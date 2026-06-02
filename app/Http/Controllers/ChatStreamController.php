@@ -34,6 +34,10 @@ class ChatStreamController extends Controller
         $request->session()->save();
 
         return response()->stream(function () use ($responder, $llm, $conv, $message) {
+            // SSE 為長連線：解除 PHP 30s 執行上限；即使使用者離開也把回覆存完
+            @set_time_limit(0);
+            ignore_user_abort(true);
+
             $emit = function (string $event, array $payload) {
                 echo "event: {$event}\n";
                 echo 'data: '.json_encode($payload, JSON_UNESCAPED_UNICODE)."\n\n";
