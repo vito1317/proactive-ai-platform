@@ -1,0 +1,54 @@
+# 領域包：開發自動化 (Development Automation)
+# 對應 SPEC.md v1 / schema/domain-pack.schema.json
+domain: dev-auto
+coordinator: dev-auto-coordinator
+description: 監聽程式碼/CI 事件，自動規劃、生成修補、沙盒驗測並擬定 PR。
+
+triggers:
+  events:
+    - git.push          # 推送
+    - pr.opened         # PR 開啟（觸發自動審閱）
+    - ci.failed         # CI 失敗（觸發自動修復）
+    - issue.created     # 新 issue（觸發規劃）
+  cron:
+    - "0 9 * * 2-5: 每日彙整失敗的 CI 與待修 PR"
+
+tools:
+  - { uri: "mcp://git",     perms: [read] }
+  - { uri: "mcp://git",     perms: [write], risk: high }   # 開 PR / push 分支
+  - { uri: "mcp://ci",      perms: [read, write] }          # 觸發/讀取 CI
+  - { uri: "mcp://sandbox", perms: [exec] }                 # 沙盒內跑測試/生成 patch（隔離容器）
+
+agents:
+  topology: router
+  roster:
+    - { name: planning, role: "讀 issue/失敗 log，拆解為可執行子任務" }
+    - { name: coding,   role: "在沙盒內生成/修改程式碼產出 diff" }
+    - { name: review,   role: "competitive 模式：多解法平行生成由評判選優，審查正確性與規範" }
+    - { name: testing,  role: "沙盒內跑單元/整合測試，回饋 Reflection 迴圈" }
+
+playbooks:
+  - p_fix_failing_test    # 修復失敗測試
+  - p_review_pr           # 自動審閱 PR
+
+memory:
+  namespace: dev-auto
+  knowledge:
+    - { type: vector, source: "repo-architecture" }   # repo 結構/模組職責
+    - { type: doc,    source: "coding-standards/" }    # 編碼規範
+    - { type: vector, source: "past-prs" }             # 過往 PR 與缺陷模式（情境記憶）
+
+risk_policy:
+  autonomy: copilot             # 起步保守：只草擬 PR，全部待人核准
+  hitl_required:
+    - git.merge-to-main         # 合併到 main 永遠要人批
+    - git.force-push
+    - git.delete-branch
+  rate_limits:
+    "ci.trigger": "20/hour"
+
+contracts:
+  output: contracts/PullRequestProposal.schema.json
+
+slo:
+  patch_draft: "10min"          # 修補草稿

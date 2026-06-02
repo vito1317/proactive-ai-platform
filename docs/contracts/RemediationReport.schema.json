@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proactive-ai-platform/contracts/RemediationReport.schema.json",
+  "title": "RemediationReport",
+  "description": "log-ops 領域的輸出契約：一次日誌錯誤的偵測、診斷與修復結果。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "error_type", "summary", "status", "actions"],
+  "properties": {
+    "source": { "type": "string", "description": "日誌來源（檔案/服務）" },
+    "error_type": { "type": "string", "description": "錯誤分類，如 connection_refused / disk_full / code_exception" },
+    "summary": { "type": "string" },
+    "root_cause": { "type": "string" },
+    "status": { "enum": ["diagnosed", "remediated", "awaiting_approval", "handed_off", "failed"] },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "risk", "status"],
+        "properties": {
+          "action": { "type": "string" },
+          "risk": { "enum": ["low", "medium", "high"] },
+          "status": { "enum": ["proposed", "awaiting_approval", "executed", "rejected"] },
+          "result": { "type": "string" }
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "description": "選填：程式類錯誤轉交 dev-auto 修補",
+      "additionalProperties": false,
+      "properties": {
+        "to": { "type": "string" },
+        "task": { "type": "string" },
+        "artifact": { "type": "object" }
+      }
+    }
+  }
+}

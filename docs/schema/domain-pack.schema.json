@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proactive-ai-platform/schema/domain-pack.schema.json",
+  "title": "Domain Pack Manifest",
+  "description": "可插拔領域包的宣告式契約 (v1)。見 SPEC.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["domain", "coordinator", "description", "triggers", "tools", "agents", "memory", "risk_policy", "contracts"],
+  "properties": {
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "領域唯一鍵 (kebab-case)"
+    },
+    "coordinator": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "領域協調者 agent 名稱"
+    },
+    "description": { "type": "string", "minLength": 1 },
+
+    "triggers": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9_.-]+$" }
+        },
+        "cron": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "格式: \"<cron 運算式>: <說明>\""
+        }
+      },
+      "anyOf": [
+        { "required": ["events"] },
+        { "required": ["cron"] }
+      ]
+    },
+
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "perms"],
+        "properties": {
+          "uri": { "type": "string", "pattern": "^mcp://" },
+          "perms": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "enum": ["read", "write", "exec"] }
+          },
+          "risk": { "enum": ["low", "medium", "high"], "default": "low" }
+        }
+      }
+    },
+
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topology", "roster"],
+      "properties": {
+        "topology": { "enum": ["router", "sequential", "parallel", "competitive"] },
+        "roster": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "role"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+              "role": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+
+    "playbooks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "knowledge"],
+      "properties": {
+        "namespace": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "knowledge": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "source"],
+            "properties": {
+              "type": { "enum": ["vector", "graph", "doc"] },
+              "source": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+
+    "risk_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["autonomy", "hitl_required"],
+      "properties": {
+        "autonomy": { "enum": ["copilot", "supervisor", "autopilot"] },
+        "hitl_required": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rate_limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9]+/(sec|min|hour|day)$"
+          }
+        }
+      }
+    },
+
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["output"],
+      "properties": {
+        "output": { "type": "string", "pattern": "\\.schema\\.json$" }
+      }
+    },
+
+    "slo": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  }
+}

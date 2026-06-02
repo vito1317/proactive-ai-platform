@@ -1,0 +1,52 @@
+server {
+    listen __PORT__;
+    server_name __DOMAIN__;
+
+    root __ROOT__/public;
+    index index.php index.html;
+    charset utf-8;
+    client_max_body_size 16M;
+
+    # 站台位於 Cloudflare/反向代理之後時，強制 https scheme
+    set $forwarded_proto https;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+
+    # SSE 串流端點（agent token / HITL 推播）——關閉 buffering
+    location ~ ^/stream/ {
+        try_files $uri /index.php?$query_string;
+        location ~ \.php$ {
+            fastcgi_pass unix:__FPM_SOCK__;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            include fastcgi_params;
+            fastcgi_param HTTPS on;
+            fastcgi_param HTTP_X_FORWARDED_PROTO https;
+            fastcgi_buffering off; fastcgi_read_timeout 600s; gzip off;
+            add_header X-Accel-Buffering no;
+        }
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:__FPM_SOCK__;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_param HTTPS on;
+        fastcgi_param HTTP_X_FORWARDED_PROTO https;
+        fastcgi_read_timeout 120s;
+    }
+
+    location /build/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location ~ /\.(?!well-known).* { deny all; }
+
+    access_log /var/log/nginx/pai-access.log;
+    error_log  /var/log/nginx/pai-error.log;
+}

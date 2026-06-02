@@ -1,0 +1,49 @@
+# 領域包：日誌自動修復 (Log Auto-Remediation)
+# 偵測日誌錯誤 → 診斷 → 自動修復（低風險自動、破壞性待核准；程式錯誤可 A2A 交給 dev-auto）
+domain: log-ops
+coordinator: log-ops-coordinator
+description: 監控日誌，偵測錯誤並自動修復；破壞性動作須人類核准。
+
+triggers:
+  events:
+    - log.error              # LogScanner 偵測到 ERROR/Exception 時觸發
+  cron:
+    - "*/5 * * * *: 掃描受監控日誌偵測新錯誤"
+
+tools:
+  - { uri: "mcp://logs",    perms: [read] }                 # 讀日誌上下文
+  - { uri: "mcp://runbook", perms: [read] }                 # 已知錯誤 → 修復對照
+  - { uri: "mcp://sandbox", perms: [exec] }                 # 沙盒內跑診斷
+  - { uri: "mcp://ops",     perms: [write], risk: high }    # 重啟/回滾等破壞性操作
+
+agents:
+  topology: router
+  roster:
+    - { name: detector,   role: "判讀錯誤日誌、抽取關鍵訊息與錯誤類型" }
+    - { name: diagnoser,  role: "比對 runbook 與歷史修復、定位根因" }
+    - { name: remediator, role: "提出並執行修復；破壞性動作待人類核准" }
+
+playbooks:
+  - p_auto_remediate
+
+memory:
+  namespace: log-ops
+  knowledge:
+    - { type: doc,    source: "runbooks/" }
+    - { type: vector, source: "past-fixes" }
+
+risk_policy:
+  autonomy: supervisor          # 低風險修復自動執行；破壞性待核准
+  hitl_required:
+    - restart-service
+    - rollback-deploy
+    - delete-data
+    - scale-down
+  rate_limits:
+    "restart-service": "3/hour"
+
+contracts:
+  output: contracts/RemediationReport.schema.json
+
+slo:
+  detect: "5min"                # 偵測到錯誤的時限

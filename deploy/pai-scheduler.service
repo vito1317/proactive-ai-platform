@@ -1,0 +1,14 @@
+[Unit]
+Description=PAI 主動式 AI 平台 — Scheduler（cron 主動觸發 / 日誌掃描）
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+ExecStart=__PHP__ __APP_DIR__/artisan schedule:work
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

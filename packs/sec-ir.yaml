@@ -1,0 +1,58 @@
+# 領域包：資安事件響應 (Security Incident Response)
+# 對應 SPEC.md v1 / schema/domain-pack.schema.json
+domain: sec-ir
+coordinator: sec-ir-coordinator
+description: 資安事件的偵測、分流定級、取證關聯、遏制與修復協同。
+
+triggers:
+  events:
+    - siem.alert            # SIEM 告警（如暴力破解、異常登入）
+    - edr.detection         # 端點偵測（惡意程式、橫向移動）
+    - cloudtrail.anomaly    # 雲端 API 異常行為
+  cron:
+    - "0 8 * * 2-5: 每日威脅情報彙整與待辦事件回顧"
+
+tools:
+  - { uri: "mcp://siem",      perms: [read] }
+  - { uri: "mcp://edr",       perms: [read] }
+  - { uri: "mcp://edr",       perms: [exec], risk: high }   # isolate-host：隔離端點
+  - { uri: "mcp://ticketing", perms: [read, write] }        # 開立/更新事件工單
+  - { uri: "mcp://firewall",  perms: [write], risk: high }  # 封鎖來源 IP / 網段
+  - { uri: "mcp://idp",       perms: [write], risk: high }  # 停用帳號
+
+agents:
+  topology: router
+  roster:
+    - { name: triage,      role: "判定事件真偽與嚴重性，定級 P1-P4，路由後續處理" }
+    - { name: investigate, role: "拉取日誌與端點證據，對照 ATT&CK 關聯攻擊鏈" }
+    - { name: contain,     role: "擬定遏制方案（隔離/封鎖/停用），高風險動作只草擬待批" }
+    - { name: report,      role: "彙整事件時間軸與處置，產出 IncidentReport 契約" }
+
+playbooks:
+  - p_phishing_response       # 釣魚事件標準處置
+  - p_ransomware_containment  # 勒索軟體遏制
+
+memory:
+  namespace: sec-ir
+  knowledge:
+    - { type: graph,  source: "mitre-attack" }     # ATT&CK 戰術/技術圖譜
+    - { type: vector, source: "past-incidents" }   # 歷史事件向量庫（情境記憶）
+    - { type: doc,    source: "runbooks/" }         # SOC runbook
+
+risk_policy:
+  autonomy: supervisor          # 低風險自動，破壞性動作待批
+  hitl_required:
+    - isolate-host              # 隔離端點
+    - firewall.block            # 封鎖 IP/網段
+    - idp.disable-account       # 停用帳號
+    - mass-account-disable      # 批量停用
+  rate_limits:
+    "firewall.block": "5/min"
+    "isolate-host": "10/min"
+
+contracts:
+  output: contracts/IncidentReport.schema.json
+
+slo:
+  ack: "60s"                    # 事件確認
+  containment_draft: "5min"     # 遏制方案草擬
