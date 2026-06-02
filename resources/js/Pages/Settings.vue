@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 const props = defineProps({
     fields: { type: Array, default: () => [] },
@@ -37,6 +37,26 @@ function assist(text) {
 }
 function testNotify() {
     router.post('/notify/test', {}, { preserveScroll: true });
+}
+
+// 通知頻道（TG/LINE）：列出 / 刷新 / 選取
+const channels = ref({ telegram: [], line: [], webhook_url: {} });
+async function loadChannels() {
+    try {
+        const r = await fetch('/notify/channels', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+        if (r.ok) channels.value = await r.json();
+    } catch (e) { /* ignore */ }
+}
+onMounted(loadChannels);
+function selectChannel(platform, id) {
+    router.post('/notify/channels/select', { platform, id }, { preserveScroll: true, onSuccess: loadChannels });
+}
+function refreshTg() {
+    router.post('/notify/channels/refresh', {}, { preserveScroll: true, onSuccess: loadChannels });
+}
+function chLabel(c) {
+    const t = c.title || c.id;
+    return c.type && c.type !== 'private' && c.type !== 'user' ? `${t}（${c.type}）` : t;
 }
 </script>
 
@@ -81,6 +101,54 @@ function testNotify() {
                         {{ assistForm.processing ? 'AI 解析中…' : '✨ 讓 AI 設定' }}
                     </button>
                 </form>
+            </section>
+
+            <!-- 通知頻道（TG / LINE）：選取 + 查看 -->
+            <section class="glass mb-6 p-5">
+                <div class="flex items-center justify-between">
+                    <h2 class="flex items-center gap-2 font-semibold text-white">📡 通知頻道（Channels）</h2>
+                    <button type="button" class="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white" @click="loadChannels">重新整理</button>
+                </div>
+                <p class="mt-1 text-xs text-slate-400">選取 bot 要推播 / 回覆的頻道。bot 收到訊息的對話會自動出現在這裡。</p>
+
+                <div class="mt-4 grid gap-4 md:grid-cols-2">
+                    <!-- Telegram -->
+                    <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <h3 class="text-sm font-semibold text-sky-300">✈️ Telegram</h3>
+                            <button type="button" class="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-slate-300 hover:text-white" @click="refreshTg">刷新頻道</button>
+                        </div>
+                        <p v-if="!channels.telegram.length" class="text-xs text-slate-500">尚無頻道。請先在 Telegram 對 bot 傳一則訊息，再按「刷新頻道」。</p>
+                        <ul class="space-y-1.5">
+                            <li v-for="c in channels.telegram" :key="c.id">
+                                <button type="button" class="flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition"
+                                        :class="c.selected ? 'border-sky-400/60 bg-sky-400/10 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:border-white/20'"
+                                        @click="selectChannel('telegram', String(c.id))">
+                                    <span class="truncate">{{ chLabel(c) }}<span class="ml-1 font-mono text-xs text-slate-500">{{ c.id }}</span></span>
+                                    <span v-if="c.selected" class="shrink-0 text-xs text-sky-300">● 使用中</span>
+                                </button>
+                            </li>
+                        </ul>
+                        <p class="mt-3 break-all text-[11px] text-slate-600">Webhook：{{ channels.webhook_url.telegram }}（用 <code>php artisan pai:telegram-webhook set</code> 啟用雙向）</p>
+                    </div>
+
+                    <!-- LINE -->
+                    <div class="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                        <h3 class="mb-2 text-sm font-semibold text-emerald-300">💬 LINE</h3>
+                        <p v-if="!channels.line.length" class="text-xs text-slate-500">尚無頻道。將 bot 加入聊天/群組並傳訊後會自動出現。</p>
+                        <ul class="space-y-1.5">
+                            <li v-for="c in channels.line" :key="c.id">
+                                <button type="button" class="flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition"
+                                        :class="c.selected ? 'border-emerald-400/60 bg-emerald-400/10 text-white' : 'border-white/10 bg-white/[0.02] text-slate-300 hover:border-white/20'"
+                                        @click="selectChannel('line', String(c.id))">
+                                    <span class="truncate">{{ chLabel(c) }}</span>
+                                    <span v-if="c.selected" class="shrink-0 text-xs text-emerald-300">● 使用中</span>
+                                </button>
+                            </li>
+                        </ul>
+                        <p class="mt-3 break-all text-[11px] text-slate-600">Webhook：{{ channels.webhook_url.line }}（填入 LINE Developers Console，並設定上方 Channel Secret）</p>
+                    </div>
+                </div>
             </section>
 
             <form class="space-y-6" @submit.prevent="save">

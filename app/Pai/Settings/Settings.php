@@ -25,6 +25,7 @@ class Settings
         'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
         'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
         'notify.telegram.chat_id' => ['label' => 'Telegram Chat ID', 'type' => 'string', 'group' => '通知'],
+        'notify.line.secret' => ['label' => 'LINE Channel Secret（雙向接收驗證用）', 'type' => 'secret', 'group' => '通知'],
         'notify.line.token' => ['label' => 'LINE Channel Access Token', 'type' => 'secret', 'group' => '通知'],
         'notify.line.to' => ['label' => 'LINE 推播對象 (userId/groupId)', 'type' => 'string', 'group' => '通知'],
     ];

@@ -71,10 +71,14 @@ return [
         'telegram' => [
             'token' => env('PAI_TELEGRAM_TOKEN'),            // BotFather 取得
             'chat_id' => env('PAI_TELEGRAM_CHAT_ID'),
+            'webhook_secret' => env('PAI_TELEGRAM_WEBHOOK_SECRET'), // setWebhook 自動產生
+            'channels' => [],                                // 已知頻道（webhook/getUpdates 自動登錄）
         ],
         'line' => [
             'token' => env('PAI_LINE_TOKEN'),                // LINE Messaging API channel access token
+            'secret' => env('PAI_LINE_SECRET'),              // LINE Channel secret（雙向 webhook 驗證）
             'to' => env('PAI_LINE_TO'),                      // 推播目標 userId/groupId
+            'channels' => [],                                // 已知頻道（webhook 自動登錄）
         ],
     ],
 

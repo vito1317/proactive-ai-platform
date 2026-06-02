@@ -100,9 +100,12 @@ class RouteCommandJob implements ShouldQueue
 
     private function notice(string $message, string $kind = 'info'): void
     {
+        // 中控台鈴鐺
         $users = User::all();
         if ($users->isNotEmpty()) {
             Notification::send($users, new PlatformNotice($message, $kind));
         }
+        // 同步推到已設定的外部平台（Telegram/LINE/webhook）
+        app(\App\Pai\Notify\Notifier::class)->send($message);
     }
 }

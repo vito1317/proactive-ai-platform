@@ -4,9 +4,11 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ChatStreamController;
 use App\Http\Controllers\ConsoleController;
+use App\Http\Controllers\LineWebhookController;
 use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\TelegramWebhookController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -43,7 +45,17 @@ Route::middleware('auth')->group(function () {
     // 通知平台（AI 引導設定 + 測試）
     Route::post('/notify/assist', [NotifyController::class, 'assist'])->name('notify.assist');
     Route::post('/notify/test', [NotifyController::class, 'test'])->name('notify.test');
+    // 通知頻道（TG/LINE）：列出 / 刷新 / 選取
+    Route::get('/notify/channels', [NotifyController::class, 'channels'])->name('notify.channels');
+    Route::post('/notify/channels/refresh', [NotifyController::class, 'refreshChannels'])->name('notify.channels.refresh');
+    Route::post('/notify/channels/select', [NotifyController::class, 'selectChannel'])->name('notify.channels.select');
 });
+
+// Telegram 接收（雙向）— 須在 {source} 之前；公開、CSRF 豁免
+Route::post('/webhooks/telegram', [TelegramWebhookController::class, 'handle'])->name('webhooks.telegram');
+
+// LINE 接收（雙向）— 須在 {source} 之前；公開、CSRF 豁免
+Route::post('/webhooks/line', [LineWebhookController::class, 'handle'])->name('webhooks.line');
 
 // L1 感知層事件入口（外部系統推送，公開、CSRF 豁免，見 bootstrap/app.php）
 Route::post('/webhooks/{source}', [WebhookController::class, 'store']);

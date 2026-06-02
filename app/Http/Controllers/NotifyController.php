@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Pai\Notify\ChannelRegistry;
 use App\Pai\Notify\Notifier;
 use App\Pai\Notify\NotifyAssistant;
 use App\Pai\Settings\Settings;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -35,6 +37,39 @@ class NotifyController extends Controller
         $r = $this->attempt($notifier, $settings);
 
         return back()->with('flash', [($r['ok'] ? 'success' : 'error') => $r['summary']]);
+    }
+
+    /** 列出已知的 TG / LINE 頻道（含目前選取者）。 */
+    public function channels(ChannelRegistry $channels): JsonResponse
+    {
+        return response()->json([
+            'telegram' => $channels->list('telegram'),
+            'line' => $channels->list('line'),
+            'webhook_url' => [
+                'telegram' => rtrim((string) config('app.url'), '/').'/webhooks/telegram',
+                'line' => rtrim((string) config('app.url'), '/').'/webhooks/line',
+            ],
+        ]);
+    }
+
+    /** Telegram：主動用 getUpdates 撈最近對話過的頻道。 */
+    public function refreshChannels(ChannelRegistry $channels): RedirectResponse
+    {
+        $n = $channels->refreshTelegram();
+
+        return back()->with('flash', ['success' => "已刷新 Telegram 頻道，新增 {$n} 個。若仍是空的，請先用你的帳號對 bot 傳一則訊息。"]);
+    }
+
+    /** 選取某平台目前要推播的頻道。 */
+    public function selectChannel(Request $request, ChannelRegistry $channels): RedirectResponse
+    {
+        $data = $request->validate([
+            'platform' => ['required', 'in:telegram,line'],
+            'id' => ['required', 'string', 'max:128'],
+        ]);
+        $channels->select($data['platform'], $data['id']);
+
+        return back()->with('flash', ['success' => "已選取 {$data['platform']} 頻道：{$data['id']}"]);
     }
 
     /**

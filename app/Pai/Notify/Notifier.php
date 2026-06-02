@@ -48,6 +48,32 @@ class Notifier
         ];
     }
 
+    /** 回覆到指定的 Telegram chat（雙向：bot 收到訊息後回覆發訊者）。 */
+    public function sendTelegramTo(string $chatId, string $text): bool
+    {
+        $token = $this->settings->get('notify.telegram.token');
+        if (! $token) {
+            return false;
+        }
+
+        return $this->call(fn () => Http::timeout(8)
+            ->post("https://api.telegram.org/bot{$token}/sendMessage", ['chat_id' => $chatId, 'text' => $text]))['ok'];
+    }
+
+    /** 回覆/推送到指定的 LINE 對象（userId/groupId/roomId）— 用 push API（雙向）。 */
+    public function sendLineTo(string $to, string $text): bool
+    {
+        $token = $this->settings->get('notify.line.token');
+        if (! $token) {
+            return false;
+        }
+
+        return $this->call(fn () => Http::timeout(8)->withToken($token)
+            ->post('https://api.line.me/v2/bot/message/push', [
+                'to' => $to, 'messages' => [['type' => 'text', 'text' => $text]],
+            ]))['ok'];
+    }
+
     /**
      * Telegram：對 bot 傳訊後可自動偵測使用者 chat id（getUpdates）。
      */
