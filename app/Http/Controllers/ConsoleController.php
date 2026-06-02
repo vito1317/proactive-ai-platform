@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Pai\Cognition\AgentRun;
-use App\Pai\Cognition\ClassifyCommandJob;
+use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Cognition\RunStatus;
 use App\Pai\Domains\DomainRegistry;
 use App\Pai\Perception\EventStatus;
@@ -116,10 +116,10 @@ class ConsoleController extends Controller
             'status' => EventStatus::Received,
         ]);
 
-        ClassifyCommandJob::dispatch($event->id);
+        RouteCommandJob::dispatch($event->id);
 
         return back()->with('flash', [
-            'success' => "已收到指令 #{$event->id}，AI 正在判斷如何處理…",
+            'success' => "已收到指令 #{$event->id}，AI 正在自動判斷並處理（任務 / 新增領域 / 通知設定）…",
         ]);
     }
 

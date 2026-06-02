@@ -13,7 +13,6 @@ const props = defineProps({
     installCommand: { type: String, default: '' },
 });
 
-const cmdMode = ref('command'); // command | pack
 const copied = ref(false);
 function copyInstall() {
     navigator.clipboard?.writeText(props.installCommand);
@@ -55,61 +54,22 @@ const stages = computed(() => {
 });
 const intensity = computed(() => Math.min(1, s('total') / 20));
 
-/* ---------- 指令面板（自然語言） ---------- */
+/* ---------- 指令面板（單一輸入，AI 自動判斷） ---------- */
 const askForm = useForm({ message: '' });
-const packGen = useForm({ description: '' });
-const notifyForm = useForm({ message: '' });
-
-const commandExamples = [
-    '有一台主機 host-7 好像中了勒索病毒，幫我處理',
-    'main 分支的 CI 測試掛了，幫我看一下並修',
-    '偵測到可疑的雲端 API 異常行為，請調查',
+const examples = [
+    '有一台主機 host-7 好像中了勒索病毒，幫我處理',     // → 任務
+    '監控資料庫慢查詢，超過門檻就告警並建議加索引',     // → 新增領域
+    '我的 Telegram bot token 是 123456:ABC，chat id 是 987654321', // → 設定通知
 ];
-const packExamples = [
-    '監控資料庫慢查詢，超過門檻就告警並建議加索引',
-    '監聽客服信箱，分類工單並對高優先級草擬回覆',
-    '監控雲端成本，異常飆升時分析並提出節流建議',
-];
-const notifyExamples = [
-    '我的 Telegram bot token 是 123456:ABC，chat id 是 987654321',
-    '幫我設定 LINE 推播，token 是 xxxx，推給 Uabcdef',
-    'Slack webhook：https://hooks.slack.com/services/T00/B00/xxxx',
-];
-const examples = computed(() => ({
-    command: commandExamples, pack: packExamples, notify: notifyExamples,
-}[cmdMode.value]));
-const busy = computed(() => askForm.processing || packGen.processing || notifyForm.processing);
-const placeholderText = computed(() => ({
-    command: '例如：有一台主機好像中毒了，幫我處理…',
-    pack: '例如：監控資料庫慢查詢並建議加索引…',
-    notify: '例如：我的 Telegram bot token 是 …，chat id 是 …',
-}[cmdMode.value]));
-const submitLabel = computed(() => ({
-    command: '🚀 交給 AI', pack: '✨ 生成領域包', notify: '🔔 讓 AI 設定通知',
-}[cmdMode.value]));
-
 function fillExample(text) {
     askForm.message = text;
 }
-
 function submitPanel() {
     if (!askForm.message.trim()) return;
-    if (cmdMode.value === 'command') {
-        askForm.post('/console/ask', {
-            preserveScroll: true,
-            onSuccess: () => { askForm.reset('message'); refresh(); },
-        });
-    } else if (cmdMode.value === 'pack') {
-        packGen.description = askForm.message;
-        packGen.post('/packs/generate', { preserveScroll: true });
-    } else {
-        // 通知設定：自然語言引導 → 解析 token、存設定、發測試
-        notifyForm.message = askForm.message;
-        notifyForm.post('/notify/assist', {
-            preserveScroll: true,
-            onSuccess: () => { askForm.reset('message'); },
-        });
-    }
+    askForm.post('/console/ask', {
+        preserveScroll: true,
+        onSuccess: () => { askForm.reset('message'); refresh(); },
+    });
 }
 
 /* ---------- HITL 核准 / 駁回 ---------- */
@@ -231,27 +191,22 @@ const actionStatusClass = (x) => ({
                     <div class="glass p-5">
                         <h2 class="flex items-center gap-2 font-semibold text-white">
                             <span class="text-indigo-400">💬</span> 指揮 AI
+                            <span class="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] text-indigo-300">🪄 自動判斷</span>
                         </h2>
-                        <!-- 模式切換：指揮 / 新增領域 / 通知設定 -->
-                        <div class="mt-3 inline-flex flex-wrap gap-0.5 rounded-lg border border-white/10 bg-white/5 p-0.5 text-xs">
-                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'command' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'command'">指揮任務</button>
-                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'pack' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'pack'">🧩 新增領域</button>
-                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'notify' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'notify'">🔔 通知設定</button>
-                        </div>
-                        <p class="mt-2 text-xs text-slate-400">
-                            {{ cmdMode === 'command' ? '用白話描述要 AI 做什麼，它會自己判斷處理。' : cmdMode === 'pack' ? '用白話描述一個新領域，AI 會生成領域包（免寫程式）。' : '貼上 Telegram/LINE/Webhook 的 token，AI 自動解析設定並發測試訊息。' }}
+                        <p class="mt-1 text-xs text-slate-400">
+                            用白話說一句話就好——AI 會自動判斷要「執行任務、新增領域、還是設定通知」並處理。
                         </p>
                         <form class="mt-3 space-y-3" @submit.prevent="submitPanel()">
                             <textarea
                                 v-model="askForm.message"
                                 rows="3"
-                                :placeholder="placeholderText"
+                                placeholder="例如：主機中毒幫我處理 / 監控資料庫慢查詢 / 設定我的 Telegram 通知…"
                                 class="inp"
                                 @keydown.enter.exact.prevent="submitPanel()"
                             ></textarea>
-                            <button type="submit" :disabled="busy || !askForm.message.trim()" class="btn-primary">
-                                <span v-if="busy">AI 處理中…</span>
-                                <span v-else>{{ submitLabel }}</span>
+                            <button type="submit" :disabled="askForm.processing || !askForm.message.trim()" class="btn-primary">
+                                <span v-if="askForm.processing">AI 判斷中…</span>
+                                <span v-else>🪄 交給 AI 自動處理</span>
                             </button>
                         </form>
                         <div class="mt-3">

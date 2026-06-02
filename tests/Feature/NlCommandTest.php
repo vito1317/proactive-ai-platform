@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Pai\Cognition\ClassifyCommandJob;
+use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Perception\PaiEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -33,7 +33,7 @@ class NlCommandTest extends TestCase
         $event = PaiEvent::latest('id')->first();
         $this->assertSame('有一台主機中了勒索病毒，幫我處理', $event->payload['message']);
 
-        Bus::assertDispatched(ClassifyCommandJob::class, fn ($job) => $job->eventId === $event->id);
+        Bus::assertDispatched(RouteCommandJob::class, fn ($job) => $job->eventId === $event->id);
     }
 
     public function test_ask_requires_message(): void
