@@ -58,6 +58,7 @@ const intensity = computed(() => Math.min(1, s('total') / 20));
 /* ---------- 指令面板（自然語言） ---------- */
 const askForm = useForm({ message: '' });
 const packGen = useForm({ description: '' });
+const notifyForm = useForm({ message: '' });
 
 const commandExamples = [
     '有一台主機 host-7 好像中了勒索病毒，幫我處理',
@@ -69,8 +70,23 @@ const packExamples = [
     '監聽客服信箱，分類工單並對高優先級草擬回覆',
     '監控雲端成本，異常飆升時分析並提出節流建議',
 ];
-const examples = computed(() => (cmdMode.value === 'command' ? commandExamples : packExamples));
-const busy = computed(() => askForm.processing || packGen.processing);
+const notifyExamples = [
+    '我的 Telegram bot token 是 123456:ABC，chat id 是 987654321',
+    '幫我設定 LINE 推播，token 是 xxxx，推給 Uabcdef',
+    'Slack webhook：https://hooks.slack.com/services/T00/B00/xxxx',
+];
+const examples = computed(() => ({
+    command: commandExamples, pack: packExamples, notify: notifyExamples,
+}[cmdMode.value]));
+const busy = computed(() => askForm.processing || packGen.processing || notifyForm.processing);
+const placeholderText = computed(() => ({
+    command: '例如：有一台主機好像中毒了，幫我處理…',
+    pack: '例如：監控資料庫慢查詢並建議加索引…',
+    notify: '例如：我的 Telegram bot token 是 …，chat id 是 …',
+}[cmdMode.value]));
+const submitLabel = computed(() => ({
+    command: '🚀 交給 AI', pack: '✨ 生成領域包', notify: '🔔 讓 AI 設定通知',
+}[cmdMode.value]));
 
 function fillExample(text) {
     askForm.message = text;
@@ -83,10 +99,16 @@ function submitPanel() {
             preserveScroll: true,
             onSuccess: () => { askForm.reset('message'); refresh(); },
         });
-    } else {
-        // 新增領域：自然語言 → 生成領域包（導向 /packs 預覽）
+    } else if (cmdMode.value === 'pack') {
         packGen.description = askForm.message;
         packGen.post('/packs/generate', { preserveScroll: true });
+    } else {
+        // 通知設定：自然語言引導 → 解析 token、存設定、發測試
+        notifyForm.message = askForm.message;
+        notifyForm.post('/notify/assist', {
+            preserveScroll: true,
+            onSuccess: () => { askForm.reset('message'); },
+        });
     }
 }
 
@@ -210,33 +232,26 @@ const actionStatusClass = (x) => ({
                         <h2 class="flex items-center gap-2 font-semibold text-white">
                             <span class="text-indigo-400">💬</span> 指揮 AI
                         </h2>
-                        <!-- 模式切換：指揮 / 新增領域 -->
-                        <div class="mt-3 inline-flex rounded-lg border border-white/10 bg-white/5 p-0.5 text-xs">
-                            <button
-                                class="rounded-md px-3 py-1"
-                                :class="cmdMode === 'command' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'"
-                                @click="cmdMode = 'command'"
-                            >指揮任務</button>
-                            <button
-                                class="rounded-md px-3 py-1"
-                                :class="cmdMode === 'pack' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'"
-                                @click="cmdMode = 'pack'"
-                            >🧩 新增領域</button>
+                        <!-- 模式切換：指揮 / 新增領域 / 通知設定 -->
+                        <div class="mt-3 inline-flex flex-wrap gap-0.5 rounded-lg border border-white/10 bg-white/5 p-0.5 text-xs">
+                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'command' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'command'">指揮任務</button>
+                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'pack' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'pack'">🧩 新增領域</button>
+                            <button class="rounded-md px-3 py-1" :class="cmdMode === 'notify' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'" @click="cmdMode = 'notify'">🔔 通知設定</button>
                         </div>
                         <p class="mt-2 text-xs text-slate-400">
-                            {{ cmdMode === 'command' ? '用白話描述要 AI 做什麼，它會自己判斷處理。' : '用白話描述一個新領域，AI 會生成領域包（免寫程式）。' }}
+                            {{ cmdMode === 'command' ? '用白話描述要 AI 做什麼，它會自己判斷處理。' : cmdMode === 'pack' ? '用白話描述一個新領域，AI 會生成領域包（免寫程式）。' : '貼上 Telegram/LINE/Webhook 的 token，AI 自動解析設定並發測試訊息。' }}
                         </p>
                         <form class="mt-3 space-y-3" @submit.prevent="submitPanel()">
                             <textarea
                                 v-model="askForm.message"
                                 rows="3"
-                                :placeholder="cmdMode === 'command' ? '例如：有一台主機好像中毒了，幫我處理…' : '例如：監控資料庫慢查詢並建議加索引…'"
+                                :placeholder="placeholderText"
                                 class="inp"
                                 @keydown.enter.exact.prevent="submitPanel()"
                             ></textarea>
                             <button type="submit" :disabled="busy || !askForm.message.trim()" class="btn-primary">
                                 <span v-if="busy">AI 處理中…</span>
-                                <span v-else>{{ cmdMode === 'command' ? '🚀 交給 AI' : '✨ 生成領域包' }}</span>
+                                <span v-else>{{ submitLabel }}</span>
                             </button>
                         </form>
                         <div class="mt-3">

@@ -22,6 +22,11 @@ class Settings
         'llm.timeout' => ['label' => '逾時 (秒)', 'type' => 'int', 'group' => 'LLM', 'min' => 10, 'max' => 600],
         'react.max_steps' => ['label' => 'ReAct 最大步數', 'type' => 'int', 'group' => 'ReAct', 'min' => 1, 'max' => 12],
         'react.reflect' => ['label' => '啟用自我反思', 'type' => 'bool', 'group' => 'ReAct'],
+        'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
+        'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
+        'notify.telegram.chat_id' => ['label' => 'Telegram Chat ID', 'type' => 'string', 'group' => '通知'],
+        'notify.line.token' => ['label' => 'LINE Channel Access Token', 'type' => 'secret', 'group' => '通知'],
+        'notify.line.to' => ['label' => 'LINE 推播對象 (userId/groupId)', 'type' => 'string', 'group' => '通知'],
     ];
 
     public function get(string $key, mixed $default = null): mixed

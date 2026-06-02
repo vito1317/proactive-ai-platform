@@ -6,16 +6,16 @@ use App\Models\User;
 use App\Notifications\HitlApprovalNeeded;
 use App\Pai\Cognition\AgentRun;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
-use Throwable;
 
 /**
  * 推播協同：高風險動作待核准時，通知中控台使用者（database 鈴鐺），
- * 並選擇性推到外部 webhook（Slack/Discord 相容的 {text}）。
+ * 並透過 {@see Notifier} 推到所有已設定的外部平台（Telegram / LINE / webhook）。
  */
 class PushNotifier
 {
+    public function __construct(private readonly Notifier $notifier) {}
+
     public function hitlNeeded(AgentRun $run): void
     {
         // 去重：同一運行只推一次（resume/重放不重複）
@@ -29,17 +29,8 @@ class PushNotifier
             Notification::send($users, new HitlApprovalNeeded($run));
         }
 
-        // 外部 webhook（選配）
-        $url = config('pai.notify.webhook_url');
-        if ($url) {
-            $pending = collect($run->actions)->where('status', 'awaiting_approval')->pluck('action')->implode(', ');
-            try {
-                Http::timeout(5)->post($url, [
-                    'text' => "🛡️ PAI 需人類核准｜{$run->coordinator}（事件 #{$run->event_id}）待核准動作：{$pending}",
-                ]);
-            } catch (Throwable) {
-                // 推播失敗不影響主流程
-            }
-        }
+        // 外部平台（Telegram / LINE / webhook，皆選配）
+        $pending = collect($run->actions)->where('status', 'awaiting_approval')->pluck('action')->implode(', ');
+        $this->notifier->send("🛡️ PAI 需人類核准｜{$run->coordinator}（事件 #{$run->event_id}）待核准動作：{$pending}");
     }
 }

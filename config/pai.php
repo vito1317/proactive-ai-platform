@@ -65,9 +65,17 @@ return [
         ],
     ],
 
-    // 推播通知：待核准時可推到外部 webhook（Slack/Discord 相容 {text}）
+    // 推播通知：待核准時推到中控台鈴鐺 + 外部平台（皆可在後台設定）
     'notify' => [
-        'webhook_url' => env('PAI_NOTIFY_WEBHOOK'),
+        'webhook_url' => env('PAI_NOTIFY_WEBHOOK'),          // Slack/Discord 相容 {text}
+        'telegram' => [
+            'token' => env('PAI_TELEGRAM_TOKEN'),            // BotFather 取得
+            'chat_id' => env('PAI_TELEGRAM_CHAT_ID'),
+        ],
+        'line' => [
+            'token' => env('PAI_LINE_TOKEN'),                // LINE Messaging API channel access token
+            'to' => env('PAI_LINE_TO'),                      // 推播目標 userId/groupId
+        ],
     ],
 
     // 一鍵安裝來源（中控台顯示安裝指令用）

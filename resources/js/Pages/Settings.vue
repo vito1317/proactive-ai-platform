@@ -1,5 +1,5 @@
 <script setup>
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
 const props = defineProps({
@@ -22,6 +22,22 @@ const form = useForm({
 function save() {
     form.post('/settings', { preserveScroll: true });
 }
+
+// AI 引導設定通知（TG/LINE/webhook）
+const assistForm = useForm({ message: '' });
+const notifyExamples = [
+    '我的 Telegram bot token 是 123456:ABC-DEF，chat id 是 987654321',
+    '幫我設定 LINE 推播，channel access token 是 xxxx，推給 Uabcdef',
+    '我想用 Slack webhook：https://hooks.slack.com/services/T00/B00/xxxx',
+];
+function assist(text) {
+    if (text) assistForm.message = text;
+    if (!assistForm.message.trim()) return;
+    assistForm.post('/notify/assist', { preserveScroll: true, onSuccess: () => assistForm.reset('message') });
+}
+function testNotify() {
+    router.post('/notify/test', {}, { preserveScroll: true });
+}
 </script>
 
 <template>
@@ -43,6 +59,29 @@ function save() {
                     {{ flash.success }}
                 </div>
             </transition>
+            <transition name="fade">
+                <div v-if="flash.error" class="mb-5 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{{ flash.error }}</div>
+            </transition>
+
+            <!-- AI 引導設定通知 -->
+            <section class="glass mb-6 p-5">
+                <div class="flex items-center justify-between">
+                    <h2 class="flex items-center gap-2 font-semibold text-white">🤖 用 AI 引導設定通知（Telegram / LINE / Webhook）</h2>
+                    <button type="button" class="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white" @click="testNotify">測試通知</button>
+                </div>
+                <p class="mt-1 text-xs text-slate-400">用白話貼上你的 token / 對象，AI 會自動解析、填好設定並發測試訊息。</p>
+                <form class="mt-3 space-y-2" @submit.prevent="assist()">
+                    <textarea v-model="assistForm.message" rows="2" class="inp" placeholder="例如：我的 Telegram bot token 是 …，chat id 是 …"></textarea>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button v-for="(ex, i) in notifyExamples" :key="i" type="button"
+                                class="rounded-lg border border-white/5 bg-white/5 px-2.5 py-1 text-xs text-slate-400 hover:text-white"
+                                @click="assistForm.message = ex">{{ ex }}</button>
+                    </div>
+                    <button type="submit" :disabled="assistForm.processing || !assistForm.message.trim()" class="btn-primary">
+                        {{ assistForm.processing ? 'AI 解析中…' : '✨ 讓 AI 設定' }}
+                    </button>
+                </form>
+            </section>
 
             <form class="space-y-6" @submit.prevent="save">
                 <section v-for="g in groups" :key="g" class="glass p-5">

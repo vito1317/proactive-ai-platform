@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ConsoleController;
+use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WebhookController;
@@ -29,6 +30,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/packs', [PacksController::class, 'index'])->name('packs');
     Route::post('/packs/generate', [PacksController::class, 'generate'])->name('packs.generate');
     Route::post('/packs/save', [PacksController::class, 'save'])->name('packs.save');
+
+    // 通知平台（AI 引導設定 + 測試）
+    Route::post('/notify/assist', [NotifyController::class, 'assist'])->name('notify.assist');
+    Route::post('/notify/test', [NotifyController::class, 'test'])->name('notify.test');
 });
 
 // L1 感知層事件入口（外部系統推送，公開、CSRF 豁免，見 bootstrap/app.php）
