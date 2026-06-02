@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\ChatStreamController;
 use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
@@ -22,8 +23,9 @@ Route::middleware('auth')->group(function () {
 
     // 對話式指揮 AI
     Route::get('/chat', [ChatController::class, 'index'])->name('chat');
-    Route::post('/chat/send', [ChatController::class, 'send'])->name('chat.send');
+    Route::post('/chat/send', [ChatController::class, 'send'])->name('chat.send'); // 非串流後備
     Route::post('/chat/new', [ChatController::class, 'new'])->name('chat.new');
+    Route::post('/stream/chat', [ChatStreamController::class, 'stream'])->name('chat.stream'); // SSE 串流
 
     Route::post('/console/ask', [ConsoleController::class, 'ask'])->name('console.ask');
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');

@@ -71,6 +71,11 @@ function submitPanel() {
         onSuccess: () => { askForm.reset('message'); refresh(); },
     });
 }
+function onEnter(e) {
+    if (e.isComposing || e.keyCode === 229) return; // 中文選字中不送出
+    e.preventDefault();
+    submitPanel();
+}
 
 /* ---------- HITL 核准 / 駁回 ---------- */
 function decide(runId, index, decision) {
@@ -203,7 +208,7 @@ const actionStatusClass = (x) => ({
                                 rows="3"
                                 placeholder="例如：主機中毒幫我處理 / 監控資料庫慢查詢 / 設定我的 Telegram 通知…"
                                 class="inp"
-                                @keydown.enter.exact.prevent="submitPanel()"
+                                @keydown.enter="onEnter"
                             ></textarea>
                             <button type="submit" :disabled="askForm.processing || !askForm.message.trim()" class="btn-primary">
                                 <span v-if="askForm.processing">AI 判斷中…</span>

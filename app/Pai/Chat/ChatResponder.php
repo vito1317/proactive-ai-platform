@@ -35,26 +35,42 @@ class ChatResponder
      */
     public function respond(Conversation $conv, string $userMessage): array
     {
-        $history = $conv->messages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
-        $context = $this->contextString($history);
-        $category = $this->meta->classify($context)['category'];
+        $category = $this->category($conv, $userMessage);
 
-        return match ($category) {
-            'task' => $this->task($userMessage),
-            'new_domain' => $this->newDomain($userMessage),
-            'configure_notify' => $this->configureNotify($userMessage),
-            default => ['reply' => $this->chat($history), 'meta' => ['category' => 'chat']],
-        };
+        return $category === 'chat'
+            ? ['reply' => trim($this->llm->chat($this->chatMessages($conv))), 'meta' => ['category' => 'chat']]
+            : $this->act($category, $userMessage);
     }
 
-    private function chat(array $history): string
+    /** 判斷意圖類別（帶最近對話脈絡）。 */
+    public function category(Conversation $conv, string $userMessage): string
+    {
+        $history = $conv->messages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
+
+        return $this->meta->classify($this->contextString($history))['category'];
+    }
+
+    /** 閒聊回覆要送給 LLM 的訊息（system + 近 8 則歷史）——供串流用。 */
+    public function chatMessages(Conversation $conv): array
     {
         $system = ['role' => 'system', 'content' =>
             '你是 PAI 主動式 AI 平台的助理。平台能：監聽事件與日誌、資安事件響應、'
             .'開發自動化（讀 repo、跑測試、提修補）、新增監控領域、設定通知（Telegram/LINE）。'
             .'用繁體中文、簡潔友善地回答。若使用者想做事，鼓勵他直接用白話描述，你會自動處理。'];
+        $history = $conv->messages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
 
-        return trim($this->llm->chat([$system, ...array_slice($history, -8)]));
+        return [$system, ...array_slice($history, -8)];
+    }
+
+    /** 執行非閒聊類動作（任務 / 新增領域 / 設定通知）。 */
+    public function act(string $category, string $userMessage): array
+    {
+        return match ($category) {
+            'task' => $this->task($userMessage),
+            'new_domain' => $this->newDomain($userMessage),
+            'configure_notify' => $this->configureNotify($userMessage),
+            default => ['reply' => '（無對應動作）', 'meta' => ['category' => $category]],
+        };
     }
 
     private function task(string $message): array

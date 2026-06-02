@@ -18,6 +18,71 @@ class LlmClient
     public function __construct(private readonly Settings $settings) {}
 
     /**
+     * 串流對話：以 SSE 逐 token 取得回覆。每個 content 片段呼叫 $onDelta。
+     * 思考型模型的 reasoning_content 不傳給 $onDelta（僅累積），首個 content 片段前
+     * 呼叫 $onReasoning(true) 一次以利前端顯示「思考中」。
+     *
+     * @param  list<array{role: string, content: string}>  $messages
+     * @return array{content: string, reasoning: string}
+     */
+    public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null): array
+    {
+        $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
+        $model = (string) $this->settings->get('llm.model');
+        $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
+        $timeout = (int) $this->settings->get('llm.timeout');
+
+        $response = Http::timeout($timeout)->withToken($apiKey)
+            ->withOptions(['stream' => true])
+            ->post($baseUrl.'/chat/completions', [
+                'model' => $model,
+                'messages' => $messages,
+                'temperature' => (float) $this->settings->get('llm.temperature'),
+                'max_tokens' => (int) $this->settings->get('llm.max_tokens'),
+                'stream' => true,
+            ]);
+
+        $body = $response->toPsrResponse()->getBody();
+        $content = '';
+        $reasoning = '';
+        $sawReasoning = false;
+        $buffer = '';
+
+        while (! $body->eof()) {
+            $buffer .= $body->read(2048);
+            while (($nl = strpos($buffer, "\n")) !== false) {
+                $line = trim(substr($buffer, 0, $nl));
+                $buffer = substr($buffer, $nl + 1);
+                if ($line === '' || ! str_starts_with($line, 'data:')) {
+                    continue;
+                }
+                $data = trim(substr($line, 5));
+                if ($data === '[DONE]') {
+                    break 2;
+                }
+                $json = json_decode($data, true);
+                $delta = $json['choices'][0]['delta'] ?? null;
+                if (! is_array($delta)) {
+                    continue;
+                }
+                if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
+                    $reasoning .= $delta['reasoning_content'];
+                    if (! $sawReasoning && $onReasoning) {
+                        $sawReasoning = true;
+                        $onReasoning(true);
+                    }
+                }
+                if (isset($delta['content']) && $delta['content'] !== '') {
+                    $content .= $delta['content'];
+                    $onDelta($delta['content']);
+                }
+            }
+        }
+
+        return ['content' => $content, 'reasoning' => $reasoning];
+    }
+
+    /**
      * 核心呼叫：回傳結構化結果（含思考型模型的 reasoning_content）。
      *
      * @param  list<array{role: string, content: string}>  $messages
