@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
@@ -18,6 +19,12 @@ Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth')->n
 // 中控台（需登入）
 Route::middleware('auth')->group(function () {
     Route::get('/', [ConsoleController::class, 'index'])->name('console');
+
+    // 對話式指揮 AI
+    Route::get('/chat', [ChatController::class, 'index'])->name('chat');
+    Route::post('/chat/send', [ChatController::class, 'send'])->name('chat.send');
+    Route::post('/chat/new', [ChatController::class, 'new'])->name('chat.new');
+
     Route::post('/console/ask', [ConsoleController::class, 'ask'])->name('console.ask');
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');
     Route::post('/console/runs/{run}/decision', [ConsoleController::class, 'decide'])->name('console.decide');

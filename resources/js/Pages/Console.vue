@@ -163,6 +163,7 @@ const actionStatusClass = (x) => ({
                         </div>
                     </div>
 
+                    <Link href="/chat" class="rounded-full border border-indigo-500/40 bg-indigo-500/15 px-3 py-1 text-xs text-indigo-200 hover:text-white">💬 對話</Link>
                     <Link href="/packs" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">🧩 領域包</Link>
                     <Link href="/settings" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">⚙ 設定</Link>
                     <button class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:text-white" :title="auth.user?.email" @click="logout">登出</button>
