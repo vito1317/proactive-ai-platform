@@ -10,7 +10,16 @@ const props = defineProps({
     events: { type: Array, default: () => [] },
     runs: { type: Array, default: () => [] },
     stats: { type: Object, default: () => ({}) },
+    installCommand: { type: String, default: '' },
 });
+
+const cmdMode = ref('command'); // command | pack
+const copied = ref(false);
+function copyInstall() {
+    navigator.clipboard?.writeText(props.installCommand);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 1500);
+}
 
 const expanded = ref(new Set());
 const toggle = (id) => {
@@ -48,18 +57,37 @@ const intensity = computed(() => Math.min(1, s('total') / 20));
 
 /* ---------- 指令面板（自然語言） ---------- */
 const askForm = useForm({ message: '' });
-const examples = [
+const packGen = useForm({ description: '' });
+
+const commandExamples = [
     '有一台主機 host-7 好像中了勒索病毒，幫我處理',
     'main 分支的 CI 測試掛了，幫我看一下並修',
     '偵測到可疑的雲端 API 異常行為，請調查',
 ];
-function ask(text) {
-    if (text) askForm.message = text;
+const packExamples = [
+    '監控資料庫慢查詢，超過門檻就告警並建議加索引',
+    '監聽客服信箱，分類工單並對高優先級草擬回覆',
+    '監控雲端成本，異常飆升時分析並提出節流建議',
+];
+const examples = computed(() => (cmdMode.value === 'command' ? commandExamples : packExamples));
+const busy = computed(() => askForm.processing || packGen.processing);
+
+function fillExample(text) {
+    askForm.message = text;
+}
+
+function submitPanel() {
     if (!askForm.message.trim()) return;
-    askForm.post('/console/ask', {
-        preserveScroll: true,
-        onSuccess: () => { askForm.reset('message'); refresh(); },
-    });
+    if (cmdMode.value === 'command') {
+        askForm.post('/console/ask', {
+            preserveScroll: true,
+            onSuccess: () => { askForm.reset('message'); refresh(); },
+        });
+    } else {
+        // 新增領域：自然語言 → 生成領域包（導向 /packs 預覽）
+        packGen.description = askForm.message;
+        packGen.post('/packs/generate', { preserveScroll: true });
+    }
 }
 
 /* ---------- HITL 核准 / 駁回 ---------- */
@@ -182,18 +210,33 @@ const actionStatusClass = (x) => ({
                         <h2 class="flex items-center gap-2 font-semibold text-white">
                             <span class="text-indigo-400">💬</span> 指揮 AI
                         </h2>
-                        <p class="mt-1 text-xs text-slate-400">用白話描述你要 AI 做什麼，它會自己判斷該怎麼處理。</p>
-                        <form class="mt-4 space-y-3" @submit.prevent="ask()">
+                        <!-- 模式切換：指揮 / 新增領域 -->
+                        <div class="mt-3 inline-flex rounded-lg border border-white/10 bg-white/5 p-0.5 text-xs">
+                            <button
+                                class="rounded-md px-3 py-1"
+                                :class="cmdMode === 'command' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'"
+                                @click="cmdMode = 'command'"
+                            >指揮任務</button>
+                            <button
+                                class="rounded-md px-3 py-1"
+                                :class="cmdMode === 'pack' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'"
+                                @click="cmdMode = 'pack'"
+                            >🧩 新增領域</button>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-400">
+                            {{ cmdMode === 'command' ? '用白話描述要 AI 做什麼，它會自己判斷處理。' : '用白話描述一個新領域，AI 會生成領域包（免寫程式）。' }}
+                        </p>
+                        <form class="mt-3 space-y-3" @submit.prevent="submitPanel()">
                             <textarea
                                 v-model="askForm.message"
                                 rows="3"
-                                placeholder="例如：有一台主機好像中毒了，幫我處理…"
+                                :placeholder="cmdMode === 'command' ? '例如：有一台主機好像中毒了，幫我處理…' : '例如：監控資料庫慢查詢並建議加索引…'"
                                 class="inp"
-                                @keydown.enter.exact.prevent="ask()"
+                                @keydown.enter.exact.prevent="submitPanel()"
                             ></textarea>
-                            <button type="submit" :disabled="askForm.processing || !askForm.message.trim()" class="btn-primary">
-                                <span v-if="askForm.processing">AI 判斷中…</span>
-                                <span v-else>🚀 交給 AI</span>
+                            <button type="submit" :disabled="busy || !askForm.message.trim()" class="btn-primary">
+                                <span v-if="busy">AI 處理中…</span>
+                                <span v-else>{{ cmdMode === 'command' ? '🚀 交給 AI' : '✨ 生成領域包' }}</span>
                             </button>
                         </form>
                         <div class="mt-3">
@@ -203,7 +246,7 @@ const actionStatusClass = (x) => ({
                                     v-for="(ex, i) in examples"
                                     :key="i"
                                     class="rounded-lg border border-white/5 bg-white/5 px-3 py-1.5 text-left text-xs text-slate-300 hover:border-indigo-500/40 hover:text-white"
-                                    @click="ask(ex)"
+                                    @click="fillExample(ex)"
                                 >{{ ex }}</button>
                             </div>
                         </div>
@@ -221,6 +264,18 @@ const actionStatusClass = (x) => ({
                                 <p class="mt-1 text-xs text-slate-500">{{ d.agents.length }} agents · {{ d.events.length }} 事件 · {{ d.high_risk_tools.length }} 高風險工具</p>
                             </li>
                         </ul>
+                    </div>
+
+                    <!-- 一鍵安裝 -->
+                    <div class="glass p-5">
+                        <h2 class="flex items-center gap-2 font-semibold text-white">📦 一鍵安裝</h2>
+                        <p class="mt-1 text-xs text-slate-400">在新機器部署整套平台：</p>
+                        <div class="mt-2 flex items-center gap-2">
+                            <code class="flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-emerald-300">{{ installCommand }}</code>
+                            <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs text-slate-300 hover:text-white" @click="copyInstall">
+                                {{ copied ? '✓ 已複製' : '複製' }}
+                            </button>
+                        </div>
                     </div>
                 </section>
 

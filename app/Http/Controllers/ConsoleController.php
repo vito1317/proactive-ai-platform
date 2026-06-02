@@ -40,7 +40,18 @@ class ConsoleController extends Controller
             'events' => $this->recentEvents(),
             'runs' => $this->recentRuns(),
             'stats' => $this->stats(),
+
+            // 一鍵安裝指令（dashboard 顯示）
+            'installCommand' => $this->installCommand(),
         ]);
+    }
+
+    private function installCommand(): string
+    {
+        $repo = (string) config('pai.install.repo_url');
+        $name = basename($repo, '.git');
+
+        return "git clone {$repo} && cd {$name} && ./install.sh";
     }
 
     /**

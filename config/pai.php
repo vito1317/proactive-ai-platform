@@ -70,6 +70,11 @@ return [
         'webhook_url' => env('PAI_NOTIFY_WEBHOOK'),
     ],
 
+    // 一鍵安裝來源（中控台顯示安裝指令用）
+    'install' => [
+        'repo_url' => env('PAI_REPO_URL', 'https://github.com/vito1317/proactive-ai-platform.git'),
+    ],
+
     // log-ops 領域：要監控的日誌檔（逗號分隔）。LogScanner 只處理上次掃描後的新行。
     'logops' => [
         'sources' => array_values(array_filter(array_map('trim', explode(
