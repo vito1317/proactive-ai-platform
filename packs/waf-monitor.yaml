@@ -1,0 +1,39 @@
+domain: waf-monitor
+coordinator: waf-monitor-coordinator
+description: 'Monitor and analyze error logs in /opt/security-one-waf/ to detect and respond to WAF issues.'
+triggers:
+  events:
+    - logs.waf.error
+  cron:
+    - '*/1 * * * *: Poll error logs every minute'
+tools:
+  -
+    uri: 'mcp://file-system'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://system-shell'
+    perms:
+      - exec
+    risk: high
+agents:
+  topology: sequential
+  roster:
+    - name: log-observer
+      role: 'Scans /opt/security-one-waf/ for new error log entries'
+    - name: error-analyst
+      role: 'Interprets error patterns and determines if remediation is required'
+memory:
+  namespace: waf-monitor
+  knowledge:
+    - type: doc
+      source: /opt/security-one-waf/error.log
+risk_policy:
+  autonomy: supervisor
+  hitl_required:
+    - execute_shell_command
+  rate_limits:
+    execute_shell_command: 1/hour
+contracts:
+  output: contracts/waf_error_report.schema.json

@@ -60,4 +60,22 @@ class ChatStreamTest extends TestCase
         $this->assertCount(2, $conv->messages);
         $this->assertSame('哈囉', $conv->messages[1]->content);
     }
+
+    public function test_action_category_enqueues_and_acks_without_blocking(): void
+    {
+        $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
+        \Illuminate\Support\Facades\Bus::fake([\App\Pai\Cognition\RouteCommandJob::class]);
+
+        // 只需一次 LLM（判斷類別）→ 動作交背景，不在 SSE 內跑重活
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => json_encode(['category' => 'new_domain', 'reason' => 'x'])], 'finish_reason' => 'stop']], 'usage' => []])]);
+
+        $res = $this->post('/stream/chat', ['message' => '監控資料庫慢查詢並建議加索引']);
+        $res->assertOk();
+        $content = $res->streamedContent();
+        $this->assertStringContainsString('event: done', $content);
+        $this->assertStringContainsString('背景', $content);
+
+        \Illuminate\Support\Facades\Bus::assertDispatched(\App\Pai\Cognition\RouteCommandJob::class);
+        $this->assertCount(2, Conversation::latest('id')->first()->messages);
+    }
 }

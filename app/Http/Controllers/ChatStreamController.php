@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
 use App\Pai\Cognition\LlmClient;
+use App\Pai\Cognition\RouteCommandJob;
+use App\Pai\Perception\EventStatus;
+use App\Pai\Perception\PaiEvent;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -55,6 +58,7 @@ class ChatStreamController extends Controller
                 $meta = ['category' => $category];
 
                 if ($category === 'chat') {
+                    // 閒聊：逐 token 串流（持續有資料，不會閒置）
                     $emit('status', ['text' => '思考中…']);
                     $full = '';
                     $llm->stream(
@@ -67,13 +71,23 @@ class ChatStreamController extends Controller
                     );
                     $reply = trim($full) ?: '（沒有產生回覆）';
                 } else {
-                    $emit('status', ['text' => '處理中…']);
-                    $r = $responder->act($category, $message);
-                    $reply = $r['reply'];
-                    $meta = $r['meta'];
-                    foreach (mb_str_split($reply, 6) as $chunk) {  // 模擬逐字輸出
+                    // 需執行動作（任務/新增領域/設定通知）：交給背景 queue 處理，
+                    // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
+                    $event = PaiEvent::create([
+                        'source' => 'chat', 'topic' => 'console.request',
+                        'payload' => ['message' => $message], 'status' => EventStatus::Received,
+                    ]);
+                    RouteCommandJob::dispatch($event->id);
+
+                    $reply = match ($category) {
+                        'task' => '好的，我判斷這是一個任務，已在背景交給對應領域協調者處理。完成後可在中控台「AI 認知運行」看到推理與處置；若有高風險動作會通知你核准。',
+                        'new_domain' => '好的，我正在背景依你的描述生成並啟用新領域包 🧩，完成後會在 🔔 通知告訴你（也會出現在「領域包」頁）。',
+                        'configure_notify' => '好的，我在背景幫你設定通知並發送測試，結果會以 🔔 通知回報。',
+                        default => '好的，我來處理。',
+                    };
+                    foreach (mb_str_split($reply, 6) as $chunk) {  // 逐字輸出
                         $emit('delta', ['text' => $chunk]);
-                        usleep(12000);
+                        usleep(10000);
                     }
                 }
 
