@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Pai\Action\ActionExecutor;
 use App\Pai\Cognition\AgentRun;
 use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Cognition\RunStatus;
@@ -48,10 +49,17 @@ class ConsoleController extends Controller
 
     private function installCommand(): string
     {
+        $base = rtrim((string) config('app.url'), '/');
         $repo = (string) config('pai.install.repo_url');
-        $name = basename($repo, '.git');
+        $llmUrl = (string) config('pai.llm.base_url');
+        $llmModel = (string) config('pai.llm.model');
 
-        return "git clone {$repo} && cd {$name} && ./install.sh";
+        // curl 一鍵安裝：自動帶入本實例的 repo / AI 端點 / 模型，並裝 systemd 服務。
+        // install.sh 會自我 git clone 再安裝（見腳本 step 0）。
+        return sprintf(
+            'curl -fsSL %s/install.sh | bash -s -- --repo %s --llm-url %s --llm-model %s --with-systemd',
+            $base, escapeshellarg($repo), escapeshellarg($llmUrl), escapeshellarg($llmModel),
+        );
     }
 
     /**
@@ -127,7 +135,7 @@ class ConsoleController extends Controller
      * L5 人機協同：核准 / 駁回某個待核准的動作。
      * 核准 = 放行執行（此處標為 executed；真實執行由 L4 工具完成）。
      */
-    public function decide(Request $request, AgentRun $run, \App\Pai\Action\ActionExecutor $executor): RedirectResponse
+    public function decide(Request $request, AgentRun $run, ActionExecutor $executor): RedirectResponse
     {
         $data = $request->validate([
             'index' => ['required', 'integer', 'min:0'],

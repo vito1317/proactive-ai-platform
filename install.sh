@@ -3,22 +3,32 @@
 # PAI 主動式 AI 平台 — 一鍵安裝腳本
 #
 # 用法：
-#   ./install.sh                          # 本機開發安裝（SQLite，互動式）
-#   ./install.sh --prod                   # production（最佳化 autoload + config cache）
-#   ./install.sh --with-nginx --domain pai.example.com --port 8083
-#   ./install.sh --with-systemd           # 安裝 queue worker + scheduler 為系統服務
+#   本機（已 clone）：./install.sh [選項]
+#   一鍵（curl）：    curl -fsSL https://你的網域/install.sh | bash -s -- [選項]
+#
+#   --prod                              production（最佳化 autoload + config cache）
+#   --with-nginx --domain X --port 8083 設定 nginx vhost
+#   --with-systemd                      安裝 queue worker + scheduler 系統服務
+#   --repo URL / --branch B / --dir D   原始碼來源（curl 模式自動 git clone）
+#   --llm-url URL / --llm-model NAME    AI 後端端點/模型（寫入 .env）
 #   環境變數：ADMIN_EMAIL, ADMIN_PASSWORD（免互動建立管理員）
 #
 set -euo pipefail
 
 # ---------- 參數 ----------
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || pwd)"
 PROD=0
 WITH_NGINX=0
 WITH_SYSTEMD=0
 DOMAIN=""
 PORT="8083"
+REPO_URL="${PAI_REPO_URL:-https://github.com/vito1317/proactive-ai-platform.git}"
+BRANCH=""
+TARGET_DIR="${PAI_TARGET_DIR:-proactive-ai-platform}"
+LLM_URL="${PAI_LLM_BASE_URL:-}"
+LLM_MODEL="${PAI_LLM_MODEL:-}"
 RUN_USER="${SUDO_USER:-$(id -un)}"
+ORIG_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,12 +37,15 @@ while [[ $# -gt 0 ]]; do
     --with-systemd) WITH_SYSTEMD=1; shift ;;
     --domain) DOMAIN="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
+    --repo) REPO_URL="$2"; shift 2 ;;
+    --branch) BRANCH="$2"; shift 2 ;;
+    --dir) TARGET_DIR="$2"; shift 2 ;;
+    --llm-url) LLM_URL="$2"; shift 2 ;;
+    --llm-model) LLM_MODEL="$2"; shift 2 ;;
     -h|--help) awk 'NR>1 && /^set /{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
     *) echo "未知參數：$1"; exit 1 ;;
   esac
 done
-
-cd "$APP_DIR"
 
 # ---------- 輔助 ----------
 c_green=$'\033[0;32m'; c_yellow=$'\033[0;33m'; c_red=$'\033[0;31m'; c_reset=$'\033[0m'
@@ -40,6 +53,30 @@ step() { echo -e "\n${c_green}▶ $*${c_reset}"; }
 warn() { echo -e "${c_yellow}⚠ $*${c_reset}"; }
 die()  { echo -e "${c_red}✘ $*${c_reset}"; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# 更新或附加 .env 的 KEY=VALUE
+set_env() {
+  local key="$1" val="$2"
+  if grep -qE "^${key}=" .env 2>/dev/null; then
+    sed -i "s#^${key}=.*#${key}=${val}#" .env
+  else
+    echo "${key}=${val}" >> .env
+  fi
+}
+
+# ---------- 0. 自我引導（curl | bash）：不在專案內就先 git clone 再 re-exec ----------
+if [[ ! -f "$APP_DIR/artisan" && "${PAI_BOOTSTRAPPED:-0}" != "1" ]]; then
+  have git || die "找不到 git（curl 一鍵安裝需要 git 來下載原始碼）"
+  step "下載 PAI 原始碼（$REPO_URL → $TARGET_DIR）"
+  if [[ -d "$TARGET_DIR/.git" ]]; then
+    git -C "$TARGET_DIR" pull --ff-only || warn "更新失敗，沿用既有原始碼"
+  else
+    git clone --depth 1 ${BRANCH:+-b "$BRANCH"} "$REPO_URL" "$TARGET_DIR" || die "git clone 失敗"
+  fi
+  cd "$TARGET_DIR"
+  PAI_BOOTSTRAPPED=1 exec bash install.sh "${ORIG_ARGS[@]}"
+fi
+
+cd "$APP_DIR"
 
 # ---------- 1. 前置檢查 ----------
 step "檢查環境需求"
@@ -76,6 +113,13 @@ fi
 grep -qE '^DB_CONNECTION=' .env || echo "DB_CONNECTION=sqlite" >> .env
 sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/' .env
 [[ -f database/database.sqlite ]] || touch database/database.sqlite
+
+# 由參數自動帶入設定（一鍵安裝免手改 .env）
+[[ -n "$DOMAIN" ]]     && set_env APP_URL "https://$DOMAIN"
+[[ -n "$LLM_URL" ]]    && set_env PAI_LLM_BASE_URL "$LLM_URL"
+[[ -n "$LLM_MODEL" ]]  && set_env PAI_LLM_MODEL "$LLM_MODEL"
+set_env PAI_REPO_URL "$REPO_URL"
+[[ -n "$DOMAIN$LLM_URL$LLM_MODEL" ]] && echo "  已寫入：APP_URL / PAI_LLM_* 等設定"
 
 # ---------- 4. 資料庫遷移 ----------
 step "建立資料庫結構 (migrate)"

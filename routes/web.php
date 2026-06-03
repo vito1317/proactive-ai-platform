@@ -51,6 +51,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/notify/channels/select', [NotifyController::class, 'selectChannel'])->name('notify.channels.select');
 });
 
+// 一鍵安裝腳本（公開）：curl -fsSL https://<域名>/install.sh | bash -s -- ...
+Route::get('/install.sh', function () {
+    $path = base_path('install.sh');
+
+    abort_unless(is_file($path), 404);
+
+    return response(file_get_contents($path), 200, ['Content-Type' => 'text/x-shellscript; charset=utf-8']);
+})->name('install.sh');
+
 // Telegram 接收（雙向）— 須在 {source} 之前；公開、CSRF 豁免
 Route::post('/webhooks/telegram', [TelegramWebhookController::class, 'handle'])->name('webhooks.telegram');
 

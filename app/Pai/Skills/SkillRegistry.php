@@ -3,7 +3,11 @@
 namespace App\Pai\Skills;
 
 use App\Pai\Skills\Builtin\AddMcpServerSkill;
+use App\Pai\Skills\Builtin\AnswerFromWebSkill;
+use App\Pai\Skills\Builtin\EditFileSkill;
+use App\Pai\Skills\Builtin\GenerateInstallCommandSkill;
 use App\Pai\Skills\Builtin\GetSettingsSkill;
+use App\Pai\Skills\Builtin\InsertInFileSkill;
 use App\Pai\Skills\Builtin\ListDomainsSkill;
 use App\Pai\Skills\Builtin\ListMcpServersSkill;
 use App\Pai\Skills\Builtin\OpenAppSkill;
@@ -36,13 +40,18 @@ class SkillRegistry
         OpenAppSkill::class,
         ReadFileSkill::class,
         WriteFileSkill::class,
+        EditFileSkill::class,
+        InsertInFileSkill::class,
         // 網路
+        AnswerFromWebSkill::class,
         WebSearchSkill::class,
         WebFetchSkill::class,
         // MCP 工具伺服器管理
         AddMcpServerSkill::class,
         ListMcpServersSkill::class,
         RemoveMcpServerSkill::class,
+        // 部署
+        GenerateInstallCommandSkill::class,
     ];
 
     /** @var array<string,Skill>|null */

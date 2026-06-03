@@ -97,9 +97,48 @@ class SkillsTest extends TestCase
     {
         $names = array_keys($this->app->make(SkillRegistry::class)->all());
         foreach (['get-settings', 'update-setting', 'toggle-domain', 'restart-workers', 'stop-task', 'tail-logs', 'list-domains',
-            'run-shell', 'open-app', 'read-file', 'write-file', 'web-search', 'web-fetch'] as $n) {
+            'run-shell', 'open-app', 'read-file', 'write-file', 'edit-file', 'insert-in-file', 'answer-from-web',
+            'web-search', 'web-fetch', 'add-mcp-server', 'generate-install-command'] as $n) {
             $this->assertContains($n, $names);
         }
+    }
+
+    public function test_edit_file_replaces_unique_string(): void
+    {
+        $path = storage_path('app/edit-test.txt');
+        file_put_contents($path, "line one\nTARGET here\nline three");
+        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
+        $this->fakePick('edit-file', ['path' => $path, 'old' => 'TARGET here', 'new' => 'REPLACED']);
+        $conv = Conversation::create([]);
+
+        $r = $this->app->make(SkillRunner::class)->handle($conv, '改檔');
+        $this->assertStringContainsString('取代 1 處', $r['reply']);
+        $this->assertStringContainsString('REPLACED', file_get_contents($path));
+        @unlink($path);
+    }
+
+    public function test_edit_file_refuses_ambiguous_match(): void
+    {
+        $path = storage_path('app/edit-ambig.txt');
+        file_put_contents($path, "dup\ndup\n");
+        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
+        $this->fakePick('edit-file', ['path' => $path, 'old' => 'dup', 'new' => 'x']);
+        $conv = Conversation::create([]);
+
+        $r = $this->app->make(SkillRunner::class)->handle($conv, '改檔');
+        $this->assertStringContainsString('非唯一', $r['reply']);
+        @unlink($path);
+    }
+
+    public function test_generate_install_command_builds_curl(): void
+    {
+        config(['app.url' => 'https://pai.example.com']);
+        $this->fakePick('generate-install-command', ['with_nginx' => 'true', 'domain' => 'pai.example.com', 'port' => '8083']);
+        $conv = Conversation::create([]);
+
+        $r = $this->app->make(SkillRunner::class)->handle($conv, '幫我生成裝在 pai.example.com 含 nginx 的安裝指令');
+        $this->assertStringContainsString('curl -fsSL https://pai.example.com/install.sh | bash -s --', $r['reply']);
+        $this->assertStringContainsString('--with-nginx --domain', $r['reply']);
     }
 
     public function test_run_shell_executes_and_returns_output(): void
