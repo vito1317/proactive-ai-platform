@@ -4,6 +4,7 @@ namespace App\Pai\Skills;
 
 use App\Pai\Skills\Builtin\AddMcpServerSkill;
 use App\Pai\Skills\Builtin\AnswerFromWebSkill;
+use App\Pai\Skills\Builtin\DescribeDomainSkill;
 use App\Pai\Skills\Builtin\EditFileSkill;
 use App\Pai\Skills\Builtin\GenerateInstallCommandSkill;
 use App\Pai\Skills\Builtin\GetSettingsSkill;
@@ -31,6 +32,7 @@ class SkillRegistry
         GetSettingsSkill::class,
         UpdateSettingSkill::class,
         ListDomainsSkill::class,
+        DescribeDomainSkill::class,
         ToggleDomainSkill::class,
         RestartWorkersSkill::class,
         StopTaskSkill::class,

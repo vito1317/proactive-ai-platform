@@ -105,6 +105,14 @@ class ChatResponder
         $content = '你是 PAI 主動式 AI 平台的助理。平台能：監聽事件與日誌、資安事件響應、'
             .'開發自動化（讀 repo、跑測試、提修補）、新增監控領域、設定通知（Telegram/LINE）。'
             .'用繁體中文、簡潔友善地回答。若使用者想做事，鼓勵他直接用白話描述，你會自動處理。';
+
+        // 注入目前已載入的領域包摘要，讓 AI 能回答「有哪些領域 / 各做什麼」
+        $packs = array_values(app(DomainRegistry::class)->all());
+        if ($packs !== []) {
+            $lines = array_map(fn ($p) => "・{$p->domain}（{$p->autonomy}）：{$p->description}", $packs);
+            $content .= "\n\n[目前已載入的領域包]\n".implode("\n", $lines)
+                ."\n（使用者問起時可據此說明；要看某領域的觸發條件/工具/劇本細節，可用 describe-domain 技能或到「領域包」頁。）";
+        }
         if ($conv->summary) {
             $content .= "\n\n[先前對話摘要（自動壓縮）]\n".$conv->summary;
         }
