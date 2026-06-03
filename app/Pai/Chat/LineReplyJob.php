@@ -27,18 +27,19 @@ class LineReplyJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public string $to, public string $text)
+    public function __construct(public string $to, public string $text, public ?string $imageMessageId = null)
     {
         $this->onQueue('chat'); // 互動回覆走獨立佇列，不被重型任務阻塞
     }
 
-    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier): void
+    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media): void
     {
         $conv = Conversation::forLine($this->to);
+        $userText = $this->imageMessageId ? ('[圖片] '.$this->text) : $this->text;
         if ($conv->title === null) {
-            $conv->update(['title' => Str::limit($this->text, 30)]);
+            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
         }
-        $conv->addMessage('user', $this->text);
+        $conv->addMessage('user', $userText);
 
         $last = 0;
         $loading = function () use ($notifier, &$last) {
@@ -52,6 +53,18 @@ class LineReplyJob implements ShouldQueue
         LlmClient::setHeartbeat($loading); // 所有 LLM 等待期間自動續發載入動畫
 
         try {
+            // 多模態：有圖片 → 走 vision 回答
+            if ($this->imageMessageId) {
+                $uri = $media->line($this->imageMessageId);
+                $reply = $uri
+                    ? $responder->visionReply($conv, $this->text, $uri)
+                    : '我收到圖片了，但下載失敗，請再傳一次或改用文字描述。';
+                $conv->addMessage('assistant', $reply, ['category' => 'vision']);
+                $notifier->sendLineTo($this->to, $reply);
+
+                return;
+            }
+
             $routed = $responder->route($conv, $this->text);
 
             if ($routed['stream']) {

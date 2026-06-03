@@ -72,7 +72,7 @@ class TelegramWebhookTest extends TestCase
         ]);
 
         (new TelegramReplyJob('123', '你好'))
-            ->handle($this->app->make(ChatResponder::class), $this->app->make(LlmClient::class), $this->app->make(Notifier::class));
+            ->handle($this->app->make(ChatResponder::class), $this->app->make(LlmClient::class), $this->app->make(Notifier::class), $this->app->make(\App\Pai\Chat\MediaFetcher::class));
 
         $conv = Conversation::where('tg_chat_id', '123')->first();
         $this->assertNotNull($conv);

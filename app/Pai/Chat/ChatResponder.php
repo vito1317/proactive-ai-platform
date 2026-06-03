@@ -76,6 +76,21 @@ class ChatResponder
         return $this->skills;
     }
 
+    /**
+     * 多模態：看圖回答（vision）。把對話脈絡 + 圖片送給多模態 LLM。
+     * $dataUri 形如 data:image/jpeg;base64,...
+     */
+    public function visionReply(Conversation $conv, string $caption, string $dataUri): string
+    {
+        $messages = $this->chatMessages($conv); // system + 摘要 + 近期歷史
+        $messages[] = ['role' => 'user', 'content' => [
+            ['type' => 'text', 'text' => $caption !== '' ? $caption : '請看這張圖片，描述內容並回答我可能想知道的重點。'],
+            ['type' => 'image_url', 'image_url' => ['url' => $dataUri]],
+        ]];
+
+        return trim($this->llm->chat($messages));
+    }
+
     /** 判斷意圖類別（帶最近對話脈絡）。 */
     public function category(Conversation $conv, string $userMessage): string
     {

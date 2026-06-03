@@ -40,10 +40,17 @@ class TelegramWebhookController extends Controller
             ]);
             // 外連 API 一律延到回應送出後執行（terminating）——webhook 必須立即回 200，
             // 否則 Telegram 會 "Read timeout expired" 進入重試退避，訊息延遲數分鐘。
+            // 圖片（多模態）：取最大尺寸的 file_id，caption 作為提問
+            $photos = $msg['photo'] ?? null;
+            $imageFileId = is_array($photos) && $photos !== [] ? (end($photos)['file_id'] ?? null) : null;
+
             if (in_array(strtolower(strtok($text, '@')), ['/new', '/start'], true)) {
                 // /new（/start 同義）：開新會話 session，舊上下文保留在後台
                 Conversation::newSession('tg', (string) $chatId);
                 app()->terminating(fn () => $notifier->sendTelegramTo((string) $chatId, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！'));
+            } elseif ($imageFileId) {
+                TelegramReplyJob::dispatch((string) $chatId, $msg['caption'] ?? '', $imageFileId);
+                app()->terminating(fn () => $notifier->sendTelegramTyping((string) $chatId));
             } elseif ($text !== '') {
                 TelegramReplyJob::dispatch((string) $chatId, $text);
                 app()->terminating(fn () => $notifier->sendTelegramTyping((string) $chatId)); // 回應後立即顯示「輸入中…」

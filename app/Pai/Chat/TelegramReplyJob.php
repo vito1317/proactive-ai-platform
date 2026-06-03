@@ -27,18 +27,19 @@ class TelegramReplyJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public string $chatId, public string $text)
+    public function __construct(public string $chatId, public string $text, public ?string $imageFileId = null)
     {
         $this->onQueue('chat'); // 互動回覆走獨立佇列，不被重型任務阻塞
     }
 
-    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier): void
+    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media): void
     {
         $conv = Conversation::forTelegram($this->chatId);
+        $userText = $this->imageFileId ? ('[圖片] '.$this->text) : $this->text;
         if ($conv->title === null) {
-            $conv->update(['title' => Str::limit($this->text, 30)]);
+            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
         }
-        $conv->addMessage('user', $this->text);
+        $conv->addMessage('user', $userText);
 
         $last = 0;
         $typing = function () use ($notifier, &$last) {
@@ -51,6 +52,19 @@ class TelegramReplyJob implements ShouldQueue
         LlmClient::setHeartbeat($typing); // 之後所有 LLM 等待（分類/動作/串流）都會持續心跳
 
         try {
+            // 多模態：有圖片 → 走 vision 回答
+            if ($this->imageFileId) {
+                $uri = $media->telegram($this->imageFileId);
+                $reply = $uri
+                    ? $responder->visionReply($conv, $this->text, $uri)
+                    : '我收到圖片了，但下載失敗，請再傳一次或改用文字描述。';
+                $meta = ['category' => 'vision'];
+                $conv->addMessage('assistant', $reply, $meta);
+                $notifier->sendTelegramTo($this->chatId, $reply);
+
+                return;
+            }
+
             $routed = $responder->route($conv, $this->text);
 
             if ($routed['stream']) {

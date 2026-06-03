@@ -40,7 +40,19 @@ class LineWebhookController extends Controller
                 'title' => (string) $to,
             ]);
 
-            if (($event['type'] ?? '') === 'message' && data_get($event, 'message.type') === 'text') {
+            if (($event['type'] ?? '') !== 'message') {
+                continue;
+            }
+            $msgType = data_get($event, 'message.type');
+            $loading = fn () => str_starts_with((string) $to, 'U')
+                ? app()->terminating(fn () => $notifier->sendLineLoading((string) $to, 60))
+                : null;
+
+            if ($msgType === 'image') {
+                // 圖片（多模態）
+                LineReplyJob::dispatch((string) $to, '', (string) data_get($event, 'message.id'));
+                $loading();
+            } elseif ($msgType === 'text') {
                 $text = trim((string) data_get($event, 'message.text', ''));
                 // 外連 API 延到回應送出後執行——LINE webhook 也要求快速回 200
                 if (strtolower($text) === '/new') {
@@ -49,9 +61,7 @@ class LineWebhookController extends Controller
                     app()->terminating(fn () => $notifier->sendLineTo((string) $to, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！'));
                 } elseif ($text !== '') {
                     LineReplyJob::dispatch((string) $to, $text);
-                    if (str_starts_with((string) $to, 'U')) {
-                        app()->terminating(fn () => $notifier->sendLineLoading((string) $to, 60)); // 回應後立即顯示載入動畫（僅 1:1）
-                    }
+                    $loading();
                 }
             }
         }
