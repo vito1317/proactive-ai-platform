@@ -2,10 +2,13 @@
 
 namespace App\Pai\Skills;
 
+use App\Pai\Skills\Builtin\AddMcpServerSkill;
 use App\Pai\Skills\Builtin\GetSettingsSkill;
 use App\Pai\Skills\Builtin\ListDomainsSkill;
+use App\Pai\Skills\Builtin\ListMcpServersSkill;
 use App\Pai\Skills\Builtin\OpenAppSkill;
 use App\Pai\Skills\Builtin\ReadFileSkill;
+use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
 use App\Pai\Skills\Builtin\RestartWorkersSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
 use App\Pai\Skills\Builtin\StopTaskSkill;
@@ -36,6 +39,10 @@ class SkillRegistry
         // 網路
         WebSearchSkill::class,
         WebFetchSkill::class,
+        // MCP 工具伺服器管理
+        AddMcpServerSkill::class,
+        ListMcpServersSkill::class,
+        RemoveMcpServerSkill::class,
     ];
 
     /** @var array<string,Skill>|null */

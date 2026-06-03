@@ -154,8 +154,28 @@ class ChatResponder
         foreach ($r['fields'] as $key => $value) {
             $this->settings->set($key, $value);
         }
+        $configured = $this->notifier->configured();
+        $channel = $r['channel'];
+
+        // 沒有提供新憑證，但該通道（或任一通道）已設定好 → 確定性正面回覆，
+        // 不再依賴 LLM、避免誤要 token（使用者最常見的卡關點）。
+        if ($r['fields'] === []) {
+            $ready = array_keys(array_filter($configured));
+            if (($channel !== 'unknown' && ($configured[$channel] ?? false)) || $ready !== []) {
+                $names = ['telegram' => 'Telegram', 'line' => 'LINE', 'webhook' => 'Webhook'];
+                $label = isset($names[$channel]) && ($configured[$channel] ?? false)
+                    ? $names[$channel]
+                    : implode('、', array_map(fn ($c) => $names[$c] ?? $c, $ready));
+
+                return [
+                    'reply' => "✅ {$label} 通知已設定完成，之後平台的通知（事件處置、待核准、動作完成等）都會送到這裡，不需要再提供 token。若要改推播對象或新增其他通道再告訴我即可。",
+                    'meta' => ['category' => 'configure_notify', 'already_configured' => true],
+                ];
+            }
+        }
+
         $tested = false;
-        if ($r['fields'] !== [] && ($this->notifier->configured()[$r['channel']] ?? false)) {
+        if ($r['fields'] !== [] && ($configured[$channel] ?? false)) {
             $tested = ! empty(array_filter($this->notifier->send('✅ PAI 通知測試：設定成功。')));
         }
 

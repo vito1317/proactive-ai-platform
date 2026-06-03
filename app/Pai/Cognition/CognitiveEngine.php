@@ -11,6 +11,7 @@ use App\Pai\Cognition\Tools\RecallMemoryTool;
 use App\Pai\Cognition\Tools\RecordFindingTool;
 use App\Pai\Domains\DomainPack;
 use App\Pai\Domains\DomainRegistry;
+use App\Pai\Mcp\McpManager;
 use App\Pai\Memory\Memory;
 use App\Pai\Memory\MemoryStore;
 use App\Pai\Notify\PushNotifier;
@@ -49,6 +50,7 @@ class CognitiveEngine
             new HandoffTool($this->registry),
             new FinishTool,
             ...$this->toolset->for($pack->domain),
+            ...app(McpManager::class)->tools(), // L4：已接入的 MCP server 工具（全協調者共用）
         ];
         $map = [];
         foreach ($tools as $t) {
