@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps({
     conversation: { type: Object, required: true },
@@ -31,6 +31,29 @@ function scrollDown() {
 }
 onMounted(scrollDown);
 watch([streamed, status, () => props.messages.length], scrollDown);
+
+// 若最後一則是使用者訊息且尚無 AI 回覆 → 代表回覆仍在背景生成（例如剛重新整理、
+// 或關掉串流連線後）。輪詢直到回覆出現，避免「重整後 AI 像沒回應」。
+const awaitingReply = computed(() => {
+    const m = props.messages;
+    return !sending.value && m.length > 0 && m[m.length - 1].role === 'user';
+});
+let pollTimer = null;
+let pollCount = 0;
+function syncAwaiting() {
+    if (awaitingReply.value && !pollTimer) {
+        pollCount = 0;
+        pollTimer = setInterval(() => {
+            if (++pollCount > 90) { clearInterval(pollTimer); pollTimer = null; return; } // ~5 分鐘上限
+            router.reload({ only: ['messages', 'conversation'], preserveScroll: true, preserveState: true });
+        }, 3500);
+    } else if (!awaitingReply.value && pollTimer) {
+        clearInterval(pollTimer); pollTimer = null;
+    }
+}
+onMounted(syncAwaiting);
+watch(awaitingReply, syncAwaiting);
+onUnmounted(() => { if (pollTimer) clearInterval(pollTimer); });
 
 const catLabel = (m) => ({ task: '已觸發任務', new_domain: '已新增領域', configure_notify: '已設定通知' }[m?.category]);
 
@@ -166,6 +189,15 @@ function newChat() { router.post('/chat/new'); }
                                 <div class="whitespace-pre-wrap">{{ m.content }}</div>
                                 <div v-if="catLabel(m.meta)" class="mt-1 text-[10px] text-emerald-300/70">⚙ {{ catLabel(m.meta) }}</div>
                             </template>
+                        </div>
+                    </div>
+                    <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
+                    <div v-if="awaitingReply" class="flex justify-start">
+                        <div class="max-w-[80%] rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-400">
+                            <span class="inline-flex items-center gap-2">
+                                <span class="inline-flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
+                                AI 回覆生成中…（可離開，完成後會自動出現）
+                            </span>
                         </div>
                     </div>
                     <p v-if="errorText" class="text-center text-xs text-red-400">{{ errorText }}</p>
