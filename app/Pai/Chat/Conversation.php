@@ -12,7 +12,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Conversation extends Model
 {
-    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'title', 'summary', 'compacted_through_id'];
+    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'title', 'summary', 'compacted_through_id', 'pending_skill'];
+
+    protected $casts = ['pending_skill' => 'array'];
 
     /** 尚未被壓縮進 summary 的訊息（進 prompt 用）。 */
     public function activeMessages(): HasMany

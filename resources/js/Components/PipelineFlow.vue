@@ -8,9 +8,12 @@ const props = defineProps({
     intensity: { type: Number, default: 0.3 },
 });
 
-// 每段連接器上的光點數量，隨 intensity 增加
-const packetsPerLink = computed(() => 2 + Math.round(props.intensity * 4));
-const flowDuration = computed(() => `${(3.2 - props.intensity * 1.8).toFixed(2)}s`);
+// 計算連線動畫速度（數值越大越快，週期越短）
+const animationDuration = computed(() => {
+    // 預設速度（最慢 3s，最快 0.8s）
+    const duration = 3 - (props.intensity * 2.2);
+    return Math.max(0.8, duration).toFixed(2);
+});
 </script>
 
 <template>
@@ -18,25 +21,56 @@ const flowDuration = computed(() => `${(3.2 - props.intensity * 1.8).toFixed(2)}
         <div class="flow-track">
             <template v-for="(stage, i) in stages" :key="stage.key">
                 <!-- 節點 -->
-                <div class="node" :class="{ 'node--active': stage.active }" :style="{ '--accent': stage.accent }">
-                    <div class="node-ring"></div>
+                <div class="node group" :class="{ 'node--active': stage.active }" :style="{ '--accent': stage.accent }">
+                    <!-- 背景環境發光 (Bloom) -->
+                    <div class="node-bloom"></div>
+
                     <div class="node-core">
-                        <div class="node-icon">{{ stage.icon }}</div>
-                        <div class="node-count">{{ stage.count }}</div>
+                        <!-- 旋轉科技環 -->
+                        <div class="cyber-ring cyber-ring-outer"></div>
+                        <div class="cyber-ring cyber-ring-inner"></div>
+
+                        <!-- 內部內容 -->
+                        <div class="node-content">
+                            <div class="node-icon">{{ stage.icon }}</div>
+                            <div class="node-count">{{ stage.count }}</div>
+                        </div>
                     </div>
+
                     <div class="node-label">{{ stage.label }}</div>
                     <div class="node-sub">{{ stage.sub }}</div>
                 </div>
 
                 <!-- 連接器（最後一節點後不畫） -->
                 <div v-if="i < stages.length - 1" class="link" :style="{ '--from': stage.accent, '--to': stages[i + 1].accent }">
-                    <div class="link-line"></div>
-                    <span
-                        v-for="p in packetsPerLink"
-                        :key="p"
-                        class="packet"
-                        :style="{ animationDuration: flowDuration, animationDelay: `${(p / packetsPerLink) * parseFloat(flowDuration)}s` }"
-                    ></span>
+                    <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 64">
+                        <defs>
+                            <!-- 發光濾鏡 -->
+                            <filter :id="`glow-${i}`" x="-20%" y="-20%" width="140%" height="140%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                            </filter>
+                            <!-- 漸層定義 -->
+                            <linearGradient :id="`grad-${i}`" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" :stop-color="stage.accent" stop-opacity="0.3" />
+                                <stop offset="100%" :stop-color="stages[i+1].accent" stop-opacity="0.8" />
+                            </linearGradient>
+                        </defs>
+
+                        <!-- 底線 (軌道) -->
+                        <line x1="0" y1="32" x2="100" y2="32" stroke="rgba(255,255,255,0.05)" stroke-width="2" />
+                        
+                        <!-- 動態資料流 (發光) -->
+                        <line 
+                            x1="0" y1="32" x2="100" y2="32" 
+                            :stroke="`url(#grad-${i})`" 
+                            stroke-width="2.5"
+                            :filter="`url(#glow-${i})`"
+                            stroke-linecap="round"
+                            class="data-stream"
+                            :style="{ animationDuration: `${animationDuration}s` }"
+                        />
+                    </svg>
                 </div>
             </template>
         </div>
@@ -46,13 +80,17 @@ const flowDuration = computed(() => `${(3.2 - props.intensity * 1.8).toFixed(2)}
 <style scoped>
 .flow {
     overflow-x: auto;
-    padding: 0.5rem 0 0.25rem;
+    padding: 1.5rem 0 0.5rem;
+    scrollbar-width: none; /* Firefox */
+}
+.flow::-webkit-scrollbar {
+    display: none; /* Chrome, Safari */
 }
 .flow-track {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    min-width: 720px;
+    min-width: 800px; /* 增加一點寬度讓連線有空間 */
     gap: 0;
 }
 
@@ -62,105 +100,210 @@ const flowDuration = computed(() => `${(3.2 - props.intensity * 1.8).toFixed(2)}
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 96px;
+    width: 110px;
     flex: 0 0 auto;
     text-align: center;
+    cursor: default;
 }
+
+/* 核心容器 */
 .node-core {
     position: relative;
-    z-index: 2;
-    width: 64px;
-    height: 64px;
+    z-index: 10;
+    width: 68px;
+    height: 68px;
     border-radius: 9999px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
-    transition: box-shadow 0.4s ease;
+    background: radial-gradient(circle at center, rgba(15, 23, 42, 0.9) 30%, rgba(2, 6, 23, 1) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.8);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
-.node-ring {
+
+/* 懸浮效果 */
+.node:hover .node-core {
+    transform: scale(1.08);
+    border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+    box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent),
+                0 0 30px -5px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* 環境發光 (Bloom) */
+.node-bloom {
     position: absolute;
-    top: -6px;
+    top: 5px;
     left: 50%;
     transform: translateX(-50%);
-    width: 76px;
-    height: 76px;
-    border-radius: 9999px;
-    background: conic-gradient(from 0deg, transparent, var(--accent), transparent 60%);
-    opacity: 0.0;
-    filter: blur(1px);
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    background: var(--accent);
+    filter: blur(25px);
+    opacity: 0.1;
+    z-index: 1;
+    transition: opacity 0.5s ease, filter 0.5s ease;
 }
-.node--active .node-ring {
-    opacity: 0.85;
-    animation: spin 3.5s linear infinite;
+.node--active .node-bloom {
+    opacity: 0.45;
+    filter: blur(20px);
 }
-.node--active .node-core {
-    box-shadow: 0 0 22px -2px var(--accent), 0 0 0 1px var(--accent) inset;
+.node:hover .node-bloom {
+    opacity: 0.6;
+    filter: blur(30px);
 }
-.node-icon { font-size: 1.25rem; line-height: 1; }
+
+/* 科幻雙層旋轉環 */
+.cyber-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0.3;
+    transition: opacity 0.4s;
+}
+
+.cyber-ring-outer {
+    width: 82px;
+    height: 82px;
+    margin-top: -41px;
+    margin-left: -41px;
+    border: 1px dashed var(--accent);
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+    animation: spin-slow 12s linear infinite;
+}
+
+.cyber-ring-inner {
+    width: 74px;
+    height: 74px;
+    margin-top: -37px;
+    margin-left: -37px;
+    border: 1px dotted var(--accent);
+    border-left-color: transparent;
+    animation: spin-reverse 8s linear infinite;
+}
+
+.node--active .cyber-ring {
+    opacity: 0.8;
+}
+.node--active .cyber-ring-outer {
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+    box-shadow: 0 0 10px inset var(--accent), 0 0 5px var(--accent);
+    animation: spin 3s linear infinite;
+}
+.node--active .cyber-ring-inner {
+    border-width: 1.5px;
+    border-style: dashed;
+    border-left-color: transparent;
+    border-right-color: transparent;
+    box-shadow: 0 0 8px inset var(--accent);
+    animation: spin-reverse 2s linear infinite;
+}
+
+/* 內部內容 */
+.node-content {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.node-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    transition: transform 0.3s ease;
+}
+.node:hover .node-icon {
+    transform: translateY(-2px);
+}
+
 .node-count {
-    margin-top: 2px;
-    font-size: 0.8rem;
-    font-weight: 700;
+    margin-top: 3px;
+    font-size: 0.85rem;
+    font-weight: 800;
     color: #fff;
     font-variant-numeric: tabular-nums;
+    letter-spacing: 0.5px;
+    text-shadow: 0 2px 4px rgba(0,0,0,1);
+    transition: text-shadow 0.3s ease, color 0.3s ease;
 }
-.node-label {
-    margin-top: 0.5rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #e2e8f0;
+.node--active .node-count {
+    color: #fff;
+    text-shadow: 0 0 8px var(--accent), 0 0 12px var(--accent);
 }
-.node-sub { font-size: 0.65rem; color: #64748b; }
 
-/* ---------- 連接器 + 光點 ---------- */
+/* 文字標籤 */
+.node-label {
+    margin-top: 1rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #e2e8f0;
+    text-transform: uppercase;
+    transition: color 0.3s ease, text-shadow 0.3s ease;
+}
+.node--active .node-label {
+    color: #fff;
+    text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.node-sub {
+    margin-top: 0.15rem;
+    font-size: 0.65rem;
+    color: #64748b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    letter-spacing: 0.5px;
+}
+.node:hover .node-sub {
+    color: #94a3b8;
+}
+
+/* ---------- 連接器 (SVG) ---------- */
 .link {
     position: relative;
     flex: 1 1 auto;
     height: 64px;
-    min-width: 48px;
-    display: flex;
-    align-items: center;
+    min-width: 64px;
+    margin-top: 2px;
 }
-.link-line {
-    position: absolute;
-    top: 32px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg,
-        color-mix(in srgb, var(--from) 60%, transparent),
-        color-mix(in srgb, var(--to) 60%, transparent));
-    opacity: 0.35;
-}
-.packet {
-    position: absolute;
-    top: 28px;
-    left: 0;
-    width: 8px;
-    height: 8px;
-    border-radius: 9999px;
-    background: var(--to);
-    box-shadow: 0 0 10px 2px var(--to);
-    animation-name: travel;
+
+/* 資料流動畫 */
+.data-stream {
+    /* 使用虛線模擬一條條流動的光束 */
+    stroke-dasharray: 20 80; /* 線長 20，間距 80 */
+    stroke-dashoffset: 100;
+    animation-name: stream-flow;
     animation-timing-function: linear;
     animation-iteration-count: infinite;
 }
-@keyframes travel {
-    0%   { transform: translateX(-8px) scale(0.6); opacity: 0; }
-    12%  { opacity: 1; }
-    88%  { opacity: 1; }
-    100% { transform: translateX(calc(100% + 8px)) scale(1); opacity: 0; }
+
+@keyframes stream-flow {
+    from { stroke-dashoffset: 100; }
+    to { stroke-dashoffset: 0; }
 }
+
 @keyframes spin {
-    to { transform: translateX(-50%) rotate(360deg); }
+    to { transform: rotate(360deg); }
+}
+@keyframes spin-slow {
+    to { transform: rotate(360deg); }
+}
+@keyframes spin-reverse {
+    to { transform: rotate(-360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .node--active .node-ring { animation: none; }
-    .packet { animation: none; opacity: 0; }
+    .cyber-ring-outer, .cyber-ring-inner { animation: none !important; }
+    .data-stream { animation: none !important; stroke-dasharray: 100 0; opacity: 0.5; }
+    .node-bloom { opacity: 0.2; }
 }
 </style>

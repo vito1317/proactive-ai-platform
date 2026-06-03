@@ -14,6 +14,7 @@ use App\Pai\Perception\EventStatus;
 use App\Pai\Perception\PaiEvent;
 use App\Pai\Perception\Severity;
 use App\Pai\Settings\Settings;
+use App\Pai\Skills\SkillRunner;
 
 /**
  * 對話式「指揮 AI」的回應引擎：帶多輪上下文，先用 MetaRouter 判斷意圖，
@@ -29,18 +30,50 @@ class ChatResponder
         private readonly NotifyAssistant $assistant,
         private readonly Notifier $notifier,
         private readonly Settings $settings,
+        private readonly SkillRunner $skills,
     ) {}
+
+    /**
+     * 決定如何回應。閒聊回 ['stream' => true, 'messages' => [...]]（供串流逐字輸出）；
+     * 其餘（待確認技能 / 技能 / 任務 / 新增領域 / 通知）直接回最終結果。
+     * 集中於此，讓串流端 (SSE / TG / LINE) 與非串流端共用同一套路由。
+     *
+     * @return array{stream: bool, messages?: list<array>, reply?: string, meta?: array<string,mixed>}
+     */
+    public function route(Conversation $conv, string $userMessage): array
+    {
+        // 1) 待確認的高風險技能——這則可能是「確認/取消」
+        if ($resolved = $this->skills->resolvePending($conv, $userMessage)) {
+            return ['stream' => false, ...$resolved];
+        }
+
+        $category = $this->category($conv, $userMessage);
+        if ($category === 'chat') {
+            return ['stream' => true, 'messages' => $this->chatMessages($conv)];
+        }
+        if ($category === 'skill') {
+            return ['stream' => false, ...$this->skills->handle($conv, $userMessage)];
+        }
+
+        return ['stream' => false, ...$this->act($category, $userMessage)];
+    }
 
     /**
      * @return array{reply: string, meta: array<string, mixed>}
      */
     public function respond(Conversation $conv, string $userMessage): array
     {
-        $category = $this->category($conv, $userMessage);
+        $r = $this->route($conv, $userMessage);
 
-        return $category === 'chat'
-            ? ['reply' => trim($this->llm->chat($this->chatMessages($conv))), 'meta' => ['category' => 'chat']]
-            : $this->act($category, $userMessage);
+        return $r['stream']
+            ? ['reply' => trim($this->llm->chat($r['messages'])), 'meta' => ['category' => 'chat']]
+            : ['reply' => $r['reply'], 'meta' => $r['meta']];
+    }
+
+    /** 技能執行器（供串流端處理待確認/技能類訊息）。 */
+    public function skills(): SkillRunner
+    {
+        return $this->skills;
     }
 
     /** 判斷意圖類別（帶最近對話脈絡）。 */

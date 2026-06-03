@@ -51,6 +51,15 @@ class ChatStreamController extends Controller
             };
 
             try {
+                // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理
+                if ($resolved = $responder->skills()->resolvePending($conv, $message)) {
+                    $this->emitTyped($emit, $resolved['reply']);
+                    $conv->addMessage('assistant', $resolved['reply'], $resolved['meta']);
+                    $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
+
+                    return;
+                }
+
                 $emit('status', ['text' => '判斷意圖中…']);
                 $category = $responder->category($conv, $message);
 
@@ -70,6 +79,13 @@ class ChatStreamController extends Controller
                         fn () => $emit('status', ['text' => '思考中…']),
                     );
                     $reply = trim($full) ?: '（沒有產生回覆）';
+                } elseif ($category === 'skill') {
+                    // 平台操作技能：同步執行（快），高風險則回覆要求對話確認
+                    $emit('status', ['text' => '處理中…']);
+                    $result = $responder->skills()->handle($conv, $message);
+                    $reply = $result['reply'];
+                    $meta = $result['meta'];
+                    $this->emitTyped($emit, $reply);
                 } else {
                     // 需執行動作（任務/新增領域/設定通知）：交給背景 queue 處理，
                     // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
@@ -102,6 +118,15 @@ class ChatStreamController extends Controller
             'X-Accel-Buffering' => 'no',
             'Connection' => 'keep-alive',
         ]);
+    }
+
+    /** 逐字輸出一段已完成的文字（給技能/確認類即時結果）。 */
+    private function emitTyped(callable $emit, string $text): void
+    {
+        foreach (mb_str_split($text, 6) as $chunk) {
+            $emit('delta', ['text' => $chunk]);
+            usleep(8000);
+        }
     }
 
     private function resolve(Request $request, ?int $id): Conversation

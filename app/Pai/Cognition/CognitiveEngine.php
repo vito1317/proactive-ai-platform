@@ -2,6 +2,7 @@
 
 namespace App\Pai\Cognition;
 
+use App\Pai\Action\ActionExecutor;
 use App\Pai\Cognition\Tools\FinishTool;
 use App\Pai\Cognition\Tools\GetEventContextTool;
 use App\Pai\Cognition\Tools\HandoffTool;
@@ -10,6 +11,9 @@ use App\Pai\Cognition\Tools\RecallMemoryTool;
 use App\Pai\Cognition\Tools\RecordFindingTool;
 use App\Pai\Domains\DomainPack;
 use App\Pai\Domains\DomainRegistry;
+use App\Pai\Memory\Memory;
+use App\Pai\Memory\MemoryStore;
+use App\Pai\Notify\PushNotifier;
 use App\Pai\Perception\PaiEvent;
 use App\Pai\Settings\Settings;
 use Throwable;
@@ -26,8 +30,8 @@ class CognitiveEngine
         private readonly Settings $settings,
         private readonly DomainRegistry $registry,
         private readonly DomainToolset $toolset,
-        private readonly \App\Pai\Action\ActionExecutor $executor,
-        private readonly \App\Pai\Memory\MemoryStore $memory,
+        private readonly ActionExecutor $executor,
+        private readonly MemoryStore $memory,
     ) {}
 
     /**
@@ -103,6 +107,12 @@ class CognitiveEngine
 
         try {
             for ($i = $startStep; $i <= $maxSteps && ! $ctx->finished; $i++) {
+                // 使用者透過 stop-task 技能/中控台中止 → 停止迴圈，不再產生新動作
+                if ($run->fresh()?->status === RunStatus::Cancelled) {
+                    $run->update(['summary' => '已由使用者中止']);
+
+                    return $run;
+                }
                 $res = $this->llm->complete($messages);
                 $tokens += (int) ($res['usage']['total_tokens'] ?? 0);
 
@@ -159,7 +169,7 @@ class CognitiveEngine
 
             // L5：有待核准動作 → 推播給人類（去重，重放安全）
             if ($needHitl) {
-                app(\App\Pai\Notify\PushNotifier::class)->hitlNeeded($run);
+                app(PushNotifier::class)->hitlNeeded($run);
             }
         } catch (Throwable $e) {
             $run->update([
@@ -270,7 +280,7 @@ class CognitiveEngine
     private function rememberRun(AgentRun $run, PaiEvent $event, DomainPack $pack, AgentContext $ctx): void
     {
         $ns = $pack->memoryNamespace;
-        $already = \App\Pai\Memory\Memory::query()
+        $already = Memory::query()
             ->where('namespace', $ns)
             ->where('metadata->run_id', $run->id)
             ->exists();
@@ -299,7 +309,7 @@ class CognitiveEngine
     /**
      * 依 autonomy / risk_policy 決定每個動作的最終狀態。
      *
-     * @return array{0: list<array<string,mixed>>, 1: bool}  [動作清單, 是否需要人類核准]
+     * @return array{0: list<array<string,mixed>>, 1: bool} [動作清單, 是否需要人類核准]
      */
     private function gateActions(AgentContext $ctx, DomainPack $pack): array
     {
@@ -339,9 +349,9 @@ class CognitiveEngine
     private function reflect(AgentContext $ctx, int &$tokens): array
     {
         $prompt = "請以資深審查者角度，對以下處理做一句話自我批判：是否有遺漏或過度？\n"
-            ."發現：".json_encode($ctx->findings, JSON_UNESCAPED_UNICODE)."\n"
-            ."動作：".json_encode(array_column($ctx->actions, 'action'), JSON_UNESCAPED_UNICODE)."\n"
-            ."只回一句話。";
+            .'發現：'.json_encode($ctx->findings, JSON_UNESCAPED_UNICODE)."\n"
+            .'動作：'.json_encode(array_column($ctx->actions, 'action'), JSON_UNESCAPED_UNICODE)."\n"
+            .'只回一句話。';
 
         try {
             $res = $this->llm->complete([
@@ -400,7 +410,7 @@ class CognitiveEngine
     private function taskPrompt(PaiEvent $event): string
     {
         return sprintf(
-            "一個事件進來了：topic=%s, intent=%s, severity=%s。請以你的職責開始處理，輸出第一步 JSON。",
+            '一個事件進來了：topic=%s, intent=%s, severity=%s。請以你的職責開始處理，輸出第一步 JSON。',
             $event->topic,
             $event->intent ?? '未知',
             $event->severity?->value ?? '未知',

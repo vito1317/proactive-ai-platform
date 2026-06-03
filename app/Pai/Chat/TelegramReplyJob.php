@@ -51,17 +51,16 @@ class TelegramReplyJob implements ShouldQueue
         LlmClient::setHeartbeat($typing); // 之後所有 LLM 等待（分類/動作/串流）都會持續心跳
 
         try {
-            $category = $responder->category($conv, $this->text);
+            $routed = $responder->route($conv, $this->text);
 
-            if ($category === 'chat') {
+            if ($routed['stream']) {
                 // 串流生成：每個 delta 同時是動畫 heartbeat，「輸入中…」不中斷
-                $out = $llm->stream($responder->chatMessages($conv), $typing, null, $typing);
+                $out = $llm->stream($routed['messages'], $typing, null, $typing);
                 $reply = trim($out['content']) !== '' ? trim($out['content']) : '抱歉，我這次沒有產生回覆，請再試一次。';
                 $meta = ['category' => 'chat'];
             } else {
-                $result = $responder->act($category, $this->text);
-                $reply = $result['reply'];
-                $meta = $result['meta'];
+                $reply = $routed['reply'];
+                $meta = $routed['meta'];
             }
         } catch (Throwable $e) {
             $reply = '抱歉，我處理時發生問題：'.$e->getMessage();

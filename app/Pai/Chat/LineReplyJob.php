@@ -52,17 +52,16 @@ class LineReplyJob implements ShouldQueue
         LlmClient::setHeartbeat($loading); // 所有 LLM 等待期間自動續發載入動畫
 
         try {
-            $category = $responder->category($conv, $this->text);
+            $routed = $responder->route($conv, $this->text);
 
-            if ($category === 'chat') {
+            if ($routed['stream']) {
                 // 串流生成：delta 同時是動畫 heartbeat，逾 50 秒自動續發
-                $out = $llm->stream($responder->chatMessages($conv), $loading, null, $loading);
+                $out = $llm->stream($routed['messages'], $loading, null, $loading);
                 $reply = trim($out['content']) !== '' ? trim($out['content']) : '抱歉，我這次沒有產生回覆，請再試一次。';
                 $meta = ['category' => 'chat'];
             } else {
-                $result = $responder->act($category, $this->text);
-                $reply = $result['reply'];
-                $meta = $result['meta'];
+                $reply = $routed['reply'];
+                $meta = $routed['meta'];
             }
         } catch (Throwable $e) {
             $reply = '抱歉，我處理時發生問題：'.$e->getMessage();

@@ -82,6 +82,11 @@ return [
         ],
     ],
 
+    // 技能：高風險自我修改技能是否免對話確認直接執行（預設否 → 需對話回「確認」）
+    'skills' => [
+        'allow_system_writes' => env('PAI_SKILLS_ALLOW_WRITES', false),
+    ],
+
     // 一鍵安裝來源（中控台顯示安裝指令用）
     'install' => [
         'repo_url' => env('PAI_REPO_URL', 'https://github.com/vito1317/proactive-ai-platform.git'),

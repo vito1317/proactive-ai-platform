@@ -10,7 +10,7 @@ use Throwable;
  */
 class MetaRouter
 {
-    public const CATEGORIES = ['chat', 'task', 'new_domain', 'configure_notify'];
+    public const CATEGORIES = ['chat', 'task', 'new_domain', 'configure_notify', 'skill'];
 
     public function __construct(private readonly LlmClient $llm) {}
 
@@ -18,11 +18,12 @@ class MetaRouter
     public function classify(string $message): array
     {
         $prompt = <<<PROMPT
-        判斷使用者訊息屬於下列哪一類，只輸出 JSON：{"category":"chat|task|new_domain|configure_notify","reason":"一句話"}
+        判斷使用者訊息屬於下列哪一類，只輸出 JSON：{"category":"chat|task|new_domain|configure_notify|skill","reason":"一句話"}
         - chat：一般對話、提問、閒聊、問平台能做什麼、釐清需求（不需立即執行動作）
         - task：要 AI 立即執行/處理一件事（資安事件、修 bug、調查、處理日誌錯誤、開票…）
         - new_domain：想「新增一個持續性的監控/自動化領域」（描述一種長期職責，例如「監控 X 並自動 Y」）
         - configure_notify：要設定通知平台，訊息含 Telegram/LINE/Slack/webhook 的 token、chat id 或推播對象
+        - skill：要「操作或修改平台本身」——查看/修改平台設定、切換 LLM 模型或參數、停用/啟用領域包、重啟 worker、查看日誌、中止進行中的任務
 
         （訊息可能附帶先前對話脈絡；以最後一則使用者意圖為準。）
         使用者訊息：「{$message}」
