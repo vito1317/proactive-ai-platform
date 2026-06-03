@@ -67,9 +67,8 @@ class TelegramWebhookTest extends TestCase
         $this->app->make(Settings::class)->set('notify.telegram.token', 'TOK');
         Http::fake([
             'api.telegram.org/*' => Http::response(['ok' => true]),
-            // LLM 端點與 telegram 分開 stub，避免 '*' 萬用 pattern 搶走 telegram 請求
+            // 「你好」無動作訊號 → 快速路徑直接對話（不呼叫分類 LLM），只需串流回覆這一次
             '127.0.0.1*' => Http::sequence()
-                ->push(['choices' => [['message' => ['content' => json_encode(['category' => 'chat', 'reason' => 'x'])], 'finish_reason' => 'stop']], 'usage' => []])
                 ->push('data: '.json_encode(['choices' => [['delta' => ['content' => '哈囉，我能幫你什麼？']]]])."\n\ndata: [DONE]\n\n"),
         ]);
 

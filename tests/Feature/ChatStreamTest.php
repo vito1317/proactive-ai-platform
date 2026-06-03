@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Pai\Chat\Conversation;
 use App\Pai\Cognition\LlmClient;
+use App\Pai\Cognition\RouteCommandJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -30,7 +32,9 @@ class ChatStreamTest extends TestCase
         $deltas = [];
         $r = $this->app->make(LlmClient::class)->stream(
             [['role' => 'user', 'content' => 'hi']],
-            function ($d) use (&$deltas) { $deltas[] = $d; },
+            function ($d) use (&$deltas) {
+                $deltas[] = $d;
+            },
         );
 
         $this->assertSame(['你', '好', '嗎'], $deltas);
@@ -41,11 +45,8 @@ class ChatStreamTest extends TestCase
     {
         $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
 
-        Http::fakeSequence()
-            // 1) MetaRouter.classify → chat
-            ->push(['choices' => [['message' => ['content' => json_encode(['category' => 'chat', 'reason' => 'x'])], 'finish_reason' => 'stop']], 'usage' => []])
-            // 2) 串流回覆（SSE body 字串）
-            ->push($this->sseBody(['哈', '囉']));
+        // 「嗨」無動作訊號 → 快速路徑直接對話（跳過分類 LLM）→ 只需串流回覆這一次
+        Http::fakeSequence()->push($this->sseBody(['哈', '囉']));
 
         $res = $this->post('/stream/chat', ['message' => '嗨']);
         $res->assertOk();
@@ -64,7 +65,7 @@ class ChatStreamTest extends TestCase
     public function test_action_category_enqueues_and_acks_without_blocking(): void
     {
         $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
-        \Illuminate\Support\Facades\Bus::fake([\App\Pai\Cognition\RouteCommandJob::class]);
+        Bus::fake([RouteCommandJob::class]);
 
         // 只需一次 LLM（判斷類別）→ 動作交背景，不在 SSE 內跑重活
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => json_encode(['category' => 'new_domain', 'reason' => 'x'])], 'finish_reason' => 'stop']], 'usage' => []])]);
@@ -75,7 +76,7 @@ class ChatStreamTest extends TestCase
         $this->assertStringContainsString('event: done', $content);
         $this->assertStringContainsString('背景', $content);
 
-        \Illuminate\Support\Facades\Bus::assertDispatched(\App\Pai\Cognition\RouteCommandJob::class);
+        Bus::assertDispatched(RouteCommandJob::class);
         $this->assertCount(2, Conversation::latest('id')->first()->messages);
     }
 }

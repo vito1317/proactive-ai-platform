@@ -28,8 +28,8 @@ class ChatTest extends TestCase
 
     public function test_chat_category_replies_conversationally(): void
     {
+        // 無動作訊號 → 走快速路徑直接對話（不呼叫分類 LLM），只需回覆這一次
         Http::fakeSequence()
-            ->push($this->respJson(['category' => 'chat', 'reason' => '閒聊']))
             ->push($this->text('你好！我可以幫你處理資安事件、修 bug、或新增監控領域。'));
 
         $conv = Conversation::create([]);
@@ -62,8 +62,8 @@ class ChatTest extends TestCase
     public function test_send_endpoint_persists_messages(): void
     {
         $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
+        // 「嗨」無動作訊號 → 快速路徑直接對話，只回覆一次
         Http::fakeSequence()
-            ->push($this->respJson(['category' => 'chat', 'reason' => 'x']))
             ->push($this->text('收到，我在這裡。'));
 
         $this->post('/chat/send', ['message' => '嗨'])->assertRedirect();
