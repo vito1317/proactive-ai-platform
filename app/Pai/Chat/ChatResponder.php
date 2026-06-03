@@ -55,7 +55,13 @@ class ChatResponder
             return ['stream' => true, 'messages' => $this->chatMessages($conv)];
         }
         if ($category === 'skill') {
-            return ['stream' => false, ...$this->skills->handle($conv, $userMessage, $onStep)];
+            $r = $this->skills->handle($conv, $userMessage, $onStep);
+            // 沒對應到技能 → 退回正常對話回答
+            if (! empty($r['meta']['no_skill'])) {
+                return ['stream' => true, 'messages' => $this->chatMessages($conv)];
+            }
+
+            return ['stream' => false, ...$r];
         }
         $step(match ($category) {
             'task' => '🗂️ 交給領域協調者處理…',

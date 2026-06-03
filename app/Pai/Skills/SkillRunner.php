@@ -40,6 +40,7 @@ class SkillRunner
             'list-domains' => '🧩 盤點領域包…',
             'describe-domain' => '🧩 查看領域包細節…',
             'toggle-domain' => '🧩 啟用/停用領域…',
+            'merge-domains' => '🧩 整合領域包…',
             'restart-workers' => '🔄 重啟背景 worker…',
             'stop-task' => '🛑 中止任務…',
             'tail-logs' => '📜 查看日誌…',
@@ -81,8 +82,8 @@ class SkillRunner
         $pick = $this->pick($message);
         $skill = $pick ? $this->registry->get($pick['skill']) : null;
         if (! $skill) {
-            return ['reply' => '我看得出你想操作平台，但無法對應到具體技能。可用技能：'
-                .implode('、', array_keys($this->registry->all())), 'meta' => ['category' => 'skill']];
+            // 對應不到具體技能 → 交回對話大腦正常回答（而非丟一串技能清單）
+            return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
         }
         $args = $pick['args'] ?? [];
         $step($this->stepLabel($skill));

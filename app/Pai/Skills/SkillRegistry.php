@@ -11,6 +11,7 @@ use App\Pai\Skills\Builtin\GetSettingsSkill;
 use App\Pai\Skills\Builtin\InsertInFileSkill;
 use App\Pai\Skills\Builtin\ListDomainsSkill;
 use App\Pai\Skills\Builtin\ListMcpServersSkill;
+use App\Pai\Skills\Builtin\MergeDomainsSkill;
 use App\Pai\Skills\Builtin\OpenAppSkill;
 use App\Pai\Skills\Builtin\ReadFileSkill;
 use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
@@ -34,6 +35,7 @@ class SkillRegistry
         ListDomainsSkill::class,
         DescribeDomainSkill::class,
         ToggleDomainSkill::class,
+        MergeDomainsSkill::class,
         RestartWorkersSkill::class,
         StopTaskSkill::class,
         TailLogsSkill::class,

@@ -83,12 +83,26 @@ class ChatStreamController extends Controller
                         fn () => $emit('status', ['text' => '思考中…']),
                     );
                     $reply = trim($full) ?: '（沒有產生回覆）';
-                } elseif ($category === 'skill') {
+                } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep))['meta']['no_skill'])) {
                     // 平台操作技能：同步執行（快），逐步回報；高風險則回覆要求對話確認
-                    $result = $responder->skills()->handle($conv, $message, $onStep);
-                    $reply = $result['reply'];
-                    $meta = $result['meta'];
+                    $reply = $skillResult['reply'];
+                    $meta = $skillResult['meta'];
                     $this->emitTyped($emit, $reply);
+                } elseif ($category === 'chat' || (isset($skillResult) && ! empty($skillResult['meta']['no_skill']))) {
+                    // 閒聊，或技能對應不到 → 退回正常對話、逐 token 串流
+                    $onStep('💭 思考中…');
+                    $emit('status', ['text' => '思考中…']);
+                    $full = '';
+                    $llm->stream(
+                        $responder->chatMessages($conv),
+                        function (string $delta) use (&$full, $emit) {
+                            $full .= $delta;
+                            $emit('delta', ['text' => $delta]);
+                        },
+                        fn () => $emit('status', ['text' => '思考中…']),
+                    );
+                    $reply = trim($full) ?: '（沒有產生回覆）';
+                    $meta = ['category' => 'chat'];
                 } else {
                     // 需執行動作（任務/新增領域/設定通知）：交給背景 queue 處理，
                     // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
