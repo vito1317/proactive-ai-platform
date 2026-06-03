@@ -1,6 +1,15 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+marked.setOptions({ gfm: true, breaks: true });
+// 把 AI 回覆的 Markdown 轉成安全的 HTML（清消 XSS）
+function renderMd(text) {
+    if (!text) return '';
+    try { return DOMPurify.sanitize(marked.parse(String(text))); } catch { return String(text); }
+}
 
 const props = defineProps({
     conversation: { type: Object, required: true },
@@ -210,10 +219,12 @@ function newChat() { router.post('/chat/new'); }
                                     <span class="inline-flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
                                     {{ status }}
                                 </span>
-                                <span v-if="streamed" class="whitespace-pre-wrap">{{ streamed }}<span class="cursor">▍</span></span>
+                                <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
                             </template>
                             <template v-else>
-                                <div class="whitespace-pre-wrap">{{ m.content }}</div>
+                                <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
+                                <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
+                                <div v-else class="md" v-html="renderMd(m.content)"></div>
                                 <div v-if="catLabel(m.meta)" class="mt-1 text-[10px] text-emerald-300/70">⚙ {{ catLabel(m.meta) }}</div>
                             </template>
                         </div>
@@ -273,4 +284,24 @@ function newChat() { router.post('/chat/new'); }
 .dot { width: 6px; height: 6px; border-radius: 9999px; background: #94a3b8; display: inline-block; animation: blink 1s infinite; }
 .cursor { animation: blink 1s steps(1) infinite; color: #818cf8; }
 @keyframes blink { 0%,100% { opacity: .2 } 50% { opacity: 1 } }
+
+/* Markdown 渲染（對話框）：補回 Tailwind preflight 移除的清單/標題等樣式 */
+.md { font-size: 0.875rem; line-height: 1.6; word-break: break-word; }
+.md :first-child { margin-top: 0; }
+.md :last-child { margin-bottom: 0; }
+.md p { margin: 0.4rem 0; }
+.md h1, .md h2, .md h3 { font-weight: 700; margin: 0.7rem 0 0.4rem; line-height: 1.3; }
+.md h1 { font-size: 1.15rem; } .md h2 { font-size: 1.05rem; } .md h3 { font-size: 0.95rem; }
+.md ul, .md ol { margin: 0.4rem 0; padding-left: 1.3rem; }
+.md ul { list-style: disc; } .md ol { list-style: decimal; }
+.md li { margin: 0.15rem 0; }
+.md a { color: #818cf8; text-decoration: underline; }
+.md code { background: rgba(255,255,255,0.1); padding: 0.1rem 0.35rem; border-radius: 0.3rem; font-size: 0.82em; }
+.md pre { background: rgba(2,6,23,0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 0.6rem; padding: 0.7rem 0.9rem; margin: 0.5rem 0; overflow-x: auto; }
+.md pre code { background: none; padding: 0; font-size: 0.8rem; line-height: 1.5; }
+.md blockquote { border-left: 3px solid rgba(129,140,248,0.5); padding-left: 0.7rem; margin: 0.5rem 0; color: #cbd5e1; }
+.md table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.82rem; }
+.md th, .md td { border: 1px solid rgba(255,255,255,0.15); padding: 0.3rem 0.55rem; }
+.md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.12); margin: 0.7rem 0; }
+.md strong { font-weight: 700; color: #f1f5f9; }
 </style>

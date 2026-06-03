@@ -108,7 +108,7 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}|null
      */
-    public function resolvePending(Conversation $conv, string $message): ?array
+    public function resolvePending(Conversation $conv, string $message, ?callable $onStep = null): ?array
     {
         $pending = $conv->pending_skill;
         if (! is_array($pending) || empty($pending['skill'])) {
@@ -130,6 +130,9 @@ class SkillRunner
         $skill = $this->registry->get($pending['skill']);
         if (! $skill) {
             return ['reply' => '原本要執行的技能已不存在，已取消。', 'meta' => ['category' => 'skill']];
+        }
+        if ($onStep) {
+            $onStep($this->stepLabel($skill).'（執行中，模型較慢請稍候）');
         }
         $result = $this->execute($conv, $skill, $pending['args'] ?? []);
         if ($verdict === 'always') {

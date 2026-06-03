@@ -52,18 +52,26 @@ class ChatStreamController extends Controller
                 flush();
             };
 
+            // 每一步都回報給前端（活動軌跡）
+            $onStep = fn (string $text) => $emit('step', ['text' => $text]);
+            // 心跳：任何 LLM 等待期間持續送 keepalive，避免長生成時 SSE 閒置被切、畫面空白
+            $lastBeat = 0;
+            LlmClient::setHeartbeat(function () use ($emit, &$lastBeat) {
+                if (time() - $lastBeat >= 2) {
+                    $lastBeat = time();
+                    $emit('status', ['text' => '生成中…']);
+                }
+            });
+
             try {
-                // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理
-                if ($resolved = $responder->skills()->resolvePending($conv, $message)) {
+                // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理（含進度回報）
+                if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep)) {
                     $this->emitTyped($emit, $resolved['reply']);
                     $conv->addMessage('assistant', $resolved['reply'], $resolved['meta']);
                     $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
 
                     return;
                 }
-
-                // 每一步都回報給前端（活動軌跡）
-                $onStep = fn (string $text) => $emit('step', ['text' => $text]);
 
                 $onStep('🧭 判斷意圖中…');
                 $category = $responder->category($conv, $message);
@@ -113,6 +121,8 @@ class ChatStreamController extends Controller
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
             } catch (Throwable $e) {
                 $emit('error', ['text' => 'AI 回覆失敗：'.$e->getMessage()]);
+            } finally {
+                LlmClient::setHeartbeat(null);
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',
