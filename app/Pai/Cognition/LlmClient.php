@@ -15,7 +15,26 @@ use Throwable;
  */
 class LlmClient
 {
+    /** 全程心跳：任何 LLM HTTP 等待期間定期呼叫（TG/LINE 維持「輸入中」動畫用）。 */
+    private static $heartbeat = null;
+
     public function __construct(private readonly Settings $settings) {}
+
+    /** 設定（或清除）心跳回呼。worker 一次只跑一個 job，全域狀態安全。 */
+    public static function setHeartbeat(?callable $cb): void
+    {
+        self::$heartbeat = $cb;
+    }
+
+    /** curl progress 選項：傳輸等待期間約每秒觸發，驅動心跳。 */
+    private static function progressOption(): array
+    {
+        return self::$heartbeat ? ['progress' => function (): void {
+            if (self::$heartbeat) {
+                (self::$heartbeat)();
+            }
+        }] : [];
+    }
 
     /**
      * 串流對話：以 SSE 逐 token 取得回覆。每個 content 片段呼叫 $onDelta。
@@ -35,7 +54,7 @@ class LlmClient
         $timeout = (int) $this->settings->get('llm.timeout');
 
         $response = Http::timeout($timeout)->withToken($apiKey)
-            ->withOptions(['stream' => true])
+            ->withOptions(['stream' => true, ...self::progressOption()])
             ->post($baseUrl.'/chat/completions', [
                 'model' => $model,
                 'messages' => $messages,
@@ -105,6 +124,7 @@ class LlmClient
             $response = Http::timeout($timeout)
                 ->withToken($apiKey)
                 ->acceptJson()
+                ->withOptions(self::progressOption())
                 ->post($baseUrl.'/chat/completions', [
                     'model' => $model,
                     'messages' => $messages,

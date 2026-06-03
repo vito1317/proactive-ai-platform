@@ -38,13 +38,15 @@ class TelegramWebhookController extends Controller
                 'type' => $chat['type'] ?? 'private',
                 'title' => $chat['title'] ?? trim(($chat['first_name'] ?? '').' '.($chat['last_name'] ?? '')) ?: ($chat['username'] ?? (string) $chatId),
             ]);
+            // 外連 API 一律延到回應送出後執行（terminating）——webhook 必須立即回 200，
+            // 否則 Telegram 會 "Read timeout expired" 進入重試退避，訊息延遲數分鐘。
             if (in_array(strtolower(strtok($text, '@')), ['/new', '/start'], true)) {
                 // /new（/start 同義）：開新會話 session，舊上下文保留在後台
                 Conversation::newSession('tg', (string) $chatId);
-                $notifier->sendTelegramTo((string) $chatId, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！');
+                app()->terminating(fn () => $notifier->sendTelegramTo((string) $chatId, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！'));
             } elseif ($text !== '') {
                 TelegramReplyJob::dispatch((string) $chatId, $text);
-                $notifier->sendTelegramTyping((string) $chatId); // 收到當下立即顯示「輸入中…」
+                app()->terminating(fn () => $notifier->sendTelegramTyping((string) $chatId)); // 回應後立即顯示「輸入中…」
             }
         }
 

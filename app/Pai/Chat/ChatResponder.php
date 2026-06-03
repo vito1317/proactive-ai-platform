@@ -7,6 +7,7 @@ use App\Pai\Cognition\LlmClient;
 use App\Pai\Cognition\MetaRouter;
 use App\Pai\Cognition\RunCoordinatorJob;
 use App\Pai\Domains\DomainPackGenerator;
+use App\Pai\Domains\DomainRegistry;
 use App\Pai\Notify\Notifier;
 use App\Pai\Notify\NotifyAssistant;
 use App\Pai\Perception\EventStatus;
@@ -45,21 +46,23 @@ class ChatResponder
     /** 判斷意圖類別（帶最近對話脈絡）。 */
     public function category(Conversation $conv, string $userMessage): string
     {
-        $history = $conv->messages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
+        $history = $conv->activeMessages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
 
         return $this->meta->classify($this->contextString($history))['category'];
     }
 
-    /** 閒聊回覆要送給 LLM 的訊息（system + 近 8 則歷史）——供串流用。 */
+    /** 閒聊回覆要送給 LLM 的訊息（system + 壓縮摘要 + 近 8 則）——供串流用。 */
     public function chatMessages(Conversation $conv): array
     {
-        $system = ['role' => 'system', 'content' =>
-            '你是 PAI 主動式 AI 平台的助理。平台能：監聽事件與日誌、資安事件響應、'
+        $content = '你是 PAI 主動式 AI 平台的助理。平台能：監聽事件與日誌、資安事件響應、'
             .'開發自動化（讀 repo、跑測試、提修補）、新增監控領域、設定通知（Telegram/LINE）。'
-            .'用繁體中文、簡潔友善地回答。若使用者想做事，鼓勵他直接用白話描述，你會自動處理。'];
-        $history = $conv->messages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
+            .'用繁體中文、簡潔友善地回答。若使用者想做事，鼓勵他直接用白話描述，你會自動處理。';
+        if ($conv->summary) {
+            $content .= "\n\n[先前對話摘要（自動壓縮）]\n".$conv->summary;
+        }
+        $history = $conv->activeMessages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
 
-        return [$system, ...array_slice($history, -8)];
+        return [['role' => 'system', 'content' => $content], ...array_slice($history, -8)];
     }
 
     /** 執行非閒聊類動作（任務 / 新增領域 / 設定通知）。 */
@@ -139,6 +142,6 @@ class ChatResponder
 
     private function domainKeys(): array
     {
-        return array_keys(app(\App\Pai\Domains\DomainRegistry::class)->all());
+        return array_keys(app(DomainRegistry::class)->all());
     }
 }

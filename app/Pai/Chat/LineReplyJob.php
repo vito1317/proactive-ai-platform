@@ -49,6 +49,7 @@ class LineReplyJob implements ShouldQueue
             }
         };
         $loading(); // 收到訊息立刻顯示載入動畫
+        LlmClient::setHeartbeat($loading); // 所有 LLM 等待期間自動續發載入動畫
 
         try {
             $category = $responder->category($conv, $this->text);
@@ -66,6 +67,8 @@ class LineReplyJob implements ShouldQueue
         } catch (Throwable $e) {
             $reply = '抱歉，我處理時發生問題：'.$e->getMessage();
             $meta = ['error' => true];
+        } finally {
+            LlmClient::setHeartbeat(null);
         }
 
         $conv->addMessage('assistant', $reply, $meta);

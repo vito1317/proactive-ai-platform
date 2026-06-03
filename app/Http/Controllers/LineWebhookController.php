@@ -42,14 +42,15 @@ class LineWebhookController extends Controller
 
             if (($event['type'] ?? '') === 'message' && data_get($event, 'message.type') === 'text') {
                 $text = trim((string) data_get($event, 'message.text', ''));
+                // 外連 API 延到回應送出後執行——LINE webhook 也要求快速回 200
                 if (strtolower($text) === '/new') {
                     // /new：開新會話 session，舊上下文保留在後台
                     Conversation::newSession('line', (string) $to);
-                    $notifier->sendLineTo((string) $to, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！');
+                    app()->terminating(fn () => $notifier->sendLineTo((string) $to, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！'));
                 } elseif ($text !== '') {
                     LineReplyJob::dispatch((string) $to, $text);
                     if (str_starts_with((string) $to, 'U')) {
-                        $notifier->sendLineLoading((string) $to, 60); // 收到當下立即顯示載入動畫（僅 1:1）
+                        app()->terminating(fn () => $notifier->sendLineLoading((string) $to, 60)); // 回應後立即顯示載入動畫（僅 1:1）
                     }
                 }
             }

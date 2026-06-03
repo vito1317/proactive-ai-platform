@@ -48,11 +48,10 @@ class TelegramReplyJob implements ShouldQueue
             }
         };
         $typing(); // 收到訊息立刻顯示「輸入中…」
+        LlmClient::setHeartbeat($typing); // 之後所有 LLM 等待（分類/動作/串流）都會持續心跳
 
         try {
             $category = $responder->category($conv, $this->text);
-            $last = 0;
-            $typing(); // 分類期間動畫可能已過期 → 補發
 
             if ($category === 'chat') {
                 // 串流生成：每個 delta 同時是動畫 heartbeat，「輸入中…」不中斷
@@ -67,6 +66,8 @@ class TelegramReplyJob implements ShouldQueue
         } catch (Throwable $e) {
             $reply = '抱歉，我處理時發生問題：'.$e->getMessage();
             $meta = ['error' => true];
+        } finally {
+            LlmClient::setHeartbeat(null);
         }
 
         $conv->addMessage('assistant', $reply, $meta);

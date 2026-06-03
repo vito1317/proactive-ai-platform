@@ -12,7 +12,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Conversation extends Model
 {
-    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'title'];
+    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'title', 'summary', 'compacted_through_id'];
+
+    /** 尚未被壓縮進 summary 的訊息（進 prompt 用）。 */
+    public function activeMessages(): HasMany
+    {
+        return $this->messages()->when($this->compacted_through_id,
+            fn ($q) => $q->where('id', '>', $this->compacted_through_id));
+    }
 
     public function messages(): HasMany
     {
@@ -41,6 +48,13 @@ class Conversation extends Model
 
     public function addMessage(string $role, string $content, array $meta = []): ConversationMessage
     {
-        return $this->messages()->create(['role' => $role, 'content' => $content, 'meta' => $meta]);
+        $msg = $this->messages()->create(['role' => $role, 'content' => $content, 'meta' => $meta]);
+
+        // 自動上下文壓縮：每次 AI 回覆後檢查，超過門檻就排背景摘要（不阻塞回覆）
+        if ($role === 'assistant' && $this->activeMessages()->count() > ContextCompactor::THRESHOLD) {
+            CompactConversationJob::dispatch($this->id);
+        }
+
+        return $msg;
     }
 }
