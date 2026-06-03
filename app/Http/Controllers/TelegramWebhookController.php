@@ -43,6 +43,8 @@ class TelegramWebhookController extends Controller
             // 圖片（多模態）：取最大尺寸的 file_id，caption 作為提問
             $photos = $msg['photo'] ?? null;
             $imageFileId = is_array($photos) && $photos !== [] ? (end($photos)['file_id'] ?? null) : null;
+            // 語音 / 音檔（STT）
+            $audioFileId = $msg['voice']['file_id'] ?? $msg['audio']['file_id'] ?? null;
 
             if (in_array(strtolower(strtok($text, '@')), ['/new', '/start'], true)) {
                 // /new（/start 同義）：開新會話 session，舊上下文保留在後台
@@ -50,6 +52,9 @@ class TelegramWebhookController extends Controller
                 app()->terminating(fn () => $notifier->sendTelegramTo((string) $chatId, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！'));
             } elseif ($imageFileId) {
                 TelegramReplyJob::dispatch((string) $chatId, $msg['caption'] ?? '', $imageFileId);
+                app()->terminating(fn () => $notifier->sendTelegramTyping((string) $chatId));
+            } elseif ($audioFileId) {
+                TelegramReplyJob::dispatch((string) $chatId, '', null, $audioFileId);
                 app()->terminating(fn () => $notifier->sendTelegramTyping((string) $chatId));
             } elseif ($text !== '') {
                 TelegramReplyJob::dispatch((string) $chatId, $text);

@@ -23,6 +23,7 @@ class Settings
         'react.max_steps' => ['label' => 'ReAct 最大步數', 'type' => 'int', 'group' => 'ReAct', 'min' => 1, 'max' => 12],
         'react.reflect' => ['label' => '啟用自我反思', 'type' => 'bool', 'group' => 'ReAct'],
         'skills.allow_system_writes' => ['label' => '允許 AI 直接執行高風險自我修改技能（關閉時需對話確認）', 'type' => 'bool', 'group' => '技能'],
+        'voice.stt_url' => ['label' => '語音轉文字 (STT) 端點', 'type' => 'string', 'group' => '語音'],
         'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
         'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
         'notify.telegram.chat_id' => ['label' => 'Telegram Chat ID', 'type' => 'string', 'group' => '通知'],

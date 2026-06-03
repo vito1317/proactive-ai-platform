@@ -27,19 +27,14 @@ class TelegramReplyJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public string $chatId, public string $text, public ?string $imageFileId = null)
+    public function __construct(public string $chatId, public string $text, public ?string $imageFileId = null, public ?string $audioFileId = null)
     {
         $this->onQueue('chat'); // 互動回覆走獨立佇列，不被重型任務阻塞
     }
 
-    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media): void
+    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media, SpeechToText $stt): void
     {
         $conv = Conversation::forTelegram($this->chatId);
-        $userText = $this->imageFileId ? ('[圖片] '.$this->text) : $this->text;
-        if ($conv->title === null) {
-            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
-        }
-        $conv->addMessage('user', $userText);
 
         $last = 0;
         $typing = function () use ($notifier, &$last) {
@@ -49,7 +44,27 @@ class TelegramReplyJob implements ShouldQueue
             }
         };
         $typing(); // 收到訊息立刻顯示「輸入中…」
-        LlmClient::setHeartbeat($typing); // 之後所有 LLM 等待（分類/動作/串流）都會持續心跳
+        LlmClient::setHeartbeat($typing); // 之後所有 LLM 等待（分類/動作/串流/STT）都會持續心跳
+
+        // 語音：先轉文字，之後當一般文字訊息處理
+        if ($this->audioFileId) {
+            $b64 = $media->telegramAudio($this->audioFileId);
+            $transcript = $b64 ? $stt->transcribe($b64) : null;
+            if (! $transcript) {
+                LlmClient::setHeartbeat(null);
+                $conv->addMessage('user', '🎤（語音，轉錄失敗）');
+                $notifier->sendTelegramTo($this->chatId, '抱歉，這段語音我聽不清楚或轉錄失敗，可以再說一次或改打字嗎？');
+
+                return;
+            }
+            $this->text = $transcript;
+        }
+
+        $userText = $this->imageFileId ? ('[圖片] '.$this->text) : ($this->audioFileId ? ('🎤 '.$this->text) : $this->text);
+        if ($conv->title === null) {
+            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
+        }
+        $conv->addMessage('user', $userText);
 
         try {
             // 多模態：有圖片 → 走 vision 回答

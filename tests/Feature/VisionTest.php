@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
 use App\Pai\Chat\MediaFetcher;
+use App\Pai\Chat\SpeechToText;
 use App\Pai\Chat\TelegramReplyJob;
 use App\Pai\Cognition\LlmClient;
 use App\Pai\Notify\Notifier;
@@ -61,6 +62,7 @@ class VisionTest extends TestCase
             $this->app->make(LlmClient::class),
             $this->app->make(Notifier::class),
             $this->app->make(MediaFetcher::class),
+            $this->app->make(SpeechToText::class),
         );
 
         $conv = Conversation::where('tg_chat_id', '123')->first();

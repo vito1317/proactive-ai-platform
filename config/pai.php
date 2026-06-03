@@ -87,6 +87,11 @@ return [
         'allow_system_writes' => env('PAI_SKILLS_ALLOW_WRITES', false),
     ],
 
+    // 語音轉文字（STT）：本機 MiniCPM-o 語音服務的 transcribe 端點
+    'voice' => [
+        'stt_url' => env('PAI_STT_URL', 'http://127.0.0.1:8891/voice/transcribe'),
+    ],
+
     // 一鍵安裝來源（中控台顯示安裝指令用）
     'install' => [
         'repo_url' => env('PAI_REPO_URL', 'https://github.com/vito1317/proactive-ai-platform.git'),

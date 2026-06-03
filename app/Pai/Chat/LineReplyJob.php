@@ -27,19 +27,14 @@ class LineReplyJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public string $to, public string $text, public ?string $imageMessageId = null)
+    public function __construct(public string $to, public string $text, public ?string $imageMessageId = null, public ?string $audioMessageId = null)
     {
         $this->onQueue('chat'); // 互動回覆走獨立佇列，不被重型任務阻塞
     }
 
-    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media): void
+    public function handle(ChatResponder $responder, LlmClient $llm, Notifier $notifier, MediaFetcher $media, SpeechToText $stt): void
     {
         $conv = Conversation::forLine($this->to);
-        $userText = $this->imageMessageId ? ('[圖片] '.$this->text) : $this->text;
-        if ($conv->title === null) {
-            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
-        }
-        $conv->addMessage('user', $userText);
 
         $last = 0;
         $loading = function () use ($notifier, &$last) {
@@ -51,6 +46,26 @@ class LineReplyJob implements ShouldQueue
         };
         $loading(); // 收到訊息立刻顯示載入動畫
         LlmClient::setHeartbeat($loading); // 所有 LLM 等待期間自動續發載入動畫
+
+        // 語音：先轉文字
+        if ($this->audioMessageId) {
+            $b64 = $media->lineAudio($this->audioMessageId);
+            $transcript = $b64 ? $stt->transcribe($b64) : null;
+            if (! $transcript) {
+                LlmClient::setHeartbeat(null);
+                $conv->addMessage('user', '🎤（語音，轉錄失敗）');
+                $notifier->sendLineTo($this->to, '抱歉，這段語音我聽不清楚或轉錄失敗，可以再說一次或改打字嗎？');
+
+                return;
+            }
+            $this->text = $transcript;
+        }
+
+        $userText = $this->imageMessageId ? ('[圖片] '.$this->text) : ($this->audioMessageId ? ('🎤 '.$this->text) : $this->text);
+        if ($conv->title === null) {
+            $conv->update(['title' => Str::limit($userText !== '' ? $userText : '圖片', 30)]);
+        }
+        $conv->addMessage('user', $userText);
 
         try {
             // 多模態：有圖片 → 走 vision 回答

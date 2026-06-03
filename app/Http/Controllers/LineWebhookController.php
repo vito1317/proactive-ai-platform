@@ -52,6 +52,10 @@ class LineWebhookController extends Controller
                 // 圖片（多模態）
                 LineReplyJob::dispatch((string) $to, '', (string) data_get($event, 'message.id'));
                 $loading();
+            } elseif ($msgType === 'audio') {
+                // 語音（STT）
+                LineReplyJob::dispatch((string) $to, '', null, (string) data_get($event, 'message.id'));
+                $loading();
             } elseif ($msgType === 'text') {
                 $text = trim((string) data_get($event, 'message.text', ''));
                 // 外連 API 延到回應送出後執行——LINE webhook 也要求快速回 200
