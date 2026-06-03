@@ -22,10 +22,10 @@ class SkillRunner
         private readonly Settings $settings,
     ) {}
 
-    /** 是否全域允許高風險自我修改（後台開關 / autopilot）。 */
-    public function writesAllowed(): bool
+    /** 是否允許高風險自我修改：後台全域開關 OR 本對話已設「一律允許」。 */
+    public function writesAllowed(Conversation $conv): bool
     {
-        return (bool) $this->settings->get('skills.allow_system_writes', false);
+        return (bool) $this->settings->get('skills.allow_system_writes', false) || (bool) $conv->always_allow_skills;
     }
 
     /**
@@ -35,6 +35,18 @@ class SkillRunner
      */
     public function handle(Conversation $conv, string $message): array
     {
+        // 「一律允許 / 取消一律允許」指令（不必先有待確認操作）
+        if (($toggle = $this->alwaysAllowIntent($message)) !== null) {
+            $conv->update(['always_allow_skills' => $toggle, 'pending_skill' => null]);
+
+            return [
+                'reply' => $toggle
+                    ? '已開啟「一律允許」🔓 —— 本對話之後的高風險操作我會直接執行，不再逐次詢問。（要收回請說「取消一律允許」）'
+                    : '已關閉「一律允許」🔒 —— 高風險操作會恢復逐次確認。',
+                'meta' => ['category' => 'skill', 'always_allow' => $toggle],
+            ];
+        }
+
         $pick = $this->pick($message);
         $skill = $pick ? $this->registry->get($pick['skill']) : null;
         if (! $skill) {
@@ -43,17 +55,17 @@ class SkillRunner
         }
         $args = $pick['args'] ?? [];
 
-        // 低風險或已全域允許 → 直接執行
-        if (! $skill->isHighRisk() || $this->writesAllowed()) {
+        // 低風險或已允許（全域 / 本對話一律允許）→ 直接執行
+        if (! $skill->isHighRisk() || $this->writesAllowed($conv)) {
             return $this->execute($conv, $skill, $args);
         }
 
-        // 高風險且未全域允許 → 暫存、要求對話確認
+        // 高風險且未允許 → 暫存、要求對話確認
         $conv->update(['pending_skill' => ['skill' => $skill->name(), 'args' => $args]]);
         $argText = $args === [] ? '' : '（'.collect($args)->map(fn ($v, $k) => "{$k}={$v}")->implode('，').'）';
 
         return [
-            'reply' => "⚠️ 這是高風險操作，會修改平台本身：\n「{$skill->description()}」{$argText}\n\n確定要執行嗎？回覆「確認」我就執行，回覆「取消」則作罷。",
+            'reply' => "⚠️ 這是高風險操作，會修改系統：\n「{$skill->description()}」{$argText}\n\n確定要執行嗎？回覆「確認」執行一次、「一律允許」之後都不再問、「取消」則作罷。",
             'meta' => ['category' => 'skill', 'pending' => $skill->name()],
         ];
     }
@@ -74,16 +86,24 @@ class SkillRunner
             return null; // 既非確認也非取消 → 當作新訊息處理（保留待確認）
         }
 
-        $conv->update(['pending_skill' => null]);
         if ($verdict === false) {
+            $conv->update(['pending_skill' => null]);
+
             return ['reply' => '好的，已取消這次操作。', 'meta' => ['category' => 'skill', 'cancelled' => true]];
         }
+        // 'always' → 本對話之後一律允許
+        $conv->update(['pending_skill' => null, 'always_allow_skills' => $verdict === 'always' ? true : $conv->always_allow_skills]);
+
         $skill = $this->registry->get($pending['skill']);
         if (! $skill) {
             return ['reply' => '原本要執行的技能已不存在，已取消。', 'meta' => ['category' => 'skill']];
         }
+        $result = $this->execute($conv, $skill, $pending['args'] ?? []);
+        if ($verdict === 'always') {
+            $result['reply'] = "🔓（已開啟本對話「一律允許」，之後不再逐次詢問）\n".$result['reply'];
+        }
 
-        return $this->execute($conv, $skill, $pending['args'] ?? []);
+        return $result;
     }
 
     private function execute(Conversation $conv, Skill $skill, array $args): array
@@ -123,20 +143,47 @@ class SkillRunner
         return ['skill' => (string) $out['skill'], 'args' => is_array($out['args'] ?? null) ? $out['args'] : []];
     }
 
-    /** 判斷確認(true)/取消(false)/不確定(null)。先用關鍵字，避免多一次 LLM。 */
-    private function confirmation(string $message): ?bool
+    /**
+     * 判斷待確認回覆：'always'(一律允許) / true(確認一次) / false(取消) / null(不確定)。
+     * 先用關鍵字，避免多一次 LLM。
+     */
+    private function confirmation(string $message): string|bool|null
     {
         $m = mb_strtolower(trim($message));
-        $yes = ['確認', '確定', '是', '好', '可以', '同意', '允許', '執行', 'ok', 'yes', 'y', '對'];
+        // 先判「一律允許」（比單純「允許」更優先）
+        if ($this->alwaysAllowIntent($message) === true) {
+            return 'always';
+        }
         $no = ['取消', '不要', '不用', '否', '別', 'no', 'n', '算了'];
+        foreach ($no as $w) {
+            if (str_contains($m, $w)) {
+                return false;
+            }
+        }
+        $yes = ['確認', '確定', '是', '好', '可以', '同意', '允許', '執行', 'ok', 'yes', 'y', '對'];
         foreach ($yes as $w) {
             if (str_contains($m, $w)) {
                 return true;
             }
         }
-        foreach ($no as $w) {
+
+        return null;
+    }
+
+    /** 偵測「一律允許 / 取消一律允許」意圖：true=開、false=關、null=非此意圖。 */
+    private function alwaysAllowIntent(string $message): ?bool
+    {
+        $m = mb_strtolower(trim($message));
+        $off = ['取消一律', '關閉一律', '關閉自動允許', '取消自動允許', '不要一律', '恢復確認', 'stop always'];
+        foreach ($off as $w) {
             if (str_contains($m, $w)) {
                 return false;
+            }
+        }
+        $on = ['一律允許', '都允許', '全部允許', '永遠允許', '自動允許', '免確認', '不要再問', '不用再問', 'always allow', 'auto approve'];
+        foreach ($on as $w) {
+            if (str_contains($m, $w)) {
+                return true;
             }
         }
 
