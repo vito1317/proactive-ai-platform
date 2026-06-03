@@ -22,6 +22,34 @@ class SkillRunner
         private readonly Settings $settings,
     ) {}
 
+    /** 把技能對應成一句「正在做什麼」的步驟說明（給前端活動軌跡）。 */
+    private function stepLabel(Skill $skill): string
+    {
+        return [
+            'web-search' => '🔍 上網搜尋…',
+            'answer-from-web' => '🔍 上網搜尋並閱讀資料…',
+            'web-fetch' => '🌐 開啟網頁讀取內容…',
+            'read-file' => '📄 讀取檔案…',
+            'write-file' => '✏️ 寫入檔案…',
+            'edit-file' => '✏️ 編輯檔案…',
+            'insert-in-file' => '✏️ 修改檔案…',
+            'run-shell' => '💻 執行終端機指令…',
+            'open-app' => '🚀 啟動程式…',
+            'get-settings' => '⚙️ 讀取平台設定…',
+            'update-setting' => '⚙️ 調整平台設定…',
+            'list-domains' => '🧩 盤點領域包…',
+            'describe-domain' => '🧩 查看領域包細節…',
+            'toggle-domain' => '🧩 啟用/停用領域…',
+            'restart-workers' => '🔄 重啟背景 worker…',
+            'stop-task' => '🛑 中止任務…',
+            'tail-logs' => '📜 查看日誌…',
+            'add-mcp-server' => '🔌 接入 MCP 工具…',
+            'list-mcp-servers' => '🔌 盤點 MCP 工具…',
+            'remove-mcp-server' => '🔌 移除 MCP 工具…',
+            'generate-install-command' => '📦 產生安裝指令…',
+        ][$skill->name()] ?? ('🔧 '.$skill->description().'…');
+    }
+
     /** 是否允許高風險自我修改：後台全域開關 OR 本對話已設「一律允許」。 */
     public function writesAllowed(Conversation $conv): bool
     {
@@ -33,8 +61,10 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}
      */
-    public function handle(Conversation $conv, string $message): array
+    public function handle(Conversation $conv, string $message, ?callable $onStep = null): array
     {
+        $step = $onStep ?? fn (string $t) => null;
+
         // 「一律允許 / 取消一律允許」指令（不必先有待確認操作）
         if (($toggle = $this->alwaysAllowIntent($message)) !== null) {
             $conv->update(['always_allow_skills' => $toggle, 'pending_skill' => null]);
@@ -47,6 +77,7 @@ class SkillRunner
             ];
         }
 
+        $step('🧠 判斷要用哪個能力…');
         $pick = $this->pick($message);
         $skill = $pick ? $this->registry->get($pick['skill']) : null;
         if (! $skill) {
@@ -54,6 +85,7 @@ class SkillRunner
                 .implode('、', array_keys($this->registry->all())), 'meta' => ['category' => 'skill']];
         }
         $args = $pick['args'] ?? [];
+        $step($this->stepLabel($skill));
 
         // 低風險或已允許（全域 / 本對話一律允許）→ 直接執行
         if (! $skill->isHighRisk() || $this->writesAllowed($conv)) {

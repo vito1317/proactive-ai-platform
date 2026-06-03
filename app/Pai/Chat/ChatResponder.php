@@ -40,20 +40,29 @@ class ChatResponder
      *
      * @return array{stream: bool, messages?: list<array>, reply?: string, meta?: array<string,mixed>}
      */
-    public function route(Conversation $conv, string $userMessage): array
+    public function route(Conversation $conv, string $userMessage, ?callable $onStep = null): array
     {
+        $step = $onStep ?? fn (string $t) => null;
+
         // 1) 待確認的高風險技能——這則可能是「確認/取消」
         if ($resolved = $this->skills->resolvePending($conv, $userMessage)) {
             return ['stream' => false, ...$resolved];
         }
 
+        $step('🧭 判斷意圖中…');
         $category = $this->category($conv, $userMessage);
         if ($category === 'chat') {
             return ['stream' => true, 'messages' => $this->chatMessages($conv)];
         }
         if ($category === 'skill') {
-            return ['stream' => false, ...$this->skills->handle($conv, $userMessage)];
+            return ['stream' => false, ...$this->skills->handle($conv, $userMessage, $onStep)];
         }
+        $step(match ($category) {
+            'task' => '🗂️ 交給領域協調者處理…',
+            'new_domain' => '🧩 生成新領域包…',
+            'configure_notify' => '🔔 設定通知…',
+            default => '⚙️ 處理中…',
+        });
 
         return ['stream' => false, ...$this->act($category, $userMessage)];
     }

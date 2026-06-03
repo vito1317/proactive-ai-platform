@@ -11,6 +11,7 @@ const props = defineProps({
 const input = ref('');
 const sending = ref(false);
 const status = ref('');           // 思考中… / 處理中…
+const steps = ref([]);            // AI 活動軌跡（每步在幹嘛）
 const streamed = ref('');         // 正在串流的 AI 回覆
 const lastSent = ref('');
 const errorText = ref('');
@@ -47,6 +48,7 @@ async function send() {
     lastSent.value = msg;
     input.value = '';
     streamed.value = '';
+    steps.value = [];
     errorText.value = '';
     status.value = '送出中…';
     sending.value = true;
@@ -95,6 +97,7 @@ async function send() {
         try { payload = JSON.parse(data); } catch { return; }
 
         if (event === 'status') { if (!streamed.value) status.value = payload.text; }
+        else if (event === 'step') { steps.value.push(payload.text); status.value = ''; }
         else if (event === 'delta') { status.value = ''; streamed.value += payload.text; }
         else if (event === 'done') { convId = payload.conversation_id ?? convId; }
         else if (event === 'error') { errorText.value = payload.text; }
@@ -143,11 +146,21 @@ function newChat() { router.post('/chat/new'); }
                              :class="m.role === 'user' ? 'bg-indigo-600 text-white' : 'border border-white/10 bg-white/5 text-slate-200'">
                             <!-- 串流中的 AI 泡泡 -->
                             <template v-if="m.streaming">
-                                <span v-if="status && !streamed" class="inline-flex items-center gap-2 text-slate-400">
+                                <!-- AI 活動軌跡：每一步在幹嘛 -->
+                                <div v-if="steps.length" class="mb-2 space-y-1 border-l-2 border-indigo-400/40 pl-2.5">
+                                    <div v-for="(s, i) in steps" :key="i"
+                                         class="flex items-center gap-1.5 text-xs"
+                                         :class="i === steps.length - 1 && !streamed ? 'text-indigo-300' : 'text-slate-500'">
+                                        <span v-if="i === steps.length - 1 && !streamed" class="dot"></span>
+                                        <span v-else class="text-emerald-400/70">✓</span>
+                                        {{ s }}
+                                    </div>
+                                </div>
+                                <span v-if="status && !streamed && !steps.length" class="inline-flex items-center gap-2 text-slate-400">
                                     <span class="inline-flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
                                     {{ status }}
                                 </span>
-                                <span v-else class="whitespace-pre-wrap">{{ streamed }}<span class="cursor">▍</span></span>
+                                <span v-if="streamed" class="whitespace-pre-wrap">{{ streamed }}<span class="cursor">▍</span></span>
                             </template>
                             <template v-else>
                                 <div class="whitespace-pre-wrap">{{ m.content }}</div>

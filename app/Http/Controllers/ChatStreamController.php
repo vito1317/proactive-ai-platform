@@ -60,7 +60,10 @@ class ChatStreamController extends Controller
                     return;
                 }
 
-                $emit('status', ['text' => '判斷意圖中…']);
+                // 每一步都回報給前端（活動軌跡）
+                $onStep = fn (string $text) => $emit('step', ['text' => $text]);
+
+                $onStep('🧭 判斷意圖中…');
                 $category = $responder->category($conv, $message);
 
                 $reply = '';
@@ -68,6 +71,7 @@ class ChatStreamController extends Controller
 
                 if ($category === 'chat') {
                     // 閒聊：逐 token 串流（持續有資料，不會閒置）
+                    $onStep('💭 思考中…');
                     $emit('status', ['text' => '思考中…']);
                     $full = '';
                     $llm->stream(
@@ -80,9 +84,8 @@ class ChatStreamController extends Controller
                     );
                     $reply = trim($full) ?: '（沒有產生回覆）';
                 } elseif ($category === 'skill') {
-                    // 平台操作技能：同步執行（快），高風險則回覆要求對話確認
-                    $emit('status', ['text' => '處理中…']);
-                    $result = $responder->skills()->handle($conv, $message);
+                    // 平台操作技能：同步執行（快），逐步回報；高風險則回覆要求對話確認
+                    $result = $responder->skills()->handle($conv, $message, $onStep);
                     $reply = $result['reply'];
                     $meta = $result['meta'];
                     $this->emitTyped($emit, $reply);
@@ -93,6 +96,12 @@ class ChatStreamController extends Controller
                         'source' => 'chat', 'topic' => 'console.request',
                         'payload' => ['message' => $message], 'status' => EventStatus::Received,
                     ]);
+                    $onStep(match ($category) {
+                        'task' => '🗂️ 交給領域協調者處理…',
+                        'new_domain' => '🧩 生成新領域包…',
+                        'configure_notify' => '🔔 設定通知…',
+                        default => '⚙️ 處理中…',
+                    });
                     RouteCommandJob::dispatch($event->id);
 
                     $reply = match ($category) {
