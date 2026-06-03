@@ -64,9 +64,32 @@ function onEnter(e) {
     send();
 }
 
+const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+let controller = null;
+
+// 終止回覆：通知後端停止生成 + 中斷前端串流
+async function stopReply() {
+    if (!sending.value) return;
+    status.value = '已終止';
+    try {
+        await fetch('/chat/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+            body: JSON.stringify({ conversation_id: props.conversation.id }),
+        });
+    } catch { /* ignore */ }
+    controller?.abort();
+}
+
 async function send() {
     const msg = input.value.trim();
-    if (!msg || sending.value) return;
+    if (!msg) return;
+
+    // 插話：生成中又送新訊息 → 先終止目前回覆，再送新的
+    if (sending.value) {
+        await stopReply();
+        await new Promise((r) => setTimeout(r, 250)); // 等舊串流收尾
+    }
 
     lastSent.value = msg;
     input.value = '';
@@ -75,17 +98,19 @@ async function send() {
     errorText.value = '';
     status.value = '送出中…';
     sending.value = true;
+    controller = new AbortController();
 
-    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
     let convId = props.conversation.id;
 
     try {
         const resp = await fetch('/stream/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, Accept: 'text/event-stream' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken(), Accept: 'text/event-stream' },
             body: JSON.stringify({ conversation_id: convId, message: msg }),
+            signal: controller.signal,
         });
         if (!resp.ok || !resp.body) throw new Error('連線失敗 (' + resp.status + ')');
+        status.value = '連線中…';
 
         const reader = resp.body.getReader();
         const dec = new TextDecoder();
@@ -101,9 +126,10 @@ async function send() {
             }
         }
     } catch (e) {
-        errorText.value = e.message || 'AI 回覆失敗';
+        if (e.name !== 'AbortError') errorText.value = e.message || 'AI 回覆失敗';
     } finally {
         sending.value = false;
+        controller = null;
         // 同步伺服器端已持久化的訊息（含標題/側欄）
         router.reload({ only: ['messages', 'conversations', 'conversation'], preserveScroll: true, preserveState: true });
     }
@@ -122,6 +148,7 @@ async function send() {
         if (event === 'status') { if (!streamed.value) status.value = payload.text; }
         else if (event === 'step') { steps.value.push(payload.text); status.value = ''; }
         else if (event === 'delta') { status.value = ''; streamed.value += payload.text; }
+        else if (event === 'stopped') { status.value = '已終止'; }
         else if (event === 'done') { convId = payload.conversation_id ?? convId; }
         else if (event === 'error') { errorText.value = payload.text; }
     }
@@ -208,19 +235,26 @@ function newChat() { router.post('/chat/new'); }
                     {{ conversation.channel === 'tg' ? '✈️ Telegram' : '💬 LINE' }} 會話 — bot 自動回覆中，此處為唯讀檢視
                 </div>
                 <div v-else class="border-t border-white/10 bg-slate-950/60 px-5 py-3">
+                    <!-- 生成中的進度條（不再卡在「送出中」）-->
+                    <div v-if="sending" class="mb-2 flex items-center justify-between gap-2 text-xs text-indigo-300">
+                        <span class="inline-flex items-center gap-2">
+                            <span class="dot"></span>
+                            {{ status || (streamed ? '生成回覆中…' : (steps.length ? steps[steps.length - 1] : '處理中…')) }}
+                        </span>
+                        <button type="button" class="rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-red-300 hover:bg-red-500/20" @click="stopReply">■ 終止</button>
+                    </div>
                     <form class="flex items-end gap-2" @submit.prevent="send">
                         <textarea
                             v-model="input"
                             rows="1"
-                            placeholder="跟 AI 說一句話…（Enter 送出，Shift+Enter 換行）"
+                            :placeholder="sending ? '生成中也可直接打字插話（會打斷目前回覆）…' : '跟 AI 說一句話…（Enter 送出，Shift+Enter 換行）'"
                             class="inp flex-1 resize-none"
                             @keydown.enter="onEnter"
                         ></textarea>
-                        <button type="submit" :disabled="sending || !input.trim()" class="btn-send">
-                            {{ sending ? '…' : '送出' }}
-                        </button>
+                        <button v-if="sending" type="button" class="btn-send !bg-red-600 hover:!bg-red-500" @click="stopReply">■</button>
+                        <button type="submit" :disabled="!input.trim()" class="btn-send">{{ sending ? '插話' : '送出' }}</button>
                     </form>
-                    <p class="mt-1 text-[10px] text-slate-600">即時串流回覆；AI 會自動串接前文並判斷意圖。</p>
+                    <p class="mt-1 text-[10px] text-slate-600">即時串流；可隨時按「終止」停止，或直接打字「插話」打斷目前回覆。</p>
                 </div>
             </main>
         </div>

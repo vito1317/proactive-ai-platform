@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
+use App\Pai\Chat\StopStreaming;
 use App\Pai\Cognition\LlmClient;
 use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Perception\EventStatus;
 use App\Pai\Perception\PaiEvent;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
@@ -71,18 +73,7 @@ class ChatStreamController extends Controller
 
                 if ($category === 'chat') {
                     // 閒聊：逐 token 串流（持續有資料，不會閒置）
-                    $onStep('💭 思考中…');
-                    $emit('status', ['text' => '思考中…']);
-                    $full = '';
-                    $llm->stream(
-                        $responder->chatMessages($conv),
-                        function (string $delta) use (&$full, $emit) {
-                            $full .= $delta;
-                            $emit('delta', ['text' => $delta]);
-                        },
-                        fn () => $emit('status', ['text' => '思考中…']),
-                    );
-                    $reply = trim($full) ?: '（沒有產生回覆）';
+                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
                 } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep))['meta']['no_skill'])) {
                     // 平台操作技能：同步執行（快），逐步回報；高風險則回覆要求對話確認
                     $reply = $skillResult['reply'];
@@ -90,19 +81,7 @@ class ChatStreamController extends Controller
                     $this->emitTyped($emit, $reply);
                 } elseif ($category === 'chat' || (isset($skillResult) && ! empty($skillResult['meta']['no_skill']))) {
                     // 閒聊，或技能對應不到 → 退回正常對話、逐 token 串流
-                    $onStep('💭 思考中…');
-                    $emit('status', ['text' => '思考中…']);
-                    $full = '';
-                    $llm->stream(
-                        $responder->chatMessages($conv),
-                        function (string $delta) use (&$full, $emit) {
-                            $full .= $delta;
-                            $emit('delta', ['text' => $delta]);
-                        },
-                        fn () => $emit('status', ['text' => '思考中…']),
-                    );
-                    $reply = trim($full) ?: '（沒有產生回覆）';
-                    $meta = ['category' => 'chat'];
+                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
                 } else {
                     // 需執行動作（任務/新增領域/設定通知）：交給背景 queue 處理，
                     // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
@@ -141,6 +120,50 @@ class ChatStreamController extends Controller
             'X-Accel-Buffering' => 'no',
             'Connection' => 'keep-alive',
         ]);
+    }
+
+    /**
+     * 串流閒聊回覆，並支援「終止 / 插話」：每隔幾個 token 檢查中止旗標，
+     * 一旦使用者按終止或插話即停止生成、保留已產出的部分。
+     *
+     * @return array{0: string, 1: array<string,mixed>} [reply, meta]
+     */
+    private function streamChatReply(LlmClient $llm, ChatResponder $responder, Conversation $conv, callable $emit, callable $onStep): array
+    {
+        $onStep('💭 思考中…');
+        $emit('status', ['text' => '思考中…']);
+        $abortKey = "pai:chat:abort:{$conv->id}";
+        Cache::forget($abortKey); // 清掉上一輪的殘留旗標
+        $full = '';
+        $n = 0;
+        $stopped = false;
+
+        try {
+            $llm->stream(
+                $responder->chatMessages($conv),
+                function (string $delta) use (&$full, &$n, $emit, $abortKey) {
+                    $full .= $delta;
+                    $emit('delta', ['text' => $delta]);
+                    // 節流檢查中止旗標（每 ~10 個片段查一次 DB cache）
+                    if ((++$n % 10) === 0 && Cache::get($abortKey)) {
+                        throw new StopStreaming;
+                    }
+                },
+                fn () => $emit('status', ['text' => '思考中…']),
+            );
+        } catch (StopStreaming) {
+            $stopped = true;
+        }
+        Cache::forget($abortKey);
+
+        $reply = trim($full);
+        if ($stopped) {
+            $emit('stopped', []);
+
+            return [$reply !== '' ? $reply."\n\n…（已中止）" : '（已中止回覆）', ['category' => 'chat', 'stopped' => true]];
+        }
+
+        return [$reply !== '' ? $reply : '（沒有產生回覆）', ['category' => 'chat']];
     }
 
     /** 逐字輸出一段已完成的文字（給技能/確認類即時結果）。 */

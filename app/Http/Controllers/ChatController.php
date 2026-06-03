@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -60,6 +62,17 @@ class ChatController extends Controller
         $conv = Conversation::create(['user_id' => $request->user()->id]);
 
         return redirect()->route('chat', ['c' => $conv->id]);
+    }
+
+    /** 終止回覆 / 插話：標記中止旗標，串流中的生成迴圈會即時停下。 */
+    public function stop(Request $request): JsonResponse
+    {
+        $id = (int) $request->input('conversation_id');
+        if ($id > 0) {
+            Cache::put("pai:chat:abort:{$id}", true, 120);
+        }
+
+        return response()->json(['ok' => true]);
     }
 
     /** 取目前會話（?c=id 指定，否則最新，否則新建）。 */
