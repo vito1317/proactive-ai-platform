@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Pai\Chat\Conversation;
 use App\Pai\Chat\LineReplyJob;
 use App\Pai\Notify\ChannelRegistry;
+use App\Pai\Notify\Notifier;
 use App\Pai\Settings\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,7 +16,7 @@ use Illuminate\Http\Request;
  */
 class LineWebhookController extends Controller
 {
-    public function handle(Request $request, Settings $settings, ChannelRegistry $channels): JsonResponse
+    public function handle(Request $request, Settings $settings, ChannelRegistry $channels, Notifier $notifier): JsonResponse
     {
         // 用 LINE Channel secret 驗證簽章（X-Line-Signature = base64(HMAC-SHA256(body)))
         $secret = $settings->get('notify.line.secret');
@@ -40,8 +42,15 @@ class LineWebhookController extends Controller
 
             if (($event['type'] ?? '') === 'message' && data_get($event, 'message.type') === 'text') {
                 $text = trim((string) data_get($event, 'message.text', ''));
-                if ($text !== '') {
+                if (strtolower($text) === '/new') {
+                    // /new：開新會話 session，舊上下文保留在後台
+                    Conversation::newSession('line', (string) $to);
+                    $notifier->sendLineTo((string) $to, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！');
+                } elseif ($text !== '') {
                     LineReplyJob::dispatch((string) $to, $text);
+                    if (str_starts_with((string) $to, 'U')) {
+                        $notifier->sendLineLoading((string) $to, 60); // 收到當下立即顯示載入動畫（僅 1:1）
+                    }
                 }
             }
         }

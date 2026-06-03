@@ -21,11 +21,13 @@ class LlmClient
      * 串流對話：以 SSE 逐 token 取得回覆。每個 content 片段呼叫 $onDelta。
      * 思考型模型的 reasoning_content 不傳給 $onDelta（僅累積），首個 content 片段前
      * 呼叫 $onReasoning(true) 一次以利前端顯示「思考中」。
+     * $onTick 則在「每個」delta（含 reasoning）都會呼叫——供 TG/LINE 在生成期間
+     * 持續補發「輸入中／載入中」動畫（heartbeat）。
      *
      * @param  list<array{role: string, content: string}>  $messages
      * @return array{content: string, reasoning: string}
      */
-    public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null): array
+    public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null, ?callable $onTick = null): array
     {
         $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
         $model = (string) $this->settings->get('llm.model');
@@ -64,6 +66,9 @@ class LlmClient
                 $delta = $json['choices'][0]['delta'] ?? null;
                 if (! is_array($delta)) {
                     continue;
+                }
+                if ($onTick) {
+                    $onTick(); // heartbeat：reasoning 階段也持續觸發
                 }
                 if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
                     $reasoning .= $delta['reasoning_content'];

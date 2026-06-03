@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -20,14 +21,18 @@ class ChatController extends Controller
         $conv = $this->current($request);
 
         return Inertia::render('Chat', [
-            'conversation' => ['id' => $conv->id, 'title' => $conv->title ?? '新對話'],
+            'conversation' => [
+                'id' => $conv->id, 'title' => $conv->title ?? '新對話',
+                'channel' => $this->channelOf($conv), // tg / line / null；TG·LINE session 後台唯讀
+            ],
             'messages' => $conv->messages()->get()->map(fn ($m) => [
                 'id' => $m->id, 'role' => $m->role, 'content' => $m->content,
                 'meta' => $m->meta ?? [], 'at' => $m->created_at?->format('H:i'),
             ])->all(),
-            'conversations' => Conversation::where('user_id', $request->user()->id)
-                ->latest('id')->limit(15)->get(['id', 'title'])
-                ->map(fn ($c) => ['id' => $c->id, 'title' => $c->title ?? '新對話'])->all(),
+            // 自己的對話 + TG/LINE 的 session（後台可查看 bot 與誰聊了什麼）
+            'conversations' => $this->visible($request)
+                ->latest('id')->limit(25)->get(['id', 'title', 'tg_chat_id', 'line_to'])
+                ->map(fn ($c) => ['id' => $c->id, 'title' => $c->title ?? '新對話', 'channel' => $this->channelOf($c)])->all(),
         ]);
     }
 
@@ -61,7 +66,7 @@ class ChatController extends Controller
     private function current(Request $request): Conversation
     {
         if ($request->filled('c')) {
-            $conv = Conversation::where('user_id', $request->user()->id)->find($request->integer('c'));
+            $conv = $this->visible($request)->find($request->integer('c'));
             if ($conv) {
                 return $conv;
             }
@@ -69,6 +74,20 @@ class ChatController extends Controller
 
         return Conversation::where('user_id', $request->user()->id)->latest('id')->first()
             ?? Conversation::create(['user_id' => $request->user()->id]);
+    }
+
+    /** 後台可見的會話：自己的 + 來自 TG/LINE 的 session。 */
+    private function visible(Request $request): Builder
+    {
+        return Conversation::where(fn ($q) => $q
+            ->where('user_id', $request->user()->id)
+            ->orWhereNotNull('tg_chat_id')
+            ->orWhereNotNull('line_to'));
+    }
+
+    private function channelOf(Conversation $c): ?string
+    {
+        return $c->tg_chat_id ? 'tg' : ($c->line_to ? 'line' : null);
     }
 
     private function resolve(Request $request, ?int $id): Conversation

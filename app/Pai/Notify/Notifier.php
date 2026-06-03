@@ -60,6 +60,31 @@ class Notifier
             ->post("https://api.telegram.org/bot{$token}/sendMessage", ['chat_id' => $chatId, 'text' => $text]))['ok'];
     }
 
+    /** Telegram「輸入中…」動畫（sendChatAction）。約 5 秒過期，生成期間需節流補發。 */
+    public function sendTelegramTyping(string $chatId): bool
+    {
+        $token = $this->settings->get('notify.telegram.token');
+        if (! $token) {
+            return false;
+        }
+
+        return $this->call(fn () => Http::timeout(5)
+            ->post("https://api.telegram.org/bot{$token}/sendChatAction", ['chat_id' => $chatId, 'action' => 'typing']))['ok'];
+    }
+
+    /** LINE 載入中動畫（僅 1:1 聊天有效；5–60 秒、5 的倍數；bot 回覆時自動消失）。 */
+    public function sendLineLoading(string $to, int $seconds = 60): bool
+    {
+        $token = $this->settings->get('notify.line.token');
+        if (! $token) {
+            return false;
+        }
+        $seconds = (int) max(5, min(60, round($seconds / 5) * 5));
+
+        return $this->call(fn () => Http::timeout(5)->withToken($token)
+            ->post('https://api.line.me/v2/bot/chat/loading/start', ['chatId' => $to, 'loadingSeconds' => $seconds]))['ok'];
+    }
+
     /** 回覆/推送到指定的 LINE 對象（userId/groupId/roomId）— 用 push API（雙向）。 */
     public function sendLineTo(string $to, string $text): bool
     {

@@ -20,6 +20,16 @@ class CronTrigger
             return null;
         }
 
+        // 防積壓：該領域還有未消化的協調者 job（LLM 一輪可能數分鐘）就跳過本次觸發，
+        // 否則每分鐘 cron 會無限堆 job（曾累積上千個）。
+        $pending = \Illuminate\Support\Facades\DB::table('jobs')
+            ->where('payload', 'like', '%RunCoordinatorJob%')
+            ->where('payload', 'like', "%{$domain}%")
+            ->exists();
+        if ($pending) {
+            return null;
+        }
+
         $event = PaiEvent::create([
             'source' => 'cron',
             'topic' => 'cron.tick',

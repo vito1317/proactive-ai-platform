@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Pai\Chat\Conversation;
 use App\Pai\Chat\TelegramReplyJob;
 use App\Pai\Notify\ChannelRegistry;
+use App\Pai\Notify\Notifier;
 use App\Pai\Settings\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,11 +16,13 @@ use Illuminate\Http\Request;
  */
 class TelegramWebhookController extends Controller
 {
-    public function handle(Request $request, Settings $settings, ChannelRegistry $channels): JsonResponse
+    public function handle(Request $request, Settings $settings, ChannelRegistry $channels, Notifier $notifier): JsonResponse
     {
         // 驗證來自 Telegram 的 secret token（setWebhook 時設定）
         $secret = $settings->get('notify.telegram.webhook_secret');
         if ($secret && $request->header('X-Telegram-Bot-Api-Secret-Token') !== $secret) {
+            logger()->warning('TG webhook secret 不符（可能需重跑 pai:telegram-webhook set 重新同步）');
+
             return response()->json(['ok' => false], 403);
         }
 
@@ -34,8 +38,13 @@ class TelegramWebhookController extends Controller
                 'type' => $chat['type'] ?? 'private',
                 'title' => $chat['title'] ?? trim(($chat['first_name'] ?? '').' '.($chat['last_name'] ?? '')) ?: ($chat['username'] ?? (string) $chatId),
             ]);
-            if ($text !== '') {
+            if (in_array(strtolower(strtok($text, '@')), ['/new', '/start'], true)) {
+                // /new（/start 同義）：開新會話 session，舊上下文保留在後台
+                Conversation::newSession('tg', (string) $chatId);
+                $notifier->sendTelegramTo((string) $chatId, '🆕 已開啟新的會話，上下文已重置。直接說話即可開始！');
+            } elseif ($text !== '') {
                 TelegramReplyJob::dispatch((string) $chatId, $text);
+                $notifier->sendTelegramTyping((string) $chatId); // 收到當下立即顯示「輸入中…」
             }
         }
 

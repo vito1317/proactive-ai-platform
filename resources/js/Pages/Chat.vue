@@ -116,8 +116,12 @@ function newChat() { router.post('/chat/new'); }
                 <button class="mb-3 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500" @click="newChat">＋ 新對話</button>
                 <div class="flex-1 space-y-1 overflow-y-auto">
                     <Link v-for="c in conversations" :key="c.id" :href="`/chat?c=${c.id}`"
-                          class="block truncate rounded-lg px-3 py-2 text-xs"
-                          :class="c.id === conversation.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5'">{{ c.title }}</Link>
+                          class="flex items-center gap-1.5 truncate rounded-lg px-3 py-2 text-xs"
+                          :class="c.id === conversation.id ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5'">
+                        <span v-if="c.channel === 'tg'" class="shrink-0 rounded bg-sky-500/20 px-1 text-[9px] text-sky-300">TG</span>
+                        <span v-else-if="c.channel === 'line'" class="shrink-0 rounded bg-emerald-500/20 px-1 text-[9px] text-emerald-300">LINE</span>
+                        <span class="truncate">{{ c.title }}</span>
+                    </Link>
                 </div>
             </aside>
 
@@ -154,8 +158,11 @@ function newChat() { router.post('/chat/new'); }
                     <p v-if="errorText" class="text-center text-xs text-red-400">{{ errorText }}</p>
                 </div>
 
-                <!-- 對話框（獨立分離於底部） -->
-                <div class="border-t border-white/10 bg-slate-950/60 px-5 py-3">
+                <!-- 對話框（獨立分離於底部）；TG/LINE session 為唯讀檢視 -->
+                <div v-if="conversation.channel" class="border-t border-white/10 bg-slate-950/60 px-5 py-3 text-center text-xs text-slate-500">
+                    {{ conversation.channel === 'tg' ? '✈️ Telegram' : '💬 LINE' }} 會話 — bot 自動回覆中，此處為唯讀檢視
+                </div>
+                <div v-else class="border-t border-white/10 bg-slate-950/60 px-5 py-3">
                     <form class="flex items-end gap-2" @submit.prevent="send">
                         <textarea
                             v-model="input"
