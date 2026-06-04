@@ -19,6 +19,7 @@ class RunCoordinatorJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 900;     // 26B 模型多步推理可能較久
+
     public int $tries = 2;         // 崩潰/逾時可重試——靠 resume() 從已存步驟續跑，不重複動作
 
     public function __construct(public int $eventId, public string $domain) {}

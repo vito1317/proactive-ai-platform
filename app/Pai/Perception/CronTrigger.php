@@ -4,6 +4,7 @@ namespace App\Pai\Perception;
 
 use App\Pai\Cognition\RunCoordinatorJob;
 use App\Pai\Domains\DomainRegistry;
+use Illuminate\Support\Facades\DB;
 
 /**
  * 時間觸發（L1）：依領域包的 triggers.cron，定時主動喚醒協調者，
@@ -22,7 +23,7 @@ class CronTrigger
 
         // 防積壓：該領域還有未消化的協調者 job（LLM 一輪可能數分鐘）就跳過本次觸發，
         // 否則每分鐘 cron 會無限堆 job（曾累積上千個）。
-        $pending = \Illuminate\Support\Facades\DB::table('jobs')
+        $pending = DB::table('jobs')
             ->where('payload', 'like', '%RunCoordinatorJob%')
             ->where('payload', 'like', "%{$domain}%")
             ->exists();
@@ -49,7 +50,7 @@ class CronTrigger
     /**
      * 解析領域包的 cron 條目 "「<cron 運算式>: <說明>」"。
      *
-     * @return array{0: string, 1: string}  [運算式, 說明]
+     * @return array{0: string, 1: string} [運算式, 說明]
      */
     public static function parse(string $entry): array
     {

@@ -106,6 +106,6 @@ class RouteCommandJob implements ShouldQueue
             Notification::send($users, new PlatformNotice($message, $kind));
         }
         // 同步推到已設定的外部平台（Telegram/LINE/webhook）
-        app(\App\Pai\Notify\Notifier::class)->send($message);
+        app(Notifier::class)->send($message);
     }
 }

@@ -13,7 +13,7 @@ final class DomainPackValidator
 
     /**
      * @param  mixed  $m  YAML 解析後的結構（理應為 array）
-     * @return string[]  錯誤清單
+     * @return string[] 錯誤清單
      */
     public function validate(mixed $m): array
     {

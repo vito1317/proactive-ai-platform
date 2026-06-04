@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use App\Pai\Settings\Settings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -13,7 +14,7 @@ class SettingsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->actingAs(\App\Models\User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
+        $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
     }
 
     public function test_settings_page_renders(): void

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Perception\PaiEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,7 +16,7 @@ class NlCommandTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->actingAs(\App\Models\User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
+        $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
     }
 
     public function test_ask_creates_event_and_dispatches_classifier(): void

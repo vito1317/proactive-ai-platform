@@ -2,6 +2,7 @@
 
 namespace App\Pai\Cognition;
 
+use App\Pai\Chat\StopStreaming;
 use App\Pai\Settings\Settings;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -18,6 +19,9 @@ class LlmClient
     /** 全程心跳：任何 LLM HTTP 等待期間定期呼叫（TG/LINE 維持「輸入中」動畫用）。 */
     private static $heartbeat = null;
 
+    /** 心跳丟出中止訊號時設為 true，讓外層把 curl 中斷（cURL 42）轉回 StopStreaming。 */
+    private static bool $aborted = false;
+
     public function __construct(private readonly Settings $settings) {}
 
     /** 設定（或清除）心跳回呼。worker 一次只跑一個 job，全域狀態安全。 */
@@ -26,12 +30,20 @@ class LlmClient
         self::$heartbeat = $cb;
     }
 
-    /** curl progress 選項：傳輸等待期間約每秒觸發，驅動心跳。 */
+    /**
+     * curl progress 選項：傳輸等待期間約每秒觸發。
+     * 心跳可丟 StopStreaming 來「即時中斷」連阻塞中的 LLM 請求（終止/插話用）。
+     */
     private static function progressOption(): array
     {
         return self::$heartbeat ? ['progress' => function (): void {
             if (self::$heartbeat) {
-                (self::$heartbeat)();
+                try {
+                    (self::$heartbeat)();
+                } catch (StopStreaming $e) {
+                    self::$aborted = true; // curl 會以 error 42 中止；外層據此還原 StopStreaming
+                    throw $e;
+                }
             }
         }] : [];
     }
@@ -53,15 +65,25 @@ class LlmClient
         $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
         $timeout = (int) $this->settings->get('llm.timeout');
 
-        $response = Http::timeout($timeout)->withToken($apiKey)
-            ->withOptions(['stream' => true, ...self::progressOption()])
-            ->post($baseUrl.'/chat/completions', [
-                'model' => $model,
-                'messages' => $messages,
-                'temperature' => (float) $this->settings->get('llm.temperature'),
-                'max_tokens' => (int) $this->settings->get('llm.max_tokens'),
-                'stream' => true,
-            ]);
+        self::$aborted = false;
+        try {
+            $response = Http::timeout($timeout)->withToken($apiKey)
+                ->withOptions(['stream' => true, ...self::progressOption()])
+                ->post($baseUrl.'/chat/completions', [
+                    'model' => $model,
+                    'messages' => $messages,
+                    'temperature' => (float) $this->settings->get('llm.temperature'),
+                    'max_tokens' => (int) $this->settings->get('llm.max_tokens'),
+                    'stream' => true,
+                ]);
+        } catch (StopStreaming $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            if (self::$aborted) {
+                throw new StopStreaming;
+            }
+            throw $e;
+        }
 
         $body = $response->toPsrResponse()->getBody();
         $content = '';
@@ -69,38 +91,47 @@ class LlmClient
         $sawReasoning = false;
         $buffer = '';
 
-        while (! $body->eof()) {
-            $buffer .= $body->read(2048);
-            while (($nl = strpos($buffer, "\n")) !== false) {
-                $line = trim(substr($buffer, 0, $nl));
-                $buffer = substr($buffer, $nl + 1);
-                if ($line === '' || ! str_starts_with($line, 'data:')) {
-                    continue;
-                }
-                $data = trim(substr($line, 5));
-                if ($data === '[DONE]') {
-                    break 2;
-                }
-                $json = json_decode($data, true);
-                $delta = $json['choices'][0]['delta'] ?? null;
-                if (! is_array($delta)) {
-                    continue;
-                }
-                if ($onTick) {
-                    $onTick(); // heartbeat：reasoning 階段也持續觸發
-                }
-                if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
-                    $reasoning .= $delta['reasoning_content'];
-                    if (! $sawReasoning && $onReasoning) {
-                        $sawReasoning = true;
-                        $onReasoning(true);
+        try {
+            while (! $body->eof()) {
+                $buffer .= $body->read(2048);
+                while (($nl = strpos($buffer, "\n")) !== false) {
+                    $line = trim(substr($buffer, 0, $nl));
+                    $buffer = substr($buffer, $nl + 1);
+                    if ($line === '' || ! str_starts_with($line, 'data:')) {
+                        continue;
+                    }
+                    $data = trim(substr($line, 5));
+                    if ($data === '[DONE]') {
+                        break 2;
+                    }
+                    $json = json_decode($data, true);
+                    $delta = $json['choices'][0]['delta'] ?? null;
+                    if (! is_array($delta)) {
+                        continue;
+                    }
+                    if ($onTick) {
+                        $onTick(); // heartbeat：reasoning 階段也持續觸發
+                    }
+                    if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
+                        $reasoning .= $delta['reasoning_content'];
+                        if (! $sawReasoning && $onReasoning) {
+                            $sawReasoning = true;
+                            $onReasoning(true);
+                        }
+                    }
+                    if (isset($delta['content']) && $delta['content'] !== '') {
+                        $content .= $delta['content'];
+                        $onDelta($delta['content']);
                     }
                 }
-                if (isset($delta['content']) && $delta['content'] !== '') {
-                    $content .= $delta['content'];
-                    $onDelta($delta['content']);
-                }
             }
+        } catch (StopStreaming $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            if (self::$aborted) {
+                throw new StopStreaming;
+            }
+            throw $e;
         }
 
         return ['content' => $content, 'reasoning' => $reasoning];

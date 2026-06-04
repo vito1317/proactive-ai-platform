@@ -5,6 +5,7 @@ namespace App\Pai\Action;
 use App\Pai\Security\EgressGateway;
 use App\Pai\Security\Sandbox;
 use App\Pai\Security\SecretRef;
+use Illuminate\Support\Facades\Artisan;
 use Throwable;
 
 /**
@@ -51,9 +52,9 @@ class ActionExecutor
     private function clearCache(): array
     {
         try {
-            \Illuminate\Support\Facades\Artisan::call('cache:clear');
+            Artisan::call('cache:clear');
 
-            return ['ok' => true, 'output' => '已清除應用快取（cache:clear）。'.trim(\Illuminate\Support\Facades\Artisan::output())];
+            return ['ok' => true, 'output' => '已清除應用快取（cache:clear）。'.trim(Artisan::output())];
         } catch (Throwable $e) {
             return ['ok' => false, 'output' => '清除快取失敗：'.$e->getMessage()];
         }

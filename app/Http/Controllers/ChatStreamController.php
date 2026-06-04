@@ -54,9 +54,15 @@ class ChatStreamController extends Controller
 
             // 每一步都回報給前端（活動軌跡）
             $onStep = fn (string $text) => $emit('step', ['text' => $text]);
-            // 心跳：任何 LLM 等待期間持續送 keepalive，避免長生成時 SSE 閒置被切、畫面空白
+            // 心跳：任何 LLM 等待期間持續送 keepalive；同時檢查中止旗標——
+            // 一旦使用者按「終止」，丟 StopStreaming 連阻塞中的 LLM 請求都會被即時打斷。
+            $abortKey = "pai:chat:abort:{$conv->id}";
+            Cache::forget($abortKey);
             $lastBeat = 0;
-            LlmClient::setHeartbeat(function () use ($emit, &$lastBeat) {
+            LlmClient::setHeartbeat(function () use ($emit, &$lastBeat, $abortKey) {
+                if (Cache::get($abortKey)) {
+                    throw new StopStreaming;
+                }
                 if (time() - $lastBeat >= 2) {
                     $lastBeat = time();
                     $emit('status', ['text' => '生成中…']);
@@ -119,6 +125,11 @@ class ChatStreamController extends Controller
 
                 $conv->addMessage('assistant', $reply, $meta);
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
+            } catch (StopStreaming) {
+                // 使用者按「終止」→ 連阻塞中的 LLM 請求都被打斷；存一則「已中止」收尾
+                $conv->addMessage('assistant', '（已中止回覆）', ['stopped' => true]);
+                $emit('stopped', []);
+                $emit('done', ['conversation_id' => $conv->id, 'meta' => ['stopped' => true]]);
             } catch (Throwable $e) {
                 // 一律存一則回覆，避免對話永遠卡在「生成中」（前端輪詢才會結束）
                 $conv->addMessage('assistant', '抱歉，這次處理失敗了：'.$e->getMessage().'　可以再試一次或換個說法。', ['error' => true]);
@@ -126,6 +137,7 @@ class ChatStreamController extends Controller
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => ['error' => true]]);
             } finally {
                 LlmClient::setHeartbeat(null);
+                Cache::forget($abortKey);
             }
         }, 200, [
             'Content-Type' => 'text/event-stream',

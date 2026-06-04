@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Pai\Cognition\AgentRun;
 use App\Pai\Cognition\CognitiveEngine;
 use App\Pai\Cognition\RunCoordinatorJob;
+use App\Pai\Cognition\RunStatus;
 use App\Pai\Domains\DomainRegistry;
 use App\Pai\Perception\PaiEvent;
 use App\Pai\Settings\Settings;
@@ -74,9 +76,9 @@ class A2AHandoffTest extends TestCase
         $pack = $this->app->make(DomainRegistry::class)->get('sec-ir');
 
         // 預置一個已含 handoff 步驟的「中斷」運行
-        $run = \App\Pai\Cognition\AgentRun::create([
+        $run = AgentRun::create([
             'event_id' => $event->id, 'domain' => 'sec-ir', 'coordinator' => 'sec-ir-coordinator',
-            'status' => \App\Pai\Cognition\RunStatus::Running,
+            'status' => RunStatus::Running,
             'steps' => [
                 ['step' => 1, 'thought' => 't', 'action' => 'handoff_to_domain',
                     'action_input' => ['to_domain' => 'dev-auto', 'task' => 'T1', 'artifact' => []], 'observation' => 'ok'],

@@ -7,6 +7,7 @@ use App\Pai\Domains\DomainPackValidationException;
 use App\Pai\Domains\DomainPackValidator;
 use App\Pai\Domains\DomainRegistry;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 
 class DomainPackTest extends TestCase
@@ -111,7 +112,7 @@ class DomainPackTest extends TestCase
     {
         $dir = sys_get_temp_dir().'/pai-packs-'.uniqid();
         mkdir($dir);
-        file_put_contents($dir.'/good.yaml', \Symfony\Component\Yaml\Yaml::dump($this->validManifest()));
+        file_put_contents($dir.'/good.yaml', Yaml::dump($this->validManifest()));
         file_put_contents($dir.'/bad.yaml', "domain: bad\ncoordinator: bad\n"); // 缺一堆必填
 
         $loader = new DomainPackLoader(new DomainPackValidator, $dir);

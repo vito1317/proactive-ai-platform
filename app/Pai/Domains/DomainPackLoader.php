@@ -41,7 +41,7 @@ final class DomainPackLoader
     /**
      * 嚴格載入整個目錄；任一檔案無效即拋出。
      *
-     * @return array<string, DomainPack>  以 domain 鍵
+     * @return array<string, DomainPack> 以 domain 鍵
      */
     public function loadAll(): array
     {
@@ -77,7 +77,7 @@ final class DomainPackLoader
     }
 
     /**
-     * @return string[]  排序後的 *.yaml 絕對路徑
+     * @return string[] 排序後的 *.yaml 絕對路徑
      */
     public function files(): array
     {

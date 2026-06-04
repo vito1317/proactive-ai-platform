@@ -43,6 +43,6 @@ final class RecallMemoryTool implements Tool
             $hits,
         );
 
-        return ToolResult::ok("檢索到 ".count($hits)." 筆相似記憶：\n".implode("\n", $lines));
+        return ToolResult::ok('檢索到 '.count($hits)." 筆相似記憶：\n".implode("\n", $lines));
     }
 }

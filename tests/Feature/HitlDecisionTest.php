@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use App\Pai\Cognition\AgentRun;
 use App\Pai\Cognition\RunStatus;
 use App\Pai\Perception\PaiEvent;
@@ -15,7 +16,7 @@ class HitlDecisionTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->actingAs(\App\Models\User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
+        $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
     }
 
     private function makeRun(array $actions): AgentRun

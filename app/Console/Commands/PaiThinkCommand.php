@@ -28,7 +28,7 @@ class PaiThinkCommand extends Command
 
         $pack = $registry->get((string) $event->domain);
         if ($pack === null) {
-            $this->error("事件未路由到任何領域（domain=".($event->domain ?? 'null').'）。');
+            $this->error('事件未路由到任何領域（domain='.($event->domain ?? 'null').'）。');
 
             return self::FAILURE;
         }
@@ -42,7 +42,7 @@ class PaiThinkCommand extends Command
             if (! empty($s['thought'])) {
                 $this->line("    💭 {$s['thought']}");
             }
-            $this->line("    👁  ".str_replace("\n", ' ', mb_substr($s['observation'], 0, 160)));
+            $this->line('    👁  '.str_replace("\n", ' ', mb_substr($s['observation'], 0, 160)));
         }
 
         $this->newLine();
