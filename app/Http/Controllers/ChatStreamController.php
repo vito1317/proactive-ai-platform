@@ -52,8 +52,12 @@ class ChatStreamController extends Controller
                 flush();
             };
 
+            $trace = [];
             // 每一步都回報給前端（活動軌跡）
-            $onStep = fn (string $text) => $emit('step', ['text' => $text]);
+            $onStep = function (string $text) use ($emit, &$trace) {
+                $trace[] = $text;
+                $emit('step', ['text' => $text]);
+            };
             // 心跳：任何 LLM 等待期間持續送 keepalive；同時檢查中止旗標——
             // 一旦使用者按「終止」，丟 StopStreaming 連阻塞中的 LLM 請求都會被即時打斷。
             $abortKey = "pai:chat:abort:{$conv->id}";
@@ -73,7 +77,7 @@ class ChatStreamController extends Controller
                 // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理（含進度回報）
                 if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep)) {
                     $this->emitTyped($emit, $resolved['reply']);
-                    $conv->addMessage('assistant', $resolved['reply'], $resolved['meta']);
+                    $conv->addMessage('assistant', $resolved['reply'], array_merge($resolved['meta'], ['trace' => $trace]));
                     $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
 
                     return;
@@ -123,16 +127,16 @@ class ChatStreamController extends Controller
                     }
                 }
 
-                $conv->addMessage('assistant', $reply, $meta);
+                $conv->addMessage('assistant', $reply, array_merge($meta, ['trace' => $trace]));
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
             } catch (StopStreaming) {
                 // 使用者按「終止」→ 連阻塞中的 LLM 請求都被打斷；存一則「已中止」收尾
-                $conv->addMessage('assistant', '（已中止回覆）', ['stopped' => true]);
+                $conv->addMessage('assistant', '（已中止回覆）', ['stopped' => true, 'trace' => $trace]);
                 $emit('stopped', []);
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => ['stopped' => true]]);
             } catch (Throwable $e) {
                 // 一律存一則回覆，避免對話永遠卡在「生成中」（前端輪詢才會結束）
-                $conv->addMessage('assistant', '抱歉，這次處理失敗了：'.$e->getMessage().'　可以再試一次或換個說法。', ['error' => true]);
+                $conv->addMessage('assistant', '抱歉，這次處理失敗了：'.$e->getMessage().'　可以再試一次或換個說法。', ['error' => true, 'trace' => $trace]);
                 $emit('error', ['text' => 'AI 回覆失敗：'.$e->getMessage()]);
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => ['error' => true]]);
             } finally {

@@ -76,6 +76,21 @@ function onEnter(e) {
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 let controller = null;
 
+/* ---------- 歷程動畫對照表 ---------- */
+const stepIcons = {
+    '感知': '📡', '分析': '🧠', '載入': '📚', '讀取': '📚', '修改': '🛠️', 
+    '執行': '⚡', '驗證': '🛡️', '通知': '🔔', '連線': '🔗', '喚醒': '🦾',
+    '思考': '💡', '搜尋': '🔍', '儲存': '💾'
+};
+const getStepIcon = (txt) => Object.entries(stepIcons).find(([k]) => txt.includes(k))?.[1] || '🔹';
+const getStepColor = (txt) => {
+    if (txt.includes('載入') || txt.includes('讀取')) return '#fbbf24'; // amber
+    if (txt.includes('修改') || txt.includes('執行')) return '#f472b6'; // pink
+    if (txt.includes('驗證')) return '#10b981'; // emerald
+    if (txt.includes('喚醒') || txt.includes('分析')) return '#a855f7'; // purple
+    return '#38bdf8'; // sky
+};
+
 // 通知後端設定中止旗標（背景生成迴圈會即時停下並存檔）
 async function requestStop() {
     try {
@@ -218,30 +233,43 @@ function newChat() { router.post('/chat/new'); }
                                 :class="m.role === 'user' ? 'bg-indigo-600 text-white shadow-[0_4px_12px_rgba(79,70,229,0.3)]' : 'border border-white/10 bg-white/5 text-slate-200'">
                                 <!-- 串流中的 AI 泡泡 -->
                                 <template v-if="m.streaming">
-                                    <!-- AI 微型終端機 -->
-                                    <div v-if="steps.length || (!streamed && status)" class="mini-terminal mb-3 rounded-lg border border-sky-500/30 bg-slate-900/90 p-3 font-mono text-xs shadow-[0_0_15px_rgba(56,189,248,0.1)]">
-                                        <div class="mb-2 flex items-center gap-2 border-b border-white/10 pb-1 text-sky-400">
-                                            <span class="relative flex h-2 w-2">
-                                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
-                                                <span class="relative inline-flex h-2 w-2 rounded-full bg-sky-500"></span>
-                                            </span>
-                                            <span class="font-bold">SYSTEM_ACTIVE</span>
-                                            <span v-if="status && !streamed && !steps.length" class="ml-auto text-slate-400 animate-pulse">{{ status }}</span>
-                                        </div>
-                                        <div class="space-y-1.5 pl-1 text-slate-300">
-                                            <div v-for="(s, i) in steps" :key="i" class="flex items-start gap-2">
-                                                <span v-if="i < steps.length - 1" class="mt-0.5 text-emerald-400/80">✓</span>
-                                                <span v-else class="mt-0.5 text-sky-400">></span>
-                                                <span :class="{ 'text-sky-300 font-medium': i === steps.length - 1 }">
-                                                    {{ s }}<span v-if="i === steps.length - 1 && !streamed" class="typing-cursor-chat">_</span>
-                                                </span>
+                                    <!-- AI 執行歷程動畫圖 (Visual Trace) -->
+                                    <div v-if="steps.length || (!streamed && status)" class="trace-container">
+                                        <div v-for="(s, i) in (steps.length ? steps : [status])" :key="i" class="trace-item">
+                                            <!-- 連接線 (最後一項不畫) -->
+                                            <div v-if="i < (steps.length ? steps.length : 1) - 1" 
+                                                 class="trace-line" 
+                                                 :class="{ 'trace-line--active': true }"
+                                                 :style="{ '--from-color': getStepColor(s), '--to-color': steps[i+1] ? getStepColor(steps[i+1]) : 'transparent' }">
+                                            </div>
+
+                                            <!-- 節點 -->
+                                            <div class="trace-node" 
+                                                 :class="{ 'trace-node--active': true, 'trace-node--pulsing': i === (steps.length ? steps.length : 1) - 1 && !streamed }"
+                                                 :style="{ '--accent': getStepColor(s) }">
+                                                {{ getStepIcon(s) }}
+                                            </div>
+
+                                            <!-- 標籤 -->
+                                            <div class="trace-label" :class="{ 'trace-label--active': i === (steps.length ? steps.length : 1) - 1 }">
+                                                {{ s }}<span v-if="i === (steps.length ? steps.length : 1) - 1 && !streamed" class="typing-cursor-chat">_</span>
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
                                 </template>
                                 <template v-else>
+                                    <!-- 歷史訊息的歷程圖 (如果有 trace) -->
+                                    <div v-if="m.meta?.trace?.length" class="trace-container opacity-60 hover:opacity-100 transition-opacity">
+                                        <div v-for="(s, i) in m.meta.trace" :key="i" class="trace-item">
+                                            <div v-if="i < m.meta.trace.length - 1" class="trace-line" :style="{ '--from-color': getStepColor(s), '--to-color': getStepColor(m.meta.trace[i+1]) }"></div>
+                                            <div class="trace-node" :style="{ '--accent': getStepColor(s) }">{{ getStepIcon(s) }}</div>
+                                            <div class="trace-label">{{ s }}</div>
+                                        </div>
+                                        <div class="mb-2 border-b border-white/5"></div>
+                                    </div>
+
                                     <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
                                     <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
@@ -374,5 +402,79 @@ function newChat() { router.post('/chat/new'); }
     animation: blink 1s step-end infinite;
     font-weight: bold;
     color: #38bdf8;
+}
+
+/* ---------- 歷程動畫圖 (Visual Trace) ---------- */
+.trace-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 0.75rem;
+    padding-left: 0.5rem;
+}
+.trace-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    position: relative;
+}
+/* 連接線 */
+.trace-line {
+    position: absolute;
+    left: 9px;
+    top: 20px;
+    bottom: -4px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--from-color), var(--to-color, transparent));
+    opacity: 0.3;
+    z-index: 1;
+}
+.trace-line--active {
+    opacity: 0.8;
+    box-shadow: 0 0 8px var(--from-color);
+}
+/* 節點 */
+.trace-node {
+    position: relative;
+    z-index: 10;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #1e293b;
+    border: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    transition: all 0.3s ease;
+}
+.trace-node--active {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px var(--accent), inset 0 0 4px var(--accent);
+    transform: scale(1.1);
+}
+.trace-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: #94a3b8;
+    padding-top: 2px;
+    transition: color 0.3s;
+}
+.trace-label--active {
+    color: #f1f5f9;
+    text-shadow: 0 0 8px rgba(255,255,255,0.3);
+}
+
+@keyframes pulse-ring {
+    0% { transform: scale(0.8); opacity: 0.5; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+.trace-node--pulsing::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+    animation: pulse-ring 1.5s cubic-bezier(0.24, 0, 0.38, 1) infinite;
 }
 </style>
