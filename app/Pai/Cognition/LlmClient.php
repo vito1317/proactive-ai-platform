@@ -118,7 +118,7 @@ class LlmClient
         $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
         $model = (string) $this->settings->get('llm.model');
         $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
-        $timeout = (int) $this->settings->get('llm.timeout');
+        $timeout = (int) ($opts['timeout'] ?? $this->settings->get('llm.timeout'));
 
         try {
             $response = Http::timeout($timeout)
