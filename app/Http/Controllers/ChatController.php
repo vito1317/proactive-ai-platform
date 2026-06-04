@@ -47,7 +47,22 @@ class ChatController extends Controller
             'conversations' => $this->visible($request)
                 ->latest('id')->limit(25)->get(['id', 'title', 'tg_chat_id', 'line_to'])
                 ->map(fn ($c) => ['id' => $c->id, 'title' => $c->title ?? '新對話', 'channel' => $this->channelOf($c)])->all(),
+            // 全雙工語音設定（前端據此連 Socket.IO；密鑰不外露）
+            'voice' => $this->voiceConfig(),
         ]);
+    }
+
+    /** 全雙工語音前端設定（可由 Settings/AI 即時調整）。 */
+    private function voiceConfig(): array
+    {
+        $s = app(\App\Pai\Settings\Settings::class);
+
+        return [
+            'enabled' => (bool) $s->get('voice.fullduplex_enabled', config('pai.voice.fullduplex_enabled')),
+            'url' => (string) $s->get('voice.fullduplex_url', config('pai.voice.fullduplex_url')), // 空=同源
+            'path' => (string) $s->get('voice.fullduplex_path', config('pai.voice.fullduplex_path')),
+            'mode' => 'hybrid', // 原生 S2S + 指令閘門 → 可操控系統
+        ];
     }
 
     public function send(Request $request, ChatResponder $responder): RedirectResponse

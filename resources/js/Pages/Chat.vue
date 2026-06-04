@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { useVoiceChat } from '@/composables/useVoiceChat';
 
 marked.setOptions({ gfm: true, breaks: true });
 // 把 AI 回覆的 Markdown 轉成安全的 HTML（清消 XSS）
@@ -15,7 +16,26 @@ const props = defineProps({
     conversation: { type: Object, required: true },
     messages: { type: Array, default: () => [] },
     conversations: { type: Array, default: () => [] },
+    voice: { type: Object, default: () => ({ enabled: false }) },
 });
+
+/* ---------- 全雙工語音 ---------- */
+const voice = useVoiceChat();
+const voiceTranscript = ref('');
+const voiceReply = ref('');
+function toggleVoice() {
+    if (voice.active.value) { voice.stop(); return; }
+    voice.start(
+        { url: props.voice.url || undefined, path: props.voice.path, mode: props.voice.mode || 'hybrid', conversationId: props.conversation.id },
+        {
+            onTranscript: (t) => { voiceTranscript.value = t; },
+            onAiText: (t) => { voiceReply.value = t; },
+            onStep: (s) => { steps.value.push(s); },
+            onError: () => {},
+        },
+    );
+}
+onUnmounted(() => voice.stop());
 
 const input = ref('');
 const sending = ref(false);
@@ -405,8 +425,18 @@ function newChat() { router.post('/chat/new'); }
                         </span>
                         <button type="button" class="rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-red-300 hover:bg-red-500/20" @click="stopReply">■ 終止</button>
                     </div>
+                    <!-- 全雙工語音狀態列 -->
+                    <div v-if="voice.active.value" class="mb-2 flex items-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1.5 text-[11px] text-indigo-200">
+                        <span class="relative flex h-2.5 w-2.5">
+                            <span class="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" :class="{ 'animate-ping': voice.connected.value }"></span>
+                            <span class="relative inline-flex h-2.5 w-2.5 rounded-full" :class="voice.speaking.value ? 'bg-emerald-400' : 'bg-indigo-400'"></span>
+                        </span>
+                        <span>{{ voice.speaking.value ? 'AI 說話中…' : (voice.status.value || '聆聽中…') }}</span>
+                        <span v-if="voiceTranscript" class="truncate text-slate-400">你：{{ voiceTranscript }}</span>
+                    </div>
                     <form class="flex items-end gap-2" @submit.prevent="send">
                         <textarea v-model="input" rows="1" :placeholder="sending ? '生成中也可直接打字插話…' : '跟 AI 說一句話…'" class="inp flex-1 resize-none" @keydown.enter="onEnter"></textarea>
+                        <button v-if="props.voice.enabled" type="button" class="btn-send" :class="voice.active.value ? '!bg-emerald-600 hover:!bg-emerald-500' : '!bg-slate-700 hover:!bg-slate-600'" :title="voice.active.value ? '關閉全雙工語音' : '開啟全雙工語音（即時對話＋可操控系統）'" @click="toggleVoice">{{ voice.active.value ? '🎙■' : '🎙' }}</button>
                         <button v-if="sending" type="button" class="btn-send !bg-red-600 hover:!bg-red-500" @click="stopReply">■</button>
                         <button type="submit" :disabled="!input.trim()" class="btn-send">{{ sending ? '插話' : '送出' }}</button>
                     </form>
