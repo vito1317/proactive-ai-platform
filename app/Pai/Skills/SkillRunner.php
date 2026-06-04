@@ -184,8 +184,12 @@ class SkillRunner
         {$obsText}
 
         決定下一步，只輸出 JSON：
-        {"thought":"簡述","action":"工具名 或 finish","args":{...},"final":"當 action=finish 時，根據實際結果用繁體中文回覆使用者（解讀重點、不要編造）"}
-        規則：一次一個工具；目標已達成/資訊已足夠/無工具可用 → action=finish 並填 final；破壞性操作前先觀察再動手。
+        {"thought":"簡述","action":"工具名 或 finish","args":{...},"final":"當 action=finish 時，依對話脈絡用繁體中文直接回答使用者；有工具結果就據實解讀、沒有就正常對答，不要編造"}
+        重要規則：
+        - **只有在「需要真實系統資料」或「需要實際執行操作」時才用工具**。單純問答、聊天、釐清、或你不確定該用哪個工具 → 一律 action=finish，並在 final 直接回答使用者的問題（根據對話脈絡），不要硬湊工具。
+        - 嚴禁為了用工具而用工具：不要用 list-domains / describe-domain 去回答與領域包無關的問題。
+        - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
+        - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
         /no_think
         PROMPT;
 

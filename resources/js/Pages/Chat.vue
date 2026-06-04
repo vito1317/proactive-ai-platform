@@ -112,13 +112,10 @@ function onEnter(e) {
     send();
 }
 
-// 最後一則訊息（判斷是否顯示「確認/一律允許/取消」快速按鈕）
-const lastMsg = computed(() => props.messages[props.messages.length - 1]);
-function quickReply(text) {
-    if (sending.value) return;
-    input.value = text;
-    send();
-}
+const formattedStep = (txt) => {
+    // 將 [TAG] 轉為帶樣式的 span
+    return txt.replace(/\[(.*?)\]/, '<span class="opacity-50 text-[9px] font-bold mr-1">$1</span>');
+};
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 let controller = null;
@@ -127,14 +124,20 @@ let controller = null;
 const stepIcons = {
     '感知': '📡', '分析': '🧠', '載入': '📚', '讀取': '📚', '修改': '🛠️', 
     '執行': '⚡', '驗證': '🛡️', '通知': '🔔', '連線': '🔗', '喚醒': '🦾',
-    '思考': '💡', '搜尋': '🔍', '儲存': '💾'
+    '思考': '💡', '搜尋': '🔍', '儲存': '💾', 'INTENT': '💠', 'SYNTHESIS': '🧠',
+    'EXECUTING': '⚙️', 'DECODING': '💠'
 };
-const getStepIcon = (txt) => Object.entries(stepIcons).find(([k]) => txt.includes(k))?.[1] || '🔹';
+const getStepIcon = (txt) => {
+    const icon = Object.entries(stepIcons).find(([k]) => txt.includes(k))?.[1];
+    if (icon) return icon;
+    return '💠'; // 高科技感預設圖示
+};
 const getStepColor = (txt) => {
     if (txt.includes('載入') || txt.includes('讀取')) return '#fbbf24'; // amber
-    if (txt.includes('修改') || txt.includes('執行')) return '#f472b6'; // pink
-    if (txt.includes('驗證')) return '#10b981'; // emerald
-    if (txt.includes('喚醒') || txt.includes('分析')) return '#a855f7'; // purple
+    if (txt.includes('修改') || txt.includes('執行') || txt.includes('EXECUTING')) return '#f472b6'; // pink
+    if (txt.includes('驗證') || txt.includes('OK')) return '#10b981'; // emerald
+    if (txt.includes('喚醒') || txt.includes('分析') || txt.includes('SYNTHESIS')) return '#a855f7'; // purple
+    if (txt.includes('INTENT') || txt.includes('DECODING')) return '#22d3ee'; // cyan
     return '#38bdf8'; // sky
 };
 
@@ -176,6 +179,7 @@ async function send() {
     lastSent.value = msg;
     input.value = '';
     streamed.value = '';
+    thought.value = '';
     steps.value = [];
     errorText.value = '';
     status.value = '送出中…';
@@ -208,19 +212,7 @@ async function send() {
             }
         }
     } catch (e) {
-        // SSE 被 WAF/HTTP2 擋掉或斷線（非使用者主動中止）→ 自動改用非串流後備（背景處理 + 輪詢）
-        if (e.name !== 'AbortError') {
-            try {
-                await fetch('/chat/queue', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
-                    body: JSON.stringify({ conversation_id: convId, message: msg }),
-                });
-                // 不報錯——交給輪詢帶出結果
-            } catch (e2) {
-                errorText.value = 'AI 回覆失敗，請稍後再試';
-            }
-        }
+        if (e.name !== 'AbortError') errorText.value = e.message || 'AI 回覆失敗';
     } finally {
         sending.value = false;
         controller = null;
@@ -241,6 +233,7 @@ async function send() {
 
         if (event === 'status') { if (!streamed.value) status.value = payload.text; }
         else if (event === 'step') { steps.value.push(payload.text); status.value = ''; }
+        else if (event === 'thought') { thought.value += payload.text; }
         else if (event === 'delta') { status.value = ''; streamed.value += payload.text; }
         else if (event === 'stopped') { status.value = '已終止'; }
         else if (event === 'done') { convId = payload.conversation_id ?? convId; }
@@ -291,6 +284,15 @@ function newChat() { router.post('/chat/new'); }
                                 :class="m.role === 'user' ? 'bg-indigo-600 text-white shadow-[0_4px_12px_rgba(79,70,229,0.3)]' : 'border border-white/10 bg-white/5 text-slate-200'">
                                 <!-- 串流中的 AI 泡泡 -->
                                 <template v-if="m.streaming">
+                                    <!-- AI 思考過程 (Reasoning/Thought) -->
+                                    <div v-if="thought" class="mb-3 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-[11px] leading-relaxed text-purple-200/80">
+                                        <div class="mb-1.5 flex items-center gap-1.5 font-bold tracking-tight text-purple-400 uppercase">
+                                            <span class="h-1 w-1 rounded-full bg-purple-400 animate-pulse"></span>
+                                            COGNITIVE_ENGINE // 思考中
+                                        </div>
+                                        <div class="whitespace-pre-wrap italic opacity-80">{{ thought }}<span class="typing-cursor-chat">_</span></div>
+                                    </div>
+
                                     <!-- AI 執行歷程動畫圖 (Visual Trace) -->
                                     <div v-if="steps.length || (!streamed && status)" class="trace-container">
                                         <div v-for="(s, i) in (steps.length ? steps : [status])" :key="i" class="trace-item">
@@ -304,32 +306,35 @@ function newChat() { router.post('/chat/new'); }
                                                 {{ getStepIcon(s) }}
                                             </div>
                                             <div class="trace-label trace-label--active">
-                                                {{ s }}<span v-if="i === (steps.length ? steps.length : 1) - 1 && !streamed" class="typing-cursor-chat">_</span>
+                                                <span v-html="formattedStep(s)"></span><span v-if="i === (steps.length ? steps : [status]).length - 1 && !streamed" class="typing-cursor-chat">_</span>
                                             </div>
                                         </div>
                                     </div>
                                     <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
                                 </template>
                                 <template v-else>
+                                    <!-- 歷史訊息的思考過程 -->
+                                    <div v-if="m.meta?.reasoning || m.meta?.trace?.some(s => s.includes('思考'))" class="mb-3 rounded-lg border border-white/5 bg-white/5 p-2.5 text-[10px] leading-relaxed text-slate-400">
+                                        <details class="group">
+                                            <summary class="flex cursor-pointer list-none items-center gap-1.5 font-bold uppercase tracking-widest text-slate-500 group-open:text-purple-400/80 transition-colors">
+                                                <span class="transition-transform group-open:rotate-90">▶</span> 🔍 思考過程 (Reasoning)
+                                            </summary>
+                                            <div class="mt-2 whitespace-pre-wrap italic border-l border-white/10 pl-3 py-1">{{ m.meta.reasoning || '透過神經網絡分析中...' }}</div>
+                                        </details>
+                                    </div>
+
                                     <!-- 歷史訊息的歷程圖 (如果有 trace) -->
                                     <div v-if="m.meta?.trace?.length" class="trace-container opacity-60 hover:opacity-100 transition-opacity">
                                         <div v-for="(s, i) in m.meta.trace" :key="i" class="trace-item">
                                             <div v-if="i < m.meta.trace.length - 1" class="trace-line" :style="{ '--from-color': getStepColor(s), '--to-color': getStepColor(m.meta.trace[i+1]) }"></div>
                                             <div class="trace-node" :style="{ '--accent': getStepColor(s) }">{{ getStepIcon(s) }}</div>
-                                            <div class="trace-label">{{ s }}</div>
+                                            <div class="trace-label" v-html="formattedStep(s)"></div>
                                         </div>
                                         <div class="mb-2 border-b border-white/5"></div>
                                     </div>
                                     <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
-
-                                    <!-- 待確認高風險操作：快速回覆按鈕（只在最後一則顯示） -->
-                                    <div v-if="m.meta?.pending && m.id === lastMsg?.id && !sending" class="mt-2 flex flex-wrap gap-2">
-                                        <button type="button" class="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500" @click="quickReply('確認')">✓ 確認</button>
-                                        <button type="button" class="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300 hover:bg-amber-500/20" @click="quickReply('一律允許')">🔓 一律允許</button>
-                                        <button type="button" class="rounded-lg border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:bg-white/10" @click="quickReply('取消')">✕ 取消</button>
-                                    </div>
-
+                                    
                                     <!-- 操作進度與動畫 (歷史項目) -->
                                     <div v-if="catLabel(m.meta)" class="mt-3 space-y-1.5 border-t border-white/10 pt-2">
                                         <div class="flex items-center justify-between text-[10px] font-bold tracking-tighter uppercase">
@@ -369,7 +374,7 @@ function newChat() { router.post('/chat/new'); }
                                     <div class="grid grid-cols-1 gap-1 text-[10px] text-slate-400">
                                         <template v-if="eventStatuses[conversation.active_event_id]?.runs?.[0]?.steps?.length">
                                             <div v-for="(s, idx) in eventStatuses[conversation.active_event_id].runs[0].steps" :key="idx" class="flex items-center gap-2">
-                                                <span class="text-emerald-500 opacity-70">>></span> {{ s }} [OK]
+                                                <span class="text-emerald-500 opacity-70">>></span> <span v-html="formattedStep(s.thought || s)"></span> [OK]
                                             </div>
                                             <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在產出最終結果...<span class="typing-cursor-chat">_</span></div>
                                         </template>

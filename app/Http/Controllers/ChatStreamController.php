@@ -83,7 +83,7 @@ class ChatStreamController extends Controller
                     return;
                 }
 
-                $onStep('🧭 判斷意圖中…');
+                $onStep('💠 [INTENT_DECODING] 正在解碼指令意圖...');
                 $category = $responder->category($conv, $message);
 
                 $reply = '';
@@ -108,8 +108,10 @@ class ChatStreamController extends Controller
                         'payload' => ['message' => $message, 'conversation_id' => $conv->id],
                         'status' => EventStatus::Received,
                     ]);
-                    $onStep('⚙️ 背景處理中…');
+                    $onStep('⚙️ [SYSTEM_EXECUTING] 正在背景執行任務...');
                     RouteCommandJob::dispatch($event->id);
+
+                    $meta['event_id'] = $event->id;
 
                     // 只串流一段「暫態」提示（不存成訊息）；真正回覆由 RouteCommandJob 寫回，前端輪詢帶出
                     foreach (mb_str_split('收到，正在背景處理，完成後會把結果回覆到這裡…', 6) as $chunk) {
@@ -153,7 +155,7 @@ class ChatStreamController extends Controller
      */
     private function streamChatReply(LlmClient $llm, ChatResponder $responder, Conversation $conv, callable $emit, callable $onStep): array
     {
-        $onStep('💭 思考中…');
+        $onStep('🧠 [COGNITIVE_SYNTHESIS] 正在合成認知邏輯...');
         $emit('status', ['text' => '思考中…']);
         $abortKey = "pai:chat:abort:{$conv->id}";
         Cache::forget($abortKey); // 清掉上一輪的殘留旗標
