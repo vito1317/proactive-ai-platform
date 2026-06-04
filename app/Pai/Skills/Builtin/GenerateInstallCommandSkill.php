@@ -28,6 +28,11 @@ class GenerateInstallCommandSkill implements Skill
             'port' => 'nginx 監聽埠（預設 8083）',
             'with_systemd' => '是否安裝 systemd 服務（true/false，預設 true）',
             'prod' => '是否 production 安裝（true/false）',
+            'include_secrets' => '是否把本實例的 AI 金鑰/語音密鑰一併帶入（true/false，預設 false）',
+            'voice' => '是否帶入語音設定（STT/全雙工/人格）（true/false，預設依目前是否啟用全雙工）',
+            'admin_email' => '免互動建立管理員的 Email（選填，搭配 admin_password）',
+            'admin_password' => '免互動建立管理員的密碼（選填）',
+            'set' => '額外要寫入 .env 的鍵值（物件，如 {"PAI_LLM_TIMEOUT":"240"}）',
         ];
     }
 
@@ -44,10 +49,11 @@ class GenerateInstallCommandSkill implements Skill
         $llmModel = (string) $this->settings->get('llm.model');
 
         $bool = fn ($v, $default = false) => filter_var($v ?? $default, FILTER_VALIDATE_BOOLEAN);
+        $arg = fn ($v) => escapeshellarg((string) $v);
         $flags = [
-            '--repo '.escapeshellarg($repo),
-            '--llm-url '.escapeshellarg($llmUrl),
-            '--llm-model '.escapeshellarg($llmModel),
+            '--repo '.$arg($repo),
+            '--llm-url '.$arg($llmUrl),
+            '--llm-model '.$arg($llmModel),
         ];
         if ($bool($args['prod'] ?? null)) {
             $flags[] = '--prod';
@@ -61,13 +67,63 @@ class GenerateInstallCommandSkill implements Skill
                 return '要設定 nginx 的話，請告訴我網域（domain）。';
             }
             $port = (int) ($args['port'] ?? 8083) ?: 8083;
-            $flags[] = '--with-nginx --domain '.escapeshellarg($domain).' --port '.$port;
+            $flags[] = '--with-nginx --domain '.$arg($domain).' --port '.$port;
+        }
+
+        // 機密：AI 金鑰 + 語音橋接密鑰（預設不帶，避免外洩；明確要求才帶入）
+        $secretsNote = '';
+        if ($bool($args['include_secrets'] ?? null)) {
+            $apiKey = (string) $this->settings->get('llm.api_key');
+            $voiceSecret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
+            if ($apiKey !== '' && $apiKey !== 'sk-local') {
+                $flags[] = '--llm-key '.$arg($apiKey);
+            }
+            if ($voiceSecret !== '') {
+                $flags[] = '--voice-secret '.$arg($voiceSecret);
+            }
+            $secretsNote = "\n⚠️ 指令含機密（AI 金鑰／語音密鑰），請只在私下傳遞、勿貼到公開處。";
+        }
+
+        // 語音設定（STT/全雙工/人格）—— 預設依目前是否啟用全雙工
+        $wantVoice = $bool($args['voice'] ?? null, (bool) $this->settings->get('voice.fullduplex_enabled', false));
+        if ($wantVoice) {
+            $stt = (string) $this->settings->get('voice.stt_url', config('pai.voice.stt_url'));
+            $fdUrl = (string) $this->settings->get('voice.fullduplex_url', config('pai.voice.fullduplex_url'));
+            $prompt = (string) $this->settings->get('voice.system_prompt', config('pai.voice.system_prompt'));
+            if ($stt !== '') {
+                $flags[] = '--voice-stt-url '.$arg($stt);
+            }
+            if ($fdUrl !== '') {
+                $flags[] = '--voice-fd-url '.$arg($fdUrl);
+            }
+            if ($prompt !== '') {
+                $flags[] = '--voice-prompt '.$arg($prompt);
+            }
+        }
+
+        // 免互動管理員
+        if (trim((string) ($args['admin_email'] ?? '')) !== '') {
+            $flags[] = '--admin-email '.$arg($args['admin_email']);
+        }
+        if (trim((string) ($args['admin_password'] ?? '')) !== '') {
+            $flags[] = '--admin-password '.$arg($args['admin_password']);
+        }
+
+        // 任意額外 .env（--set KEY=VALUE，可多筆）
+        $extra = $args['set'] ?? null;
+        if (is_array($extra)) {
+            foreach ($extra as $k => $v) {
+                if (is_string($k) && $k !== '') {
+                    $flags[] = '--set '.$arg($k.'='.$v);
+                }
+            }
         }
 
         $cmd = "curl -fsSL {$base}/install.sh | bash -s -- ".implode(' ', $flags);
 
         return "這是你的一鍵安裝指令（在目標機器的終端機執行）：\n\n{$cmd}\n\n"
-            .'說明：腳本會自動 git clone 原始碼、安裝相依、建 DB、建前端、寫好 AI 端點，'
-            .'並依你的選項設定 nginx / systemd。安裝時會詢問管理員 Email 與密碼（或先設環境變數 ADMIN_EMAIL／ADMIN_PASSWORD 免互動）。';
+            .'說明：腳本會自動 git clone 原始碼、安裝相依、建 DB、建前端、寫好 AI 端點/語音設定，'
+            .'並依你的選項設定 nginx / systemd。可用 --set KEY=VALUE 帶入任意 .env 設定。'
+            .'未帶 --admin-email/--admin-password 時安裝會互動詢問管理員帳密。'.$secretsNote;
     }
 }

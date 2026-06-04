@@ -11,6 +11,13 @@
 #   --with-systemd                      安裝 queue worker + scheduler 系統服務
 #   --repo URL / --branch B / --dir D   原始碼來源（curl 模式自動 git clone）
 #   --llm-url URL / --llm-model NAME    AI 後端端點/模型（寫入 .env）
+#   --llm-key KEY                       AI API 金鑰（寫入 .env）
+#   --voice-stt-url URL                 語音轉文字端點
+#   --voice-fd-url URL                  全雙工語音 Socket.IO 來源
+#   --voice-secret SECRET               語音橋接共用密鑰
+#   --voice-prompt TEXT                 語音助理人格
+#   --admin-email X --admin-password Y  免互動建立管理員
+#   --set KEY=VALUE                     寫入任意 .env（可重複，帶入任何設定）
 #   環境變數：ADMIN_EMAIL, ADMIN_PASSWORD（免互動建立管理員）
 #
 set -euo pipefail
@@ -27,7 +34,13 @@ BRANCH=""
 TARGET_DIR="${PAI_TARGET_DIR:-proactive-ai-platform}"
 LLM_URL="${PAI_LLM_BASE_URL:-}"
 LLM_MODEL="${PAI_LLM_MODEL:-}"
+LLM_KEY="${PAI_LLM_API_KEY:-}"
+VOICE_STT_URL="${PAI_STT_URL:-}"
+VOICE_FD_URL="${PAI_VOICE_FD_URL:-}"
+VOICE_SECRET="${VOICE_AGENT_SECRET:-}"
+VOICE_PROMPT="${PAI_VOICE_PROMPT:-}"
 RUN_USER="${SUDO_USER:-$(id -un)}"
+declare -a EXTRA_ENV=()   # 由 --set KEY=VALUE 帶入的任意 .env
 ORIG_ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -42,6 +55,14 @@ while [[ $# -gt 0 ]]; do
     --dir) TARGET_DIR="$2"; shift 2 ;;
     --llm-url) LLM_URL="$2"; shift 2 ;;
     --llm-model) LLM_MODEL="$2"; shift 2 ;;
+    --llm-key) LLM_KEY="$2"; shift 2 ;;
+    --voice-stt-url) VOICE_STT_URL="$2"; shift 2 ;;
+    --voice-fd-url) VOICE_FD_URL="$2"; shift 2 ;;
+    --voice-secret) VOICE_SECRET="$2"; shift 2 ;;
+    --voice-prompt) VOICE_PROMPT="$2"; shift 2 ;;
+    --admin-email) ADMIN_EMAIL="$2"; export ADMIN_EMAIL; shift 2 ;;
+    --admin-password) ADMIN_PASSWORD="$2"; export ADMIN_PASSWORD; shift 2 ;;
+    --set) EXTRA_ENV+=("$2"); shift 2 ;;
     -h|--help) awk 'NR>1 && /^set /{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
     *) echo "未知參數：$1"; exit 1 ;;
   esac
@@ -115,11 +136,23 @@ sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/' .env
 [[ -f database/database.sqlite ]] || touch database/database.sqlite
 
 # 由參數自動帶入設定（一鍵安裝免手改 .env）
-[[ -n "$DOMAIN" ]]     && set_env APP_URL "https://$DOMAIN"
-[[ -n "$LLM_URL" ]]    && set_env PAI_LLM_BASE_URL "$LLM_URL"
-[[ -n "$LLM_MODEL" ]]  && set_env PAI_LLM_MODEL "$LLM_MODEL"
+[[ -n "$DOMAIN" ]]         && set_env APP_URL "https://$DOMAIN"
+[[ -n "$LLM_URL" ]]        && set_env PAI_LLM_BASE_URL "$LLM_URL"
+[[ -n "$LLM_MODEL" ]]      && set_env PAI_LLM_MODEL "$LLM_MODEL"
+[[ -n "$LLM_KEY" ]]        && set_env PAI_LLM_API_KEY "$LLM_KEY"
+[[ -n "$VOICE_STT_URL" ]]  && set_env PAI_STT_URL "$VOICE_STT_URL"
+[[ -n "$VOICE_FD_URL" ]]   && set_env PAI_VOICE_FD_URL "$VOICE_FD_URL"
+[[ -n "$VOICE_SECRET" ]]   && set_env VOICE_AGENT_SECRET "$VOICE_SECRET"
+[[ -n "$VOICE_PROMPT" ]]   && set_env PAI_VOICE_PROMPT "$VOICE_PROMPT"
 set_env PAI_REPO_URL "$REPO_URL"
-[[ -n "$DOMAIN$LLM_URL$LLM_MODEL" ]] && echo "  已寫入：APP_URL / PAI_LLM_* 等設定"
+# --set KEY=VALUE：帶入任意 .env（可重複）
+for kv in "${EXTRA_ENV[@]:-}"; do
+  [[ -z "$kv" ]] && continue
+  [[ "$kv" != *=* ]] && { warn "略過無效 --set（需 KEY=VALUE）：$kv"; continue; }
+  set_env "${kv%%=*}" "${kv#*=}"
+  echo "  已寫入 ${kv%%=*}"
+done
+[[ -n "$DOMAIN$LLM_URL$LLM_MODEL$LLM_KEY$VOICE_STT_URL$VOICE_FD_URL$VOICE_SECRET" ]] && echo "  已寫入：APP_URL / PAI_LLM_* / 語音等設定"
 
 # ---------- 4. 資料庫遷移 ----------
 step "建立資料庫結構 (migrate)"
