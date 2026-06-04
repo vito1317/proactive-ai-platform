@@ -49,6 +49,12 @@ class ChatResponder
             return ['stream' => false, ...$resolved];
         }
 
+        // 2) 自訂斜線指令 /name → 展開成內容後照常處理（聊天室/TG/LINE 共用）
+        if ($expanded = app(SlashCommands::class)->expand($userMessage)) {
+            $step('⚡ 執行自訂指令…');
+            $userMessage = $expanded;
+        }
+
         $step('🧭 判斷意圖中…');
         $category = $this->category($conv, $userMessage);
         if ($category === 'chat') {

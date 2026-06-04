@@ -2,6 +2,7 @@
 
 namespace App\Pai\Skills;
 
+use App\Pai\Skills\Builtin\AddCommandSkill;
 use App\Pai\Skills\Builtin\AddMcpServerSkill;
 use App\Pai\Skills\Builtin\AnswerFromWebSkill;
 use App\Pai\Skills\Builtin\DescribeDomainSkill;
@@ -9,11 +10,13 @@ use App\Pai\Skills\Builtin\EditFileSkill;
 use App\Pai\Skills\Builtin\GenerateInstallCommandSkill;
 use App\Pai\Skills\Builtin\GetSettingsSkill;
 use App\Pai\Skills\Builtin\InsertInFileSkill;
+use App\Pai\Skills\Builtin\ListCommandsSkill;
 use App\Pai\Skills\Builtin\ListDomainsSkill;
 use App\Pai\Skills\Builtin\ListMcpServersSkill;
 use App\Pai\Skills\Builtin\MergeDomainsSkill;
 use App\Pai\Skills\Builtin\OpenAppSkill;
 use App\Pai\Skills\Builtin\ReadFileSkill;
+use App\Pai\Skills\Builtin\RemoveCommandSkill;
 use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
 use App\Pai\Skills\Builtin\RestartWorkersSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
@@ -56,6 +59,10 @@ class SkillRegistry
         RemoveMcpServerSkill::class,
         // 部署
         GenerateInstallCommandSkill::class,
+        // 自訂斜線指令
+        AddCommandSkill::class,
+        ListCommandsSkill::class,
+        RemoveCommandSkill::class,
     ];
 
     /** @var array<string,Skill>|null */

@@ -48,6 +48,9 @@ class SkillRunner
             'list-mcp-servers' => '🔌 盤點 MCP 工具…',
             'remove-mcp-server' => '🔌 移除 MCP 工具…',
             'generate-install-command' => '📦 產生安裝指令…',
+            'add-command' => '⌨️ 新增自訂指令…',
+            'list-commands' => '⌨️ 盤點自訂指令…',
+            'remove-command' => '⌨️ 移除自訂指令…',
         ][$skill->name()] ?? ('🔧 '.$skill->description().'…');
     }
 

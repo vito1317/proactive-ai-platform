@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
+use App\Pai\Chat\SlashCommands;
 use App\Pai\Chat\StopStreaming;
 use App\Pai\Cognition\LlmClient;
 use App\Pai\Cognition\RouteCommandJob;
@@ -81,6 +82,12 @@ class ChatStreamController extends Controller
                     $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
 
                     return;
+                }
+
+                // 自訂斜線指令 /name → 展開成內容後照常處理
+                if ($expanded = app(SlashCommands::class)->expand($message)) {
+                    $onStep('⚡ 執行自訂指令…');
+                    $message = $expanded;
                 }
 
                 $onStep('💠 [INTENT_DECODING] 正在解碼指令意圖...');

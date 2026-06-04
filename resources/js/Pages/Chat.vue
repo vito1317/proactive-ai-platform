@@ -364,7 +364,7 @@ function newChat() { router.post('/chat/new'); }
                                     <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
                                     <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
                                     <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
-                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🧠</div>
+                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🧠</div>
                                 </div>
                                 <div class="flex-1 space-y-2 font-mono text-xs">
                                     <div class="flex items-center justify-between text-sky-300">
