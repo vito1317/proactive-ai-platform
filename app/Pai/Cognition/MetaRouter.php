@@ -26,11 +26,41 @@ class MetaRouter
         'webhook', '日誌', 'log', '重跑', '產生', '生成',
     ];
 
+    /**
+     * 強制技能訊號：訊息含這些「明確要實際執行/查系統」的記號時，
+     * 直接判為 skill（要真的動手做），不交給慢又不穩的 LLM 分類。
+     * 這解決「使用者明明叫我安裝/跑指令，卻被當閒聊只回『我來執行』」的問題。
+     */
+    private const SKILL_FORCE = [
+        // shell / 安裝 / 套件
+        'curl ', 'wget ', '| bash', '|bash', 'bash <', 'sh -c', '.sh', 'install.sh', 'sudo ',
+        'apt ', 'apt-get', 'yum ', 'dnf ', 'brew ', 'npm ', 'pnpm ', 'yarn ', 'pip ', 'composer ',
+        'git clone', 'chmod', 'chown', './', 'systemctl', 'service ', 'journalctl',
+        // docker / nginx / 系統檢查
+        'docker ', 'docker exec', 'nginx', 'php-fpm', 'df -h', 'df ', 'free -', 'ps aux', 'ps -ef',
+        'top ', 'netstat', 'ss -', 'lsof', 'uptime', 'uname',
+        // 路徑（要讀/查實際檔案）
+        '/etc/', '/var/', '/opt/', '/usr/', '/home/', '/tmp/', '.conf', '.log', '.yaml', '.yml',
+        // 明確執行 / 讀取 / 狀態確認 動詞片語
+        '安裝', '跑指令', '跑一下', '跑個', '執行指令', '執行這', '執行終端', '執行 docker', '執行一下',
+        '讀取檔', '讀檔', '讀取 nginx', '讀取設定', '看 log', '看日誌', '查看 log', '查看日誌',
+        '查看設定', '查設定', '看設定檔', '查看 nginx', '查 nginx', 'tail ',
+        '好了嗎', '成功了嗎', '裝好了嗎', '完成了嗎', '跑完了嗎', '裝好沒', '好了沒',
+    ];
+
     /** @return array{category: string, reason: string} */
     public function classify(string $message): array
     {
-        // 快速路徑：無任何動作訊號 → 直接當閒聊，不呼叫 LLM（分類呼叫在慢速思考模型上要 1～2 分鐘）
         $lower = mb_strtolower($message);
+
+        // 最高優先：明確要實際執行/查系統 → 直接 skill（不靠 LLM，快又穩）
+        foreach (self::SKILL_FORCE as $kw) {
+            if (str_contains($lower, $kw)) {
+                return ['category' => 'skill', 'reason' => "明確執行/查系統訊號「{$kw}」→ 直接動手"];
+            }
+        }
+
+        // 快速路徑：無任何動作訊號 → 直接當閒聊，不呼叫 LLM（分類呼叫在慢速思考模型上要 1～2 分鐘）
         $hasHint = false;
         foreach (self::ACTION_HINTS as $h) {
             if (str_contains($lower, $h)) {
