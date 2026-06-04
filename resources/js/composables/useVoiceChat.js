@@ -3,140 +3,124 @@ import { io } from 'socket.io-client';
 
 /**
  * 全雙工語音（瀏覽器 ↔ voice_server :8891 Socket.IO）。
- * 協定（與電話 bridge 相同）：
- *   送：prompt_text{mode,conversation_id} · audio(JSON{audio:[…uint8],sample_rate:16000}) · recording-started/stopped
- *   收：audio(PCM16 24kHz bytes) · ai_text · user_transcript · agent_step · stop_tts
- * 麥克風 48k→16k 降採樣後逐段送；回傳音訊 24k 佇列播放；說話時送 recording-started 打斷 TTS。
+ * 寫法對齊 intellitrust-website 的 VoiceCallWidget（已驗證可用）：
+ *   - 擷取：AudioContext(16k) + Gain 2.0 + ScriptProcessor(2048,1,1) → emit audio(JSON)
+ *   - 播放：每段 PCM16(24k) 進佇列、逐段以 AudioContext 播
+ *   - 送：prompt_text{mode,conversation_id} · recording-started · audio
+ *   - 收：audio · ai_text · user_transcript · agent_step · stop_tts
  */
 export function useVoiceChat() {
-    const active = ref(false);     // 語音模式開啟中
-    const connected = ref(false);  // socket 已連
-    const speaking = ref(false);   // AI 正在說（播放中）
-    const status = ref('');        // 狀態文字
+    const active = ref(false);
+    const connected = ref(false);
+    const speaking = ref(false);
+    const status = ref('');
 
     let socket = null;
-    let micCtx = null, micStream = null, micNode = null, micSource = null;
-    let playCtx = null, playQueue = [], playHead = 0, playing = false;
-    let handlers = {};
+    let micStream = null, audioCtx = null, scriptNode = null, gainNode = null;
+    let audioQueue = [], isPlayingAudio = false;
+    let handlers = {}, cfg = {};
 
-    const IN_SR = 16000, OUT_SR = 24000;
-
-    function emit(name, payload) { socket && socket.connected && socket.emit(name, payload); }
-
-    // ── 播放：把收到的 PCM16(24k) 接成連續音流 ──
-    function enqueuePcm(arrayBuf) {
-        if (!playCtx) return;
-        const i16 = new Int16Array(arrayBuf);
-        if (!i16.length) return;
-        const f32 = new Float32Array(i16.length);
-        for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
-        const buf = playCtx.createBuffer(1, f32.length, OUT_SR);
-        buf.getChannelData(0).set(f32);
-        const t = Math.max(playCtx.currentTime, playHead);
-        const src = playCtx.createBufferSource();
+    function playNext() {
+        if (isPlayingAudio || audioQueue.length === 0) return;
+        isPlayingAudio = true;
+        const pcm16 = audioQueue.shift();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+        const buf = ctx.createBuffer(1, pcm16.length, 24000);
+        const ch = buf.getChannelData(0);
+        for (let i = 0; i < pcm16.length; i++) ch[i] = pcm16[i] / 32768.0;
+        const src = ctx.createBufferSource();
         src.buffer = buf;
-        src.connect(playCtx.destination);
-        src.start(t);
-        playHead = t + buf.duration;
-        playQueue.push(src);
-        speaking.value = true;
+        src.connect(ctx.destination);
         src.onended = () => {
-            playQueue = playQueue.filter((s) => s !== src);
-            if (!playQueue.length) speaking.value = false;
+            ctx.close().catch(() => {});
+            isPlayingAudio = false;
+            if (audioQueue.length > 0) playNext();
+            else speaking.value = false;
         };
+        src.start(0);
     }
 
-    function stopPlayback() {
-        playQueue.forEach((s) => { try { s.stop(); } catch (e) { /* noop */ } });
-        playQueue = [];
-        playHead = playCtx ? playCtx.currentTime : 0;
-        speaking.value = false;
-    }
+    async function startListening() {
+        micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        const source = audioCtx.createMediaStreamSource(micStream);
+        // 放大麥克風，確保伺服器 VAD 能偵測到語音（過小聲會斷不了句 → 沒反應）
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = 2.0;
+        source.connect(gainNode);
+        scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+        gainNode.connect(scriptNode);
+        scriptNode.connect(audioCtx.destination);
+        const nativeSR = audioCtx.sampleRate;
 
-    // ── 擷取麥克風：48k → 16k → int16 → 逐段送 ──
-    function startMic() {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        micCtx = new Ctx();
-        if (micCtx.state === 'suspended') micCtx.resume();
-        micSource = micCtx.createMediaStreamSource(micStream);
-        const bufSize = 4096;
-        // 需 ≥1 output channel，onaudioprocess 才會在多數瀏覽器觸發（先前設 0 → 不觸發）
-        micNode = micCtx.createScriptProcessor(bufSize, 1, 1);
-        const ratio = micCtx.sampleRate / IN_SR;
-        let wasSpeaking = false;
-        micNode.onaudioprocess = (e) => {
+        scriptNode.onaudioprocess = (e) => {
+            if (!socket || !socket.connected) return;
             const input = e.inputBuffer.getChannelData(0);
-            // 簡易降採樣（取樣 + 平均）到 16kHz
-            const outLen = Math.floor(input.length / ratio);
-            const i16 = new Int16Array(outLen);
-            for (let i = 0; i < outLen; i++) {
-                const start = Math.floor(i * ratio);
-                let s = input[start] || 0;
-                s = Math.max(-1, Math.min(1, s));
-                i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            let pcmFloat;
+            if (nativeSR !== 16000) {
+                const ratio = nativeSR / 16000;
+                const len = Math.round(input.length / ratio);
+                pcmFloat = new Float32Array(len);
+                for (let i = 0; i < len; i++) pcmFloat[i] = input[Math.round(i * ratio)];
+            } else {
+                pcmFloat = new Float32Array(input);
             }
-            // 偵測本地語音能量 → 打斷 AI（barge-in）
-            if (speaking.value) {
-                let energy = 0;
-                for (let i = 0; i < outLen; i++) energy += Math.abs(i16[i]);
-                if (energy / outLen > 600 && !wasSpeaking) {
-                    wasSpeaking = true;
-                    emit('recording-started');
-                    stopPlayback();
-                } else if (energy / outLen <= 400) {
-                    wasSpeaking = false;
-                }
+            const pcm16 = new Int16Array(pcmFloat.length);
+            for (let i = 0; i < pcmFloat.length; i++) {
+                const s = Math.max(-1, Math.min(1, pcmFloat[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
-            const bytes = new Uint8Array(i16.buffer);
-            emit('audio', JSON.stringify({ audio: Array.from(bytes), sample_rate: IN_SR }));
-            // 輸出填靜音，避免麥克風回授到喇叭
+            socket.emit('audio', JSON.stringify({ audio: Array.from(new Uint8Array(pcm16.buffer)), sample_rate: 16000 }));
+            // 輸出靜音，避免回授
             const out = e.outputBuffer.getChannelData(0);
             for (let i = 0; i < out.length; i++) out[i] = 0;
         };
-        micSource.connect(micNode);
-        micNode.connect(micCtx.destination); // ScriptProcessor 需連到 destination 才會觸發
+
+        status.value = '請說話';
+        socket.emit('prompt_text', { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null });
+        socket.emit('recording-started');
     }
 
-    async function start({ url, path, mode, conversationId } = {}, cbs = {}) {
+    async function start(c = {}, cbs = {}) {
         if (active.value) return;
-        handlers = cbs;
-        status.value = '取得麥克風…';
-        try {
-            micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-        } catch (e) {
-            status.value = '無法取得麥克風權限';
-            handlers.onError && handlers.onError('mic-denied');
-            return;
-        }
-
-        playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUT_SR });
-        if (playCtx.state === 'suspended') await playCtx.resume();
+        cfg = c; handlers = cbs;
         active.value = true;
         status.value = '連線中…';
 
-        socket = io(url || window.location.origin, {
-            path: path || '/voice-rt/socket.io',
-            transports: ['websocket', 'polling'],
-            reconnection: false,
+        socket = io(cfg.url || window.location.origin, {
+            path: cfg.path || '/voice-rt/socket.io',
+            transports: ['polling', 'websocket'],
+            reconnectionAttempts: 5,
+            timeout: 12000,
         });
 
-        socket.on('connect', () => {
+        socket.on('connect', async () => {
             connected.value = true;
             status.value = '已連線 · 請說話';
-            socket.emit('prompt_text', { mode: mode || 'hybrid', conversation_id: conversationId ?? null });
-            startMic();
+            try {
+                await startListening();
+            } catch (e) {
+                status.value = '無法取得麥克風權限';
+                handlers.onError && handlers.onError('mic-denied');
+            }
         });
         socket.on('disconnect', () => { connected.value = false; status.value = '已斷線'; });
+        socket.on('connect_error', () => { status.value = '連線失敗'; });
         socket.on('too_many_users', () => { status.value = '語音通道已滿，請稍後'; stop(); });
         socket.on('audio', (data) => {
-            const buf = data instanceof ArrayBuffer ? data : (data?.buffer ?? null);
-            if (buf) enqueuePcm(buf);
+            const pcm = new Int16Array(data);
+            if (!pcm.length) return;
+            audioQueue.push(pcm);
+            speaking.value = true;
+            playNext();
         });
-        socket.on('stop_tts', () => stopPlayback());
-        socket.on('user_transcript', (t) => handlers.onTranscript && handlers.onTranscript(String(t || '')));
+        socket.on('stop_tts', () => { audioQueue = []; speaking.value = false; });
         socket.on('ai_text', (t) => handlers.onAiText && handlers.onAiText(String(t || '')));
+        socket.on('user_transcript', (t) => handlers.onTranscript && handlers.onTranscript(String(t || '')));
         socket.on('agent_step', (s) => handlers.onStep && handlers.onStep(String(s || '')));
-        socket.on('connect_error', (e) => { status.value = '連線失敗'; handlers.onError && handlers.onError('connect'); });
     }
 
     function stop() {
@@ -144,15 +128,14 @@ export function useVoiceChat() {
         connected.value = false;
         speaking.value = false;
         status.value = '';
-        try { emit('recording-stopped'); } catch (e) { /* noop */ }
-        try { micNode && (micNode.onaudioprocess = null, micNode.disconnect()); } catch (e) { /* noop */ }
-        try { micSource && micSource.disconnect(); } catch (e) { /* noop */ }
+        try { socket && socket.connected && socket.emit('recording-stopped'); } catch (e) { /* noop */ }
+        try { scriptNode && (scriptNode.onaudioprocess = null, scriptNode.disconnect()); } catch (e) { /* noop */ }
+        try { gainNode && gainNode.disconnect(); } catch (e) { /* noop */ }
         try { micStream && micStream.getTracks().forEach((t) => t.stop()); } catch (e) { /* noop */ }
-        try { micCtx && micCtx.close(); } catch (e) { /* noop */ }
-        stopPlayback();
-        try { playCtx && playCtx.close(); } catch (e) { /* noop */ }
+        try { audioCtx && audioCtx.close(); } catch (e) { /* noop */ }
         try { socket && socket.disconnect(); } catch (e) { /* noop */ }
-        socket = micCtx = micStream = micNode = micSource = playCtx = null;
+        audioQueue = []; isPlayingAudio = false;
+        socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
     return { active, connected, speaking, status, start, stop };
