@@ -76,10 +76,8 @@ function onEnter(e) {
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 let controller = null;
 
-// 終止回覆：通知後端停止生成 + 中斷前端串流
-async function stopReply() {
-    if (!sending.value) return;
-    status.value = '已終止';
+// 通知後端設定中止旗標（背景生成迴圈會即時停下並存檔）
+async function requestStop() {
     try {
         await fetch('/chat/stop', {
             method: 'POST',
@@ -87,7 +85,21 @@ async function stopReply() {
             body: JSON.stringify({ conversation_id: props.conversation.id }),
         });
     } catch { /* ignore */ }
+}
+
+// 終止回覆（串流中）：通知後端 + 中斷前端串流
+async function stopReply() {
+    if (!sending.value) return;
+    status.value = '已終止';
+    await requestStop();
     controller?.abort();
+}
+
+// 終止背景生成（重整後的「生成中」狀態，已無串流連線可中斷）
+async function stopAwaiting() {
+    status.value = '終止中…';
+    await requestStop();
+    // 背景程序停下後會存一則回覆，輪詢會自動帶出
 }
 
 async function send() {
@@ -241,11 +253,30 @@ function newChat() { router.post('/chat/new'); }
                     
                     <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
                     <div v-if="awaitingReply" class="flex justify-start">
-                        <div class="max-w-[80%] rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-400">
-                            <span class="inline-flex items-center gap-2">
-                                <span class="inline-flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
-                                AI 回覆生成中…（可離開，完成後會自動出現）
-                            </span>
+                        <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
+                            <div class="flex items-start gap-4">
+                                <!-- 核心旋轉動畫 -->
+                                <div class="relative h-12 w-12 shrink-0">
+                                    <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_8s_linear_infinite]"></div>
+                                    <div class="absolute inset-2 rounded-full border-2 border-dotted border-sky-400/50 animate-[spin-reverse_4s_linear_infinite]"></div>
+                                    <div class="absolute inset-0 flex items-center justify-center text-xl animate-pulse">🧠</div>
+                                </div>
+                                <div class="flex-1 space-y-2 font-mono text-xs">
+                                    <div class="flex items-center justify-between text-indigo-300">
+                                        <span class="font-bold tracking-wider">DEEP_COGNITION // 背景生成中</span>
+                                        <span class="flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
+                                    </div>
+                                    <div class="space-y-1 text-slate-400">
+                                        <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> 建立安全連線...</div>
+                                        <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> 載入會話上下文...</div>
+                                        <div class="flex items-center gap-2"><span class="text-sky-400">></span> 喚醒神經網絡中...<span class="typing-cursor-chat">_</span></div>
+                                    </div>
+                                    <div class="mt-2 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
+                                        <span class="text-[10px] italic text-slate-500">{{ status === '終止中…' ? '終止中…' : '可先處理其他任務，完成後會自動顯示。' }}</span>
+                                        <button type="button" class="shrink-0 rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/20" @click="stopAwaiting">■ 終止</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <p v-if="errorText" class="text-center text-xs text-red-400">{{ errorText }}</p>
@@ -316,6 +347,14 @@ function newChat() { router.post('/chat/new'); }
 .md strong { font-weight: 700; color: #f1f5f9; }
 
 /* Mini Terminal Animations */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+@keyframes spin-reverse {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
 @keyframes terminal-scan {
     0% { background-position: 0% -100%; }
     100% { background-position: 0% 200%; }

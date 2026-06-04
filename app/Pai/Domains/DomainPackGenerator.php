@@ -79,6 +79,7 @@ class DomainPackGenerator
 
         準則：破壞性/不可逆動作放進 hitl_required 並把對應工具標 risk:high；autonomy 預設 supervisor（保守領域用 copilot）。
 
+        /no_think 直接輸出 JSON，不要思考、不要解釋、不要 markdown 圍欄。
         使用者描述：「{$description}」
         PROMPT;
     }

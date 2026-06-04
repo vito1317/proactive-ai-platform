@@ -142,8 +142,19 @@ class SkillRunner
         return $result;
     }
 
+    /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
+    private const BACKGROUND = ['merge-domains'];
+
     private function execute(Conversation $conv, Skill $skill, array $args): array
     {
+        if (in_array($skill->name(), self::BACKGROUND, true)) {
+            RunSkillJob::dispatch($conv->id, $skill->name(), $args);
+
+            return [
+                'reply' => "🧩 已開始「{$skill->description()}」，這需要一點時間（背景處理中），完成後會自動出現在對話。",
+                'meta' => ['category' => 'skill', 'skill' => $skill->name(), 'background' => true],
+            ];
+        }
         try {
             $reply = $skill->run($args);
         } catch (Throwable $e) {
