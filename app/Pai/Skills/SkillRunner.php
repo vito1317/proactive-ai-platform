@@ -96,7 +96,7 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}
      */
-    public function handle(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null): array
+    public function handle(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null, ?callable $onThought = null): array
     {
         $step = $onStep ?? fn (string $t) => null;
 
@@ -113,7 +113,7 @@ class SkillRunner
         }
 
         // 進入多輪代理迴圈：AI 可連續用工具（看結果再決定下一步），直到完成
-        return $this->agentic($conv, $message, $onStep, [], $onDelta);
+        return $this->agentic($conv, $message, $onStep, [], $onDelta, $onThought);
     }
 
     /** 連續執行步數上限（避免失控）。 */
@@ -126,14 +126,14 @@ class SkillRunner
      * @param  list<array{action:string,args:array,result:string}>  $obs  已累積的觀察
      * @return array{reply: string, meta: array<string,mixed>}
      */
-    private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs, ?callable $onDelta = null): array
+    private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs, ?callable $onDelta = null, ?callable $onThought = null): array
     {
         $step = $onStep ?? fn (string $t) => null;
         $picked = false;
         $forcedTool = false; // 是否已因「空談承諾」逼它選過一次工具（避免無限迴圈）
 
         for ($round = count($obs); $round < self::MAX_ROUNDS; $round++) {
-            $d = $this->decide($conv, $message, $obs, $forcedTool);
+            $d = $this->decide($conv, $message, $obs, $forcedTool, $onThought);
             $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
 
             // 完成 / 沒有合適工具
@@ -154,9 +154,9 @@ class SkillRunner
                     return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
                 }
 
-                // 有實際跑過工具 → 用串流方式把「解讀結果」的最終回覆逐字輸出（即時看到 AI 輸出內容）
+                // 有實際跑過工具 → 用串流方式把「解讀結果」的最終回覆逐字輸出（即時看到 AI 輸出內容＋思考）
                 if ($obs !== [] && $onDelta !== null) {
-                    $reply = $this->summarize($message, $obs, $onDelta);
+                    $reply = $this->summarize($message, $obs, $onDelta, $onThought);
 
                     return ['reply' => $reply, 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => true]];
                 }
@@ -208,7 +208,7 @@ class SkillRunner
         }
 
         // 達步數上限 → 用目前結果做總結
-        return ['reply' => $this->summarize($message, $obs, $onDelta)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => $onDelta !== null]];
+        return ['reply' => $this->summarize($message, $obs, $onDelta, $onThought)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => $onDelta !== null]];
     }
 
     /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
@@ -233,7 +233,7 @@ class SkillRunner
     }
 
     /** 讓 AI 依目前觀察決定下一步工具（帶最近對話脈絡，避免上下文丟失）。 */
-    private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false): ?array
+    private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false, ?callable $onThought = null): ?array
     {
         $catalog = $this->registry->catalog();
         $obsText = '';
@@ -280,6 +280,20 @@ class SkillRunner
         PROMPT;
 
         try {
+            // 帶 onThought → 串流模式：把推理鏈即時推給前端，JSON 內容靜默累積後解析
+            if ($onThought !== null) {
+                $full = '';
+                $this->llm->stream(
+                    [['role' => 'user', 'content' => $prompt]],
+                    function (string $d) use (&$full) { $full .= $d; }, // 累積 JSON，不外露給使用者
+                    null,
+                    null,
+                    $onThought // reasoning_content 即時串流
+                );
+
+                return LlmClient::extractJson($full);
+            }
+
             return LlmClient::extractJson($this->llm->chat([['role' => 'user', 'content' => $prompt]], ['max_tokens' => 1024]));
         } catch (Throwable) {
             return null;
@@ -290,7 +304,7 @@ class SkillRunner
      * 根據累積結果產生最終自然語言回覆。
      * 帶 $onDelta 時逐 token 串流輸出（讓前端即時看到 AI 在打字），並回傳完整文字。
      */
-    private function summarize(string $message, array $obs, ?callable $onDelta = null): string
+    private function summarize(string $message, array $obs, ?callable $onDelta = null, ?callable $onThought = null): string
     {
         if ($obs === []) {
             return '我沒有可執行的步驟。';
@@ -302,12 +316,18 @@ class SkillRunner
         ];
         try {
             if ($onDelta !== null) {
-                // 串流：逐 token 推給前端，同時累積完整內容
+                // 串流：逐 token 推給前端（含思考過程），同時累積完整內容
                 $full = '';
-                $this->llm->stream($messages, function (string $delta) use (&$full, $onDelta) {
-                    $full .= $delta;
-                    $onDelta($delta);
-                });
+                $this->llm->stream(
+                    $messages,
+                    function (string $delta) use (&$full, $onDelta) {
+                        $full .= $delta;
+                        $onDelta($delta);
+                    },
+                    null,
+                    null,
+                    $onThought // reasoning_content 即時串流
+                );
                 $r = trim($full);
             } else {
                 $r = trim($this->llm->chat($messages));
@@ -327,7 +347,7 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}|null
      */
-    public function resolvePending(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null): ?array
+    public function resolvePending(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null, ?callable $onThought = null): ?array
     {
         $pending = $conv->pending_skill;
         if (! is_array($pending) || empty($pending['skill'])) {
@@ -365,7 +385,7 @@ class SkillRunner
         $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [], 'result' => mb_substr((string) $result, 0, 3000)];
 
         // 接續多輪代理迴圈（confirm 一次後若還有後續步驟，會繼續；'always' 則之後不再問）
-        $out = $this->agentic($conv, $message, $onStep, $obs, $onDelta);
+        $out = $this->agentic($conv, $message, $onStep, $obs, $onDelta, $onThought);
         if ($verdict === 'always') {
             $out['reply'] = "🔓（已開啟本對話「一律允許」）\n".$out['reply'];
         }

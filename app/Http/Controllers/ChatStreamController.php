@@ -63,6 +63,12 @@ class ChatStreamController extends Controller
             $onDelta = function (string $delta) use ($emit) {
                 $emit('delta', ['text' => $delta]);
             };
+            // AI 思考過程（reasoning_content）即時串流，讓使用者看到推理鏈；同時累積以便存檔回放
+            $reasoning = '';
+            $onThought = function (string $thoughtDelta) use ($emit, &$reasoning) {
+                $reasoning .= $thoughtDelta;
+                $emit('thought', ['text' => $thoughtDelta]);
+            };
             // 心跳：任何 LLM 等待期間持續送 keepalive；同時檢查中止旗標——
             // 一旦使用者按「終止」，丟 StopStreaming 連阻塞中的 LLM 請求都會被即時打斷。
             $abortKey = "pai:chat:abort:{$conv->id}";
@@ -80,10 +86,13 @@ class ChatStreamController extends Controller
 
             try {
                 // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理（含進度回報）
-                if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep, $onDelta)) {
+                if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep, $onDelta, $onThought)) {
                     // 已串流過就不再逐字重播，避免內容重複
                     if (empty($resolved['meta']['streamed'])) {
                         $this->emitTyped($emit, $resolved['reply']);
+                    }
+                    if ($reasoning !== '') {
+                        $resolved['meta']['reasoning'] = $reasoning;
                     }
                     $conv->addMessage('assistant', $resolved['reply'], array_merge($resolved['meta'], ['trace' => $trace]));
                     $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
@@ -105,8 +114,8 @@ class ChatStreamController extends Controller
 
                 if ($category === 'chat') {
                     // 閒聊：逐 token 串流（持續有資料，不會閒置）
-                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
-                } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep, $onDelta))['meta']['no_skill'])) {
+                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep, $onThought);
+                } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep, $onDelta, $onThought))['meta']['no_skill'])) {
                     // 平台操作技能：同步執行，逐步回報；最終解讀已串流則不重播
                     $reply = $skillResult['reply'];
                     $meta = $skillResult['meta'];
@@ -115,7 +124,7 @@ class ChatStreamController extends Controller
                     }
                 } elseif ($category === 'chat' || (isset($skillResult) && ! empty($skillResult['meta']['no_skill']))) {
                     // 閒聊，或技能對應不到 → 退回正常對話、逐 token 串流
-                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
+                    [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep, $onThought);
                 } else {
                     // 需執行動作（任務/新增領域/設定通知）：交背景 RouteCommandJob 統一處理，
                     // 由它把「真正的回覆/結果」寫回此對話（避免 SSE 顯示假 ack 但實際沒跑）。
@@ -139,6 +148,9 @@ class ChatStreamController extends Controller
                     return;
                 }
 
+                if ($reasoning !== '') {
+                    $meta['reasoning'] = $reasoning;
+                }
                 $conv->addMessage('assistant', $reply, array_merge($meta, ['trace' => $trace]));
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
             } catch (StopStreaming) {
@@ -169,7 +181,7 @@ class ChatStreamController extends Controller
      *
      * @return array{0: string, 1: array<string,mixed>} [reply, meta]
      */
-    private function streamChatReply(LlmClient $llm, ChatResponder $responder, Conversation $conv, callable $emit, callable $onStep): array
+    private function streamChatReply(LlmClient $llm, ChatResponder $responder, Conversation $conv, callable $emit, callable $onStep, ?callable $onThought = null): array
     {
         $onStep('🌀 [COGNITIVE_SYNTHESIS] 正在合成認知邏輯...');
         $emit('status', ['text' => '正在合成邏輯…']);
@@ -196,7 +208,7 @@ class ChatStreamController extends Controller
                 function () {
                     // Heartbeat / reasoning token heartbeat
                 },
-                function (string $thoughtDelta) use ($emit) {
+                $onThought ?? function (string $thoughtDelta) use ($emit) {
                     $emit('thought', ['text' => $thoughtDelta]);
                 }
             );
