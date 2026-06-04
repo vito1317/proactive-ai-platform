@@ -117,6 +117,8 @@ class ChatStreamController extends Controller
                     });
                     RouteCommandJob::dispatch($event->id);
 
+                    $meta['event_id'] = $event->id;
+
                     $reply = match ($category) {
                         'task' => '好的，我判斷這是一個任務，已在背景交給對應領域協調者處理。完成後可在中控台「AI 認知運行」看到推理與處置；若有高風險動作會通知你核准。',
                         'new_domain' => '好的，我正在背景依你的描述生成並啟用新領域包 🧩，完成後會在 🔔 通知告訴你（也會出現在「領域包」頁）。',

@@ -29,6 +29,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/chat/new', [ChatController::class, 'new'])->name('chat.new');
     Route::post('/chat/stop', [ChatController::class, 'stop'])->name('chat.stop'); // 終止回覆 / 插話
     Route::post('/stream/chat', [ChatStreamController::class, 'stream'])->name('chat.stream'); // SSE 串流
+    Route::get('/chat/events/{event}', [ChatController::class, 'eventStatus'])->name('chat.event_status');
 
     Route::post('/console/ask', [ConsoleController::class, 'ask'])->name('console.ask');
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');

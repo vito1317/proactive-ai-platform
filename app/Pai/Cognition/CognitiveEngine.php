@@ -3,6 +3,7 @@
 namespace App\Pai\Cognition;
 
 use App\Pai\Action\ActionExecutor;
+use App\Pai\Chat\StopStreaming;
 use App\Pai\Cognition\Tools\FinishTool;
 use App\Pai\Cognition\Tools\GetEventContextTool;
 use App\Pai\Cognition\Tools\HandoffTool;
@@ -107,6 +108,13 @@ class CognitiveEngine
         $tokens = (int) $run->tokens;
         $startStep = $this->lastNumericStep($steps) + 1;
 
+        // 中止：使用者按終止/stop-task → 連「進行中的 LLM 呼叫」都即時打斷（curl progress 檢查）
+        LlmClient::setHeartbeat(function () use ($run) {
+            if ($run->fresh()?->status === RunStatus::Cancelled) {
+                throw new StopStreaming;
+            }
+        });
+
         try {
             for ($i = $startStep; $i <= $maxSteps && ! $ctx->finished; $i++) {
                 // 使用者透過 stop-task 技能/中控台中止 → 停止迴圈，不再產生新動作
@@ -173,6 +181,9 @@ class CognitiveEngine
             if ($needHitl) {
                 app(PushNotifier::class)->hitlNeeded($run);
             }
+        } catch (StopStreaming) {
+            // 使用者中止（連進行中的 LLM 呼叫都被打斷）
+            $run->update(['status' => RunStatus::Cancelled, 'steps' => $steps, 'summary' => '已由使用者中止', 'tokens' => $tokens]);
         } catch (Throwable $e) {
             $run->update([
                 'status' => RunStatus::Failed,
@@ -180,6 +191,8 @@ class CognitiveEngine
                 'error' => $e->getMessage(),
                 'tokens' => $tokens,
             ]);
+        } finally {
+            LlmClient::setHeartbeat(null); // 清掉心跳，避免外洩到 worker 的下一個 job
         }
 
         return $run->refresh();

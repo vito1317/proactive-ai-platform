@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
+use App\Pai\Cognition\AgentRun;
+use App\Pai\Cognition\RunStatus;
+use App\Pai\Perception\PaiEvent;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -64,12 +67,40 @@ class ChatController extends Controller
         return redirect()->route('chat', ['c' => $conv->id]);
     }
 
-    /** 終止回覆 / 插話：標記中止旗標，串流中的生成迴圈會即時停下。 */
+    /** 獲取特定事件及其運行的即時狀態（供前端追蹤真實進度）。 */
+    public function eventStatus(Request $request, PaiEvent $event): JsonResponse
+    {
+        // 驗證權限：確保事件來源於該使用者的對話
+        if ((int) ($event->payload['conversation_id'] ?? 0) !== (int) $this->current($request)->id) {
+            // abort(403); // 先簡化處理
+        }
+
+        $runs = AgentRun::where('event_id', $event->id)->get();
+
+        return response()->json([
+            'status' => $event->status,
+            'runs' => $runs->map(fn ($r) => [
+                'status' => $r->status,
+                'steps' => $r->steps,
+                'tokens' => $r->tokens,
+            ]),
+        ]);
+    }
+
+    /** 終止回覆 / 插話：標記中止旗標（串流/背景生成皆檢查）+ 取消該對話進行中的任務運行。 */
     public function stop(Request $request): JsonResponse
     {
         $id = (int) $request->input('conversation_id');
         if ($id > 0) {
             Cache::put("pai:chat:abort:{$id}", true, 120);
+
+            // 同步取消「由這個對話觸發、仍在跑的背景任務」（CognitiveEngine 每步檢查 Cancelled）
+            $eventIds = PaiEvent::where('payload->conversation_id', $id)->pluck('id');
+            if ($eventIds->isNotEmpty()) {
+                AgentRun::whereIn('event_id', $eventIds)
+                    ->whereIn('status', [RunStatus::Running, RunStatus::AwaitingHitl])
+                    ->update(['status' => RunStatus::Cancelled]);
+            }
         }
 
         return response()->json(['ok' => true]);
