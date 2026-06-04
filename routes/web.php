@@ -9,6 +9,7 @@ use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\TelegramWebhookController;
+use App\Http\Controllers\VoiceAgentController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -68,6 +69,9 @@ Route::post('/webhooks/telegram', [TelegramWebhookController::class, 'handle'])-
 
 // LINE 接收（雙向）— 須在 {source} 之前；公開、CSRF 豁免
 Route::post('/webhooks/line', [LineWebhookController::class, 'handle'])->name('webhooks.line');
+
+// 全雙工語音橋接：voice_server 把每輪逐字稿回送 agentic 引擎（共用密鑰驗證，CSRF 豁免）
+Route::post('/api/voice/agent', [VoiceAgentController::class, 'handle'])->name('voice.agent');
 
 // L1 感知層事件入口（外部系統推送，公開、CSRF 豁免，見 bootstrap/app.php）
 Route::post('/webhooks/{source}', [WebhookController::class, 'store']);

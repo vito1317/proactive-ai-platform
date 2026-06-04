@@ -90,6 +90,17 @@ return [
     // 語音轉文字（STT）：本機 MiniCPM-o 語音服務的 transcribe 端點
     'voice' => [
         'stt_url' => env('PAI_STT_URL', 'http://127.0.0.1:8891/voice/transcribe'),
+
+        // 全雙工語音（瀏覽器 ↔ voice_server :8891 Socket.IO，即時對話 + 操控系統）
+        'fullduplex_enabled' => env('PAI_VOICE_FD_ENABLED', true),
+        // 瀏覽器要連的 Socket.IO 來源（經 nginx/WAF 反代到 :8891）；空字串=同源
+        'fullduplex_url' => env('PAI_VOICE_FD_URL', ''),
+        // Socket.IO path（nginx 反代路徑）
+        'fullduplex_path' => env('PAI_VOICE_FD_PATH', '/voice-rt/socket.io'),
+        // voice_server 在每輪把逐字稿回送本平台 agentic 引擎時用的共用密鑰
+        'agent_secret' => env('VOICE_AGENT_SECRET', 'pai-voice-2f9c7a1e'),
+        // 語音助理人格（system prompt）
+        'system_prompt' => env('PAI_VOICE_PROMPT', '你是 PAI 主動式 AI 平台的語音助理，用台灣繁體中文簡短、口語化回答。可實際操控系統（讀檔、查 log、跑指令、查設定）。'),
     ],
 
     // 一鍵安裝來源（中控台顯示安裝指令用）

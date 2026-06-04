@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Conversation extends Model
 {
-    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'title', 'summary', 'compacted_through_id', 'pending_skill', 'always_allow_skills'];
+    protected $fillable = ['user_id', 'tg_chat_id', 'line_to', 'voice_sid', 'title', 'summary', 'compacted_through_id', 'pending_skill', 'always_allow_skills'];
 
     protected $casts = ['pending_skill' => 'array', 'always_allow_skills' => 'boolean'];
 

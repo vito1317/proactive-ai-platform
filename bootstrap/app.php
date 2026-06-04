@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // L1 webhook 由外部系統推送，無 session/CSRF token
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',
+            'api/voice/*', // 語音橋接（voice_server）以共用密鑰驗證，非 session
         ]);
 
         $middleware->web(append: [

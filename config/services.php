@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    // 全雙工語音橋接（voice_server :8891 → 本平台 agentic 引擎）共用密鑰
+    'voice' => [
+        'agent_secret' => env('VOICE_AGENT_SECRET', 'pai-voice-2f9c7a1e'),
+    ],
+
 ];
