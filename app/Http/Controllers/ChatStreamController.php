@@ -101,34 +101,24 @@ class ChatStreamController extends Controller
                     // 閒聊，或技能對應不到 → 退回正常對話、逐 token 串流
                     [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
                 } else {
-                    // 需執行動作（任務/新增領域/設定通知）：交給背景 queue 處理，
-                    // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
+                    // 需執行動作（任務/新增領域/設定通知）：交背景 RouteCommandJob 統一處理，
+                    // 由它把「真正的回覆/結果」寫回此對話（避免 SSE 顯示假 ack 但實際沒跑）。
                     $event = PaiEvent::create([
                         'source' => 'chat', 'topic' => 'console.request',
-                        // 帶上來源對話 → 背景處理完把結果回貼到這個對話
                         'payload' => ['message' => $message, 'conversation_id' => $conv->id],
                         'status' => EventStatus::Received,
                     ]);
-                    $onStep(match ($category) {
-                        'task' => '🗂️ 交給領域協調者處理…',
-                        'new_domain' => '🧩 生成新領域包…',
-                        'configure_notify' => '🔔 設定通知…',
-                        default => '⚙️ 處理中…',
-                    });
+                    $onStep('⚙️ 背景處理中…');
                     RouteCommandJob::dispatch($event->id);
 
-                    $meta['event_id'] = $event->id;
-
-                    $reply = match ($category) {
-                        'task' => '好的，我判斷這是一個任務，已在背景交給對應領域協調者處理。完成後可在中控台「AI 認知運行」看到推理與處置；若有高風險動作會通知你核准。',
-                        'new_domain' => '好的，我正在背景依你的描述生成並啟用新領域包 🧩，完成後會在 🔔 通知告訴你（也會出現在「領域包」頁）。',
-                        'configure_notify' => '好的，我在背景幫你設定通知並發送測試，結果會以 🔔 通知回報。',
-                        default => '好的，我來處理。',
-                    };
-                    foreach (mb_str_split($reply, 6) as $chunk) {  // 逐字輸出
+                    // 只串流一段「暫態」提示（不存成訊息）；真正回覆由 RouteCommandJob 寫回，前端輪詢帶出
+                    foreach (mb_str_split('收到，正在背景處理，完成後會把結果回覆到這裡…', 6) as $chunk) {
                         $emit('delta', ['text' => $chunk]);
-                        usleep(10000);
+                        usleep(8000);
                     }
+                    $emit('done', ['conversation_id' => $conv->id, 'meta' => ['category' => $category, 'pending_bg' => true]]);
+
+                    return;
                 }
 
                 $conv->addMessage('assistant', $reply, array_merge($meta, ['trace' => $trace]));

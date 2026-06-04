@@ -26,6 +26,34 @@ const lastSent = ref('');
 const errorText = ref('');
 const scroller = ref(null);
 
+/* ---------- 真實進度追蹤 ---------- */
+const eventStatuses = ref({}); // { event_id: { status, runs, percent } }
+async function trackEvent(id) {
+    if (!id || eventStatuses.value[id]?.status === 'completed') return;
+    try {
+        const resp = await fetch(`/chat/events/${id}`);
+        const data = await resp.json();
+        
+        // 計算進度百分比 (基於運行狀態與步數)
+        let percent = 0;
+        if (data.status === 'completed') percent = 100;
+        else if (data.status === 'processing') {
+            const run = data.runs?.[0];
+            if (run) {
+                const stepCount = run.steps?.length || 0;
+                percent = Math.min(95, 20 + (stepCount * 15)); // 起跳 20%，每步 +15%，封頂 95%
+            } else percent = 10;
+        } else if (data.status === 'failed') percent = 100;
+
+        eventStatuses.value[id] = { ...data, percent };
+
+        // 如果還沒結束，3 秒後再查一次
+        if (data.status !== 'completed' && data.status !== 'failed' && data.status !== 'rejected') {
+            setTimeout(() => trackEvent(id), 3000);
+        }
+    } catch { /* ignore */ }
+}
+
 const view = computed(() => {
     const list = [...props.messages];
     if (sending.value) {
@@ -47,11 +75,13 @@ const awaitingReply = computed(() => {
     const m = props.messages;
     return !sending.value && m.length > 0 && m[m.length - 1].role === 'user';
 });
-let pollTimer = null;
-let pollCount = 0;
 function syncAwaiting() {
     if (awaitingReply.value && !pollTimer) {
         pollCount = 0;
+        // 如果有背景事件，開始追蹤真實進度
+        if (props.conversation.active_event_id) {
+            trackEvent(props.conversation.active_event_id);
+        }
         pollTimer = setInterval(() => {
             if (++pollCount > 90) { clearInterval(pollTimer); pollTimer = null; return; } // ~5 分鐘上限
             router.reload({ only: ['messages', 'conversation'], preserveScroll: true, preserveState: true });
@@ -61,7 +91,13 @@ function syncAwaiting() {
     }
 }
 onMounted(syncAwaiting);
+watch(() => props.conversation.active_event_id, (id) => { if (id) trackEvent(id); });
 watch(awaitingReply, syncAwaiting);
+watch(() => props.messages, (msgs) => {
+    msgs.forEach(m => {
+        if (m.meta?.event_id) trackEvent(m.meta.event_id);
+    });
+}, { immediate: true });
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer); });
 
 const catLabel = (m) => ({ task: '已觸發任務', new_domain: '已新增領域', configure_notify: '已設定通知' }[m?.category]);
@@ -278,50 +314,67 @@ function newChat() { router.post('/chat/new'); }
                                     <div v-if="catLabel(m.meta)" class="mt-3 space-y-1.5 border-t border-white/10 pt-2">
                                         <div class="flex items-center justify-between text-[10px] font-bold tracking-tighter uppercase">
                                             <span class="text-emerald-400 flex items-center gap-1">
-                                                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></span>
+                                                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" :class="{ 'animate-pulse': (eventStatuses[m.meta.event_id]?.percent || 100) < 100 }"></span>
                                                 {{ catLabel(m.meta) }}
                                             </span>
-                                            <span class="text-slate-500">100% SUCCESS</span>
+                                            <span :class="(eventStatuses[m.meta.event_id]?.percent || 100) < 100 ? 'text-sky-400' : 'text-slate-500'">
+                                                {{ eventStatuses[m.meta.event_id]?.percent || 100 }}% {{ (eventStatuses[m.meta.event_id]?.percent || 100) < 100 ? 'PROCESSING' : 'SUCCESS' }}
+                                            </span>
                                         </div>
                                         <div class="h-1 w-full overflow-hidden rounded-full bg-white/5">
-                                            <div class="h-full w-full bg-gradient-to-r from-emerald-600/50 to-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]"></div>
+                                            <div class="h-full bg-gradient-to-r from-emerald-600/50 to-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)] transition-all duration-1000"
+                                                 :style="{ width: `${eventStatuses[m.meta.event_id]?.percent || 100}%` }"></div>
                                         </div>
                                     </div>
-                                </template>
-                                </div>
-                                </div>
-                                </TransitionGroup>
+                                    </template>
+                                    </div>
+                                    </div>
+                                    </TransitionGroup>
 
-                                <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
-                                <div v-if="awaitingReply" class="flex justify-start">
-                                <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
-                                <div class="flex items-start gap-4">
-                                <!-- 核心旋轉動畫 -->
-                                <div class="relative h-14 w-14 shrink-0">
+                                    <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
+                                    <div v-if="awaitingReply" class="flex justify-start">
+                                    <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
+                                    <div class="flex items-start gap-4">
+                                    <!-- 核心旋轉動畫 -->
+                                    <div class="relative h-14 w-14 shrink-0">
                                     <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
                                     <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
                                     <!-- 雷達掃描線 -->
                                     <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
                                     <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🧠</div>
-                                </div>
-                                <div class="flex-1 space-y-2 font-mono text-xs">
+                                    </div>
+                                    <div class="flex-1 space-y-2 font-mono text-xs">
                                     <div class="flex items-center justify-between text-sky-300">
                                         <span class="font-bold tracking-widest text-[10px] uppercase">NEURAL_SYNC // 意圖擷取中</span>
                                         <span class="flex gap-1.5"><span class="dot-sky"></span><span class="dot-sky" style="animation-delay:.2s"></span><span class="dot-sky" style="animation-delay:.4s"></span></span>
                                     </div>
                                     <div class="grid grid-cols-1 gap-1 text-[10px] text-slate-400">
-                                        <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 掃描通訊協定... [OK]</div>
-                                        <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 檢索領域資料庫... [OK]</div>
-                                        <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在同步感知神經元...<span class="typing-cursor-chat">_</span></div>
+                                        <!-- 顯示真實進度步驟 -->
+                                        <template v-if="eventStatuses[conversation.active_event_id]?.runs?.[0]?.steps?.length">
+                                            <div v-for="(s, idx) in eventStatuses[conversation.active_event_id].runs[0].steps" :key="idx" class="flex items-center gap-2">
+                                                <span class="text-emerald-500 opacity-70">>></span> {{ s }} [OK]
+                                            </div>
+                                            <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在產出最終結果...<span class="typing-cursor-chat">_</span></div>
+                                        </template>
+                                        <template v-else>
+                                            <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 掃描通訊協定... [OK]</div>
+                                            <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 載入會話上下文... [OK]</div>
+                                            <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在啟動認知引擎...<span class="typing-cursor-chat">_</span></div>
+                                        </template>
                                     </div>
-                                    <div class="mt-2 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
-                                        <span class="text-[10px] italic text-slate-500">{{ status === '終止中…' ? '終止中…' : '可先處理其他任務，完成後會自動顯示。' }}</span>
-                                        <button type="button" class="shrink-0 rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/20" @click="stopAwaiting">■ 終止</button>
+                                    <div class="mt-2 space-y-1.5 border-t border-white/5 pt-2">
+                                        <div class="h-1 w-full overflow-hidden rounded-full bg-white/5">
+                                            <div class="h-full bg-indigo-500 shadow-[0_0_8px_#6366f1] transition-all duration-1000"
+                                                 :style="{ width: `${eventStatuses[conversation.active_event_id]?.percent || 15}%` }"></div>
+                                        </div>
+                                        <div class="flex items-center justify-between text-[9px] text-slate-500 italic">
+                                            <span>{{ status === '終止中…' ? '終止中…' : '進度：' + (eventStatuses[conversation.active_event_id]?.percent || 15) + '%' }}</span>
+                                            <button type="button" class="shrink-0 rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/20" @click="stopAwaiting">■ 終止</button>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                                    </div>
+                                    </div>
+                                    </div>
                     <p v-if="errorText" class="text-center text-xs text-red-400">{{ errorText }}</p>
                 </div>
 

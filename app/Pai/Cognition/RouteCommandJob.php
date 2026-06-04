@@ -54,7 +54,6 @@ class RouteCommandJob implements ShouldQueue
             $conv->addMessage('user', $msg);
         }
 
-        $reused = ! $conv->wasRecentlyCreated; // 來自 chat SSE 的對話：ack 已由前端顯示/存過
         try {
             $r = $responder->respond($conv, $msg);
             $event->update([
@@ -62,11 +61,10 @@ class RouteCommandJob implements ShouldQueue
                 'intent' => 'console:'.($r['meta']['category'] ?? 'reply'),
                 'note' => mb_substr($r['reply'], 0, 250),
             ]);
-            // 沿用 chat 對話時不重存 ack/不重發通知（避免重複）；任務結果之後由 RunCoordinatorJob 回貼
-            if (! $reused) {
-                $conv->addMessage('assistant', $r['reply'], $r['meta']);
-                $this->notice($r['reply']);
-            }
+            // 把真正的回覆寫回對話（SSE 端對 action 類只串了暫態、未存訊息）；前端輪詢帶出。
+            // 若是 task，respond 內已建立帶 domain 的事件並 dispatch 協調者，最終結果由 RunCoordinatorJob 再回貼。
+            $conv->addMessage('assistant', $r['reply'], $r['meta']);
+            $this->notice($r['reply']);
         } catch (Throwable $e) {
             $event->update(['status' => EventStatus::Failed, 'note' => '處理失敗：'.$e->getMessage()]);
             $this->notice('指令處理失敗：'.$e->getMessage(), 'error');

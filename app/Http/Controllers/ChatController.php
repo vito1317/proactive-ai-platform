@@ -6,6 +6,7 @@ use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
 use App\Pai\Cognition\AgentRun;
 use App\Pai\Cognition\RunStatus;
+use App\Pai\Perception\EventStatus;
 use App\Pai\Perception\PaiEvent;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -25,10 +26,17 @@ class ChatController extends Controller
     {
         $conv = $this->current($request);
 
+        // 進行中的事件（已收/已路由但運行尚未結束）→ 供前端追蹤真實進度
+        $activeEvent = PaiEvent::where('payload->conversation_id', $conv->id)
+            ->whereIn('status', [EventStatus::Received, EventStatus::Routed])
+            ->latest('id')
+            ->first();
+
         return Inertia::render('Chat', [
             'conversation' => [
                 'id' => $conv->id, 'title' => $conv->title ?? '新對話',
                 'channel' => $this->channelOf($conv), // tg / line / null；TG·LINE session 後台唯讀
+                'active_event_id' => $activeEvent?->id,
             ],
             'messages' => $conv->messages()->get()->map(fn ($m) => [
                 'id' => $m->id, 'role' => $m->role, 'content' => $m->content,
@@ -100,6 +108,13 @@ class ChatController extends Controller
                 AgentRun::whereIn('event_id', $eventIds)
                     ->whereIn('status', [RunStatus::Running, RunStatus::AwaitingHitl])
                     ->update(['status' => RunStatus::Cancelled]);
+            }
+
+            // 立即收尾：若最後一則仍是使用者訊息（生成被斷線/逾時殺掉的孤兒狀態），補一則「已停止」，
+            // 讓前端不再卡在「生成中」、重新整理也不會復活。
+            $conv = Conversation::find($id);
+            if ($conv && $conv->messages()->latest('id')->first()?->role === 'user') {
+                $conv->addMessage('assistant', '（已停止）你按了終止；需要的話重新輸入問題即可。', ['stopped' => true]);
             }
         }
 

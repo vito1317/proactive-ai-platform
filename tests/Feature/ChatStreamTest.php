@@ -77,6 +77,7 @@ class ChatStreamTest extends TestCase
         $this->assertStringContainsString('背景', $content);
 
         Bus::assertDispatched(RouteCommandJob::class);
-        $this->assertCount(2, Conversation::latest('id')->first()->messages);
+        // SSE 只串暫態、不存 ack（真正回覆由 RouteCommandJob 寫回，此處被 Bus::fake 攔住未跑）→ 只有 user 訊息
+        $this->assertCount(1, Conversation::latest('id')->first()->messages);
     }
 }
