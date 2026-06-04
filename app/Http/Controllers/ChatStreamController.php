@@ -105,7 +105,9 @@ class ChatStreamController extends Controller
                     // SSE 立即回覆，避免長時間無資料造成連線被切（結果以通知回報）。
                     $event = PaiEvent::create([
                         'source' => 'chat', 'topic' => 'console.request',
-                        'payload' => ['message' => $message], 'status' => EventStatus::Received,
+                        // 帶上來源對話 → 背景處理完把結果回貼到這個對話
+                        'payload' => ['message' => $message, 'conversation_id' => $conv->id],
+                        'status' => EventStatus::Received,
                     ]);
                     $onStep(match ($category) {
                         'task' => '🗂️ 交給領域協調者處理…',

@@ -70,7 +70,7 @@ class ChatResponder
             default => '⚙️ 處理中…',
         });
 
-        return ['stream' => false, ...$this->act($category, $userMessage)];
+        return ['stream' => false, ...$this->act($category, $userMessage, $conv)];
     }
 
     /**
@@ -140,17 +140,17 @@ class ChatResponder
     }
 
     /** 執行非閒聊類動作（任務 / 新增領域 / 設定通知）。 */
-    public function act(string $category, string $userMessage): array
+    public function act(string $category, string $userMessage, ?Conversation $conv = null): array
     {
         return match ($category) {
-            'task' => $this->task($userMessage),
+            'task' => $this->task($userMessage, $conv),
             'new_domain' => $this->newDomain($userMessage),
             'configure_notify' => $this->configureNotify($userMessage),
             default => ['reply' => '（無對應動作）', 'meta' => ['category' => $category]],
         };
     }
 
-    private function task(string $message): array
+    private function task(string $message, ?Conversation $conv = null): array
     {
         $r = $this->classifier->classify($message);
         if ($r['domain'] === null) {
@@ -162,13 +162,14 @@ class ChatResponder
             'source' => 'chat', 'topic' => $r['topic'], 'domain' => $r['domain'],
             'intent' => 'user-request', 'severity' => Severity::from($r['severity']),
             'status' => EventStatus::Routed, 'note' => '[對話任務] '.$r['rationale'],
-            'payload' => ['message' => $message],
+            // 記下來源對話 → 任務完成後把結果回貼到這個對話（見 RunCoordinatorJob）
+            'payload' => ['message' => $message, 'conversation_id' => $conv?->id],
         ]);
         RunCoordinatorJob::dispatch($event->id, $event->domain);
 
         return [
             'reply' => "好的，我判斷這屬於「{$r['domain']}」領域，已交給協調者處理（事件 #{$event->id}）。"
-                .'稍後可在中控台的「AI 認知運行」看到推理與處置；若有高風險動作會通知你核准。',
+                .'處理完成後我會把結果回覆到這個對話（也會發通知）；若有高風險動作會請你核准。',
             'meta' => ['category' => 'task', 'event_id' => $event->id, 'domain' => $r['domain']],
         ];
     }

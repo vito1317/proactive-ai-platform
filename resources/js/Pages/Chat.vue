@@ -273,33 +273,46 @@ function newChat() { router.post('/chat/new'); }
                                     <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
                                     <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
-                                    <div v-if="catLabel(m.meta)" class="mt-1 text-[10px] text-emerald-300/70 border-t border-white/5 pt-1">⚙ {{ catLabel(m.meta) }}</div>
+
+                                    <!-- 操作進度與動畫 (歷史項目) -->
+                                    <div v-if="catLabel(m.meta)" class="mt-3 space-y-1.5 border-t border-white/10 pt-2">
+                                        <div class="flex items-center justify-between text-[10px] font-bold tracking-tighter uppercase">
+                                            <span class="text-emerald-400 flex items-center gap-1">
+                                                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></span>
+                                                {{ catLabel(m.meta) }}
+                                            </span>
+                                            <span class="text-slate-500">100% SUCCESS</span>
+                                        </div>
+                                        <div class="h-1 w-full overflow-hidden rounded-full bg-white/5">
+                                            <div class="h-full w-full bg-gradient-to-r from-emerald-600/50 to-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.3)]"></div>
+                                        </div>
+                                    </div>
                                 </template>
-                            </div>
-                        </div>
-                    </TransitionGroup>
-                    
-                    <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
-                    <div v-if="awaitingReply" class="flex justify-start">
-                        <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
-                            <div class="flex items-start gap-4">
+                                </div>
+                                </div>
+                                </TransitionGroup>
+
+                                <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
+                                <div v-if="awaitingReply" class="flex justify-start">
+                                <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
+                                <div class="flex items-start gap-4">
                                 <!-- 核心旋轉動畫 -->
                                 <div class="relative h-14 w-14 shrink-0">
                                     <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
                                     <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
                                     <!-- 雷達掃描線 -->
                                     <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
-                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🦾</div>
+                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🧠</div>
                                 </div>
                                 <div class="flex-1 space-y-2 font-mono text-xs">
                                     <div class="flex items-center justify-between text-sky-300">
-                                        <span class="font-bold tracking-widest text-[10px] uppercase">OPEN_CLAW // 意圖擷取中</span>
+                                        <span class="font-bold tracking-widest text-[10px] uppercase">NEURAL_SYNC // 意圖擷取中</span>
                                         <span class="flex gap-1.5"><span class="dot-sky"></span><span class="dot-sky" style="animation-delay:.2s"></span><span class="dot-sky" style="animation-delay:.4s"></span></span>
                                     </div>
                                     <div class="grid grid-cols-1 gap-1 text-[10px] text-slate-400">
                                         <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 掃描通訊協定... [OK]</div>
                                         <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 檢索領域資料庫... [OK]</div>
-                                        <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在利用 OpenClaw 擷取知識...<span class="typing-cursor-chat">_</span></div>
+                                        <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在同步感知神經元...<span class="typing-cursor-chat">_</span></div>
                                     </div>
                                     <div class="mt-2 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
                                         <span class="text-[10px] italic text-slate-500">{{ status === '終止中…' ? '終止中…' : '可先處理其他任務，完成後會自動顯示。' }}</span>

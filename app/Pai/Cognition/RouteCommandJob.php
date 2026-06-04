@@ -46,19 +46,27 @@ class RouteCommandJob implements ShouldQueue
             return;
         }
 
-        // 開一個會話讓對話大腦處理（也讓使用者能在 /chat 看到這條指令的來龍去脈）
-        $conv = Conversation::create(['user_id' => $event->payload['user_id'] ?? null, 'title' => Str::limit($msg, 30)]);
-        $conv->addMessage('user', $msg);
+        // 沿用來源對話（chat 觸發時帶 conversation_id）；否則開一個（也讓使用者能在 /chat 追溯）
+        $convId = $event->payload['conversation_id'] ?? null;
+        $conv = ($convId ? Conversation::find($convId) : null)
+            ?? Conversation::create(['user_id' => $event->payload['user_id'] ?? null, 'title' => Str::limit($msg, 30)]);
+        if ($conv->wasRecentlyCreated) {
+            $conv->addMessage('user', $msg);
+        }
 
+        $reused = ! $conv->wasRecentlyCreated; // 來自 chat SSE 的對話：ack 已由前端顯示/存過
         try {
             $r = $responder->respond($conv, $msg);
-            $conv->addMessage('assistant', $r['reply'], $r['meta']);
             $event->update([
                 'status' => EventStatus::Normalized,
                 'intent' => 'console:'.($r['meta']['category'] ?? 'reply'),
                 'note' => mb_substr($r['reply'], 0, 250),
             ]);
-            $this->notice($r['reply']);
+            // 沿用 chat 對話時不重存 ack/不重發通知（避免重複）；任務結果之後由 RunCoordinatorJob 回貼
+            if (! $reused) {
+                $conv->addMessage('assistant', $r['reply'], $r['meta']);
+                $this->notice($r['reply']);
+            }
         } catch (Throwable $e) {
             $event->update(['status' => EventStatus::Failed, 'note' => '處理失敗：'.$e->getMessage()]);
             $this->notice('指令處理失敗：'.$e->getMessage(), 'error');
