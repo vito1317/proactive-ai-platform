@@ -50,6 +50,10 @@ class DescribeDomainSkill implements Skill
         }
 
         $list = fn (array $a) => $a === [] ? '（無）' : implode('、', $a);
+        // tools 是結構（{uri, perms, risk}）→ 取 uri 顯示
+        $toolName = fn ($t) => is_array($t) ? ($t['uri'] ?? json_encode($t, JSON_UNESCAPED_UNICODE)) : (string) $t;
+        $tools = array_map($toolName, $p->tools);
+        $highRisk = array_map($toolName, $p->highRiskTools());
 
         return implode("\n", [
             "領域：{$p->domain}（協調者：{$p->coordinator}）",
@@ -57,8 +61,8 @@ class DescribeDomainSkill implements Skill
             '自治階段：'.$p->autonomy,
             '觸發事件：'.$list($p->eventTopics()),
             '排程：'.$list($p->cronTriggers()),
-            '可用工具：'.$list($p->tools),
-            '高風險工具：'.$list($p->highRiskTools()),
+            '可用工具：'.$list($tools),
+            '高風險工具：'.$list($highRisk),
             '子智能體：'.$list($p->agentNames()),
             '劇本：'.$list($p->playbooks),
             '需人工核准：'.$list($p->hitlRequired),
