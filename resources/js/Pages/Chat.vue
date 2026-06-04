@@ -111,7 +111,7 @@ function onEnter(e) {
 
 const formattedStep = (txt) => {
     if (!txt) return '';
-    let clean = txt.replace(/^[\u2000-\u32ff\ud83c\udc00-\ud83d\udeff\udbb9\udce5-\udbb9\udcee]/g, '').trim();
+    let clean = txt.replace(/^[\p{Extended_Pictographic}\ufe0f\u200d\s]+/u, '').trim();
     return clean.replace(/\[(.*?)\]/, '<span class="opacity-50 text-[9px] font-bold mr-1 text-sky-400">$1</span>');
 };
 
