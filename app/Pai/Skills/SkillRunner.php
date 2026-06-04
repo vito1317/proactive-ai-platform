@@ -54,6 +54,37 @@ class SkillRunner
         ][$skill->name()] ?? ('🔧 '.$skill->description().'…');
     }
 
+    /**
+     * 「正在做什麼」的即時步驟說明，帶上關鍵參數讓使用者看清楚這一步在操作什麼。
+     * 例如：💻 執行終端機指令：`docker exec … nginx -t`
+     */
+    private function stepDetail(Skill $skill, array $args): string
+    {
+        $label = rtrim($this->stepLabel($skill), '…');
+        foreach (['cmd', 'command', 'script', 'path', 'file', 'query', 'q', 'url', 'service', 'app', 'name', 'key', 'domain'] as $k) {
+            if (isset($args[$k]) && is_scalar($args[$k]) && (string) $args[$k] !== '') {
+                return $label.'：'.mb_substr((string) $args[$k], 0, 140);
+            }
+        }
+
+        return $this->stepLabel($skill);
+    }
+
+    /** 一步執行完的結果狀態（精簡單行預覽），即時回報給使用者。 */
+    private function stepResult(Skill $skill, string $result): string
+    {
+        $r = trim($result);
+        if ($r === '') {
+            return '✅ 完成（無輸出）';
+        }
+        $preview = trim((string) preg_replace('/\s+/u', ' ', mb_substr($r, 0, 140)));
+        if (mb_strpos($r, '錯誤') === 0 || str_starts_with($r, 'Error') || str_starts_with($r, 'error')) {
+            return '⚠️ 失敗：'.$preview;
+        }
+
+        return '✅ 完成 · '.$preview.(mb_strlen($r) > 140 ? '…' : '');
+    }
+
     /** 是否允許高風險自我修改：後台全域開關 OR 本對話已設「一律允許」。 */
     public function writesAllowed(Conversation $conv): bool
     {
@@ -160,12 +191,19 @@ class SkillRunner
                 return ['reply' => "🧩 已開始「{$skill->description()}」（背景處理中），完成後會出現在對話。", 'meta' => ['category' => 'skill', 'skill' => $skill->name(), 'background' => true]];
             }
 
-            $step($this->stepLabel($skill));
+            // 即時回報這一步：先說「為什麼做」(thought)，再說「正在做什麼」(含關鍵參數)
+            $thought = is_array($d) ? trim((string) ($d['thought'] ?? '')) : '';
+            if ($thought !== '') {
+                $step('🤔 '.mb_substr($thought, 0, 160));
+            }
+            $step($this->stepDetail($skill, $args));
             try {
                 $result = $skill->run($args);
             } catch (Throwable $e) {
                 $result = '錯誤：'.$e->getMessage();
             }
+            // 執行完馬上回報結果狀態（精簡預覽），讓使用者看到每一步發生了什麼
+            $step($this->stepResult($skill, (string) $result));
             $obs[] = ['action' => $skill->name(), 'args' => $args, 'result' => mb_substr((string) $result, 0, 3000)];
         }
 
@@ -316,13 +354,14 @@ class SkillRunner
         $obs = is_array($pending['obs'] ?? null) ? $pending['obs'] : [];
         $step = $onStep ?? fn (string $t) => null;
 
-        // 執行這個被確認的高風險步驟
-        $step($this->stepLabel($skill).'（執行中…）');
+        // 執行這個被確認的高風險步驟（即時回報）
+        $step($this->stepDetail($skill, $pending['args'] ?? []).'（已核准，執行中…）');
         try {
             $result = $skill->run($pending['args'] ?? []);
         } catch (Throwable $e) {
             $result = '錯誤：'.$e->getMessage();
         }
+        $step($this->stepResult($skill, (string) $result));
         $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [], 'result' => mb_substr((string) $result, 0, 3000)];
 
         // 接續多輪代理迴圈（confirm 一次後若還有後續步驟，會繼續；'always' 則之後不再問）
