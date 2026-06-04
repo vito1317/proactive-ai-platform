@@ -57,9 +57,11 @@ export function useVoiceChat() {
     function startMic() {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         micCtx = new Ctx();
+        if (micCtx.state === 'suspended') micCtx.resume();
         micSource = micCtx.createMediaStreamSource(micStream);
         const bufSize = 4096;
-        micNode = micCtx.createScriptProcessor(bufSize, 1, 0);
+        // 需 ≥1 output channel，onaudioprocess 才會在多數瀏覽器觸發（先前設 0 → 不觸發）
+        micNode = micCtx.createScriptProcessor(bufSize, 1, 1);
         const ratio = micCtx.sampleRate / IN_SR;
         let wasSpeaking = false;
         micNode.onaudioprocess = (e) => {
@@ -87,6 +89,9 @@ export function useVoiceChat() {
             }
             const bytes = new Uint8Array(i16.buffer);
             emit('audio', JSON.stringify({ audio: Array.from(bytes), sample_rate: IN_SR }));
+            // 輸出填靜音，避免麥克風回授到喇叭
+            const out = e.outputBuffer.getChannelData(0);
+            for (let i = 0; i < out.length; i++) out[i] = 0;
         };
         micSource.connect(micNode);
         micNode.connect(micCtx.destination); // ScriptProcessor 需連到 destination 才會觸發
@@ -105,6 +110,7 @@ export function useVoiceChat() {
         }
 
         playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUT_SR });
+        if (playCtx.state === 'suspended') await playCtx.resume();
         active.value = true;
         status.value = '連線中…';
 
