@@ -98,7 +98,7 @@ class SkillRunner
         $picked = false;
 
         for ($round = count($obs); $round < self::MAX_ROUNDS; $round++) {
-            $d = $this->decide($message, $obs);
+            $d = $this->decide($conv, $message, $obs);
             $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
 
             // 完成 / 沒有合適工具
@@ -155,8 +155,8 @@ class SkillRunner
     /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
     private const BACKGROUND = ['merge-domains'];
 
-    /** 讓 AI 依目前觀察決定下一步工具。 */
-    private function decide(string $message, array $obs): ?array
+    /** 讓 AI 依目前觀察決定下一步工具（帶最近對話脈絡，避免上下文丟失）。 */
+    private function decide(Conversation $conv, string $message, array $obs): ?array
     {
         $catalog = $this->registry->catalog();
         $obsText = '';
@@ -166,10 +166,18 @@ class SkillRunner
         }
         $obsText = $obsText !== '' ? $obsText : '（尚未執行任何步驟）';
 
+        // 最近對話脈絡（讓代理理解多輪上下文，例如「剛剛那個」「再幫我…」）
+        $history = $conv->activeMessages()->latest('id')->limit(6)->get()->reverse()
+            ->map(fn ($m) => "{$m->role}: ".mb_substr((string) $m->content, 0, 300))->implode("\n");
+        $ctx = ($conv->summary ? "（先前摘要）{$conv->summary}\n" : '').($history !== '' ? $history : '（無）');
+
         $prompt = <<<PROMPT
         你是平台操作代理，可「連續」使用工具達成使用者目標（例如：看磁碟滿了→再執行清理→再確認）。
         可用工具：
         {$catalog}
+
+        最近對話脈絡：
+        {$ctx}
 
         使用者目標：「{$message}」
         已執行步驟與結果：

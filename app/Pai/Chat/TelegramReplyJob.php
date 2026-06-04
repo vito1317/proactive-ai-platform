@@ -99,6 +99,8 @@ class TelegramReplyJob implements ShouldQueue
         }
 
         $conv->addMessage('assistant', $reply, $meta);
-        $notifier->sendTelegramTo($this->chatId, $reply);
+        // 待確認的高風險操作 → 附快速回覆鍵盤
+        $buttons = ! empty($meta['pending']) ? ['確認', '一律允許', '取消'] : [];
+        $notifier->sendTelegramTo($this->chatId, $reply, $buttons);
     }
 }

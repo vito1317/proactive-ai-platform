@@ -172,7 +172,15 @@ class ChatStreamController extends Controller
                         throw new StopStreaming;
                     }
                 },
-                fn () => $emit('status', ['text' => '思考中…']),
+                function () {
+                    // LLM 開始輸出推理內容 (reasoning_content)
+                },
+                function () {
+                    // Heartbeat / reasoning token heartbeat
+                },
+                function (string $thoughtDelta) use ($emit) {
+                    $emit('thought', ['text' => $thoughtDelta]);
+                }
             );
         } catch (StopStreaming) {
             $stopped = true;

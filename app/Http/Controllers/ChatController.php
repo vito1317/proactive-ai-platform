@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Pai\Chat\ChatResponder;
 use App\Pai\Chat\Conversation;
 use App\Pai\Cognition\AgentRun;
+use App\Pai\Cognition\RouteCommandJob;
 use App\Pai\Cognition\RunStatus;
 use App\Pai\Perception\EventStatus;
 use App\Pai\Perception\PaiEvent;
@@ -93,6 +94,31 @@ class ChatController extends Controller
                 'tokens' => $r->tokens,
             ]),
         ]);
+    }
+
+    /**
+     * 非串流後備：把訊息丟背景處理（不走 SSE），前端輪詢取回。
+     * 用於 SSE 被 WAF/HTTP2 擋掉時的可靠回退——一般 POST 不受串流規則影響。
+     */
+    public function queue(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'conversation_id' => ['nullable', 'integer'],
+            'message' => ['required', 'string', 'max:2000'],
+        ]);
+        $conv = $this->resolve($request, $data['conversation_id'] ?? null);
+        if ($conv->title === null) {
+            $conv->update(['title' => Str::limit($data['message'], 30)]);
+        }
+        $conv->addMessage('user', $data['message']);
+        $event = PaiEvent::create([
+            'source' => 'chat', 'topic' => 'console.request',
+            'payload' => ['message' => $data['message'], 'conversation_id' => $conv->id],
+            'status' => EventStatus::Received,
+        ]);
+        RouteCommandJob::dispatch($event->id);
+
+        return response()->json(['ok' => true, 'conversation_id' => $conv->id]);
     }
 
     /** 終止回覆 / 插話：標記中止旗標（串流/背景生成皆檢查）+ 取消該對話進行中的任務運行。 */

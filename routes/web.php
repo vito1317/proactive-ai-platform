@@ -28,6 +28,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/chat/send', [ChatController::class, 'send'])->name('chat.send'); // 非串流後備
     Route::post('/chat/new', [ChatController::class, 'new'])->name('chat.new');
     Route::post('/chat/stop', [ChatController::class, 'stop'])->name('chat.stop'); // 終止回覆 / 插話
+    Route::post('/chat/queue', [ChatController::class, 'queue'])->name('chat.queue'); // SSE 失敗時的非串流後備
     Route::post('/stream/chat', [ChatStreamController::class, 'stream'])->name('chat.stream'); // SSE 串流
     Route::get('/chat/events/{event}', [ChatController::class, 'eventStatus'])->name('chat.event_status');
 

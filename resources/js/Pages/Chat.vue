@@ -21,6 +21,7 @@ const input = ref('');
 const sending = ref(false);
 const status = ref('');           // 思考中… / 處理中…
 const steps = ref([]);            // AI 活動軌跡（每步在幹嘛）
+const thought = ref('');          // AI 的思考過程 (Reasoning/Chain of Thought)
 const streamed = ref('');         // 正在串流的 AI 回覆
 const lastSent = ref('');
 const errorText = ref('');
@@ -108,6 +109,14 @@ function onEnter(e) {
     // 中文/日文輸入法選字組字中（IME composition）→ 不送出
     if (e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
+    send();
+}
+
+// 最後一則訊息（判斷是否顯示「確認/一律允許/取消」快速按鈕）
+const lastMsg = computed(() => props.messages[props.messages.length - 1]);
+function quickReply(text) {
+    if (sending.value) return;
+    input.value = text;
     send();
 }
 
@@ -199,7 +208,19 @@ async function send() {
             }
         }
     } catch (e) {
-        if (e.name !== 'AbortError') errorText.value = e.message || 'AI 回覆失敗';
+        // SSE 被 WAF/HTTP2 擋掉或斷線（非使用者主動中止）→ 自動改用非串流後備（背景處理 + 輪詢）
+        if (e.name !== 'AbortError') {
+            try {
+                await fetch('/chat/queue', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+                    body: JSON.stringify({ conversation_id: convId, message: msg }),
+                });
+                // 不報錯——交給輪詢帶出結果
+            } catch (e2) {
+                errorText.value = 'AI 回覆失敗，請稍後再試';
+            }
+        }
     } finally {
         sending.value = false;
         controller = null;
@@ -301,7 +322,14 @@ function newChat() { router.post('/chat/new'); }
                                     </div>
                                     <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
-                                    
+
+                                    <!-- 待確認高風險操作：快速回覆按鈕（只在最後一則顯示） -->
+                                    <div v-if="m.meta?.pending && m.id === lastMsg?.id && !sending" class="mt-2 flex flex-wrap gap-2">
+                                        <button type="button" class="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500" @click="quickReply('確認')">✓ 確認</button>
+                                        <button type="button" class="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300 hover:bg-amber-500/20" @click="quickReply('一律允許')">🔓 一律允許</button>
+                                        <button type="button" class="rounded-lg border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:bg-white/10" @click="quickReply('取消')">✕ 取消</button>
+                                    </div>
+
                                     <!-- 操作進度與動畫 (歷史項目) -->
                                     <div v-if="catLabel(m.meta)" class="mt-3 space-y-1.5 border-t border-white/10 pt-2">
                                         <div class="flex items-center justify-between text-[10px] font-bold tracking-tighter uppercase">

@@ -99,6 +99,7 @@ class LineReplyJob implements ShouldQueue
         }
 
         $conv->addMessage('assistant', $reply, $meta);
-        $notifier->sendLineTo($this->to, $reply);
+        $buttons = ! empty($meta['pending']) ? ['確認', '一律允許', '取消'] : [];
+        $notifier->sendLineTo($this->to, $reply, $buttons);
     }
 }

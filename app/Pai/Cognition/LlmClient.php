@@ -58,7 +58,7 @@ class LlmClient
      * @param  list<array{role: string, content: string}>  $messages
      * @return array{content: string, reasoning: string}
      */
-    public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null, ?callable $onTick = null): array
+    public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null, ?callable $onTick = null, ?callable $onThought = null): array
     {
         $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
         $model = (string) $this->settings->get('llm.model');
@@ -114,6 +114,9 @@ class LlmClient
                     }
                     if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
                         $reasoning .= $delta['reasoning_content'];
+                        if ($onThought) {
+                            $onThought($delta['reasoning_content']);
+                        }
                         if (! $sawReasoning && $onReasoning) {
                             $sawReasoning = true;
                             $onReasoning(true);
@@ -230,7 +233,7 @@ class LlmClient
         $start = strpos($text, '{');
         $end = strrpos($text, '}');
         if ($start === false || $end === false || $end < $start) {
-            throw new LlmException('LLM 回應不含 JSON 物件：'.mb_substr($raw, 0, 200));
+            throw new LlmException('LLM 後端回應不含 JSON 物件：'.mb_substr($raw, 0, 200));
         }
         $json = substr($text, $start, $end - $start + 1);
 

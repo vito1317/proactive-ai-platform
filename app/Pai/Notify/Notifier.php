@@ -48,16 +48,27 @@ class Notifier
         ];
     }
 
-    /** 回覆到指定的 Telegram chat（雙向：bot 收到訊息後回覆發訊者）。 */
-    public function sendTelegramTo(string $chatId, string $text): bool
+    /**
+     * 回覆到指定的 Telegram chat（雙向）。$quickReplies 給快速回覆鍵盤（點一下即送出該文字）。
+     *
+     * @param  list<string>  $quickReplies
+     */
+    public function sendTelegramTo(string $chatId, string $text, array $quickReplies = []): bool
     {
         $token = $this->settings->get('notify.telegram.token');
         if (! $token) {
             return false;
         }
+        $payload = ['chat_id' => $chatId, 'text' => $text];
+        if ($quickReplies !== []) {
+            $payload['reply_markup'] = json_encode([
+                'keyboard' => [array_map(fn ($t) => ['text' => $t], $quickReplies)],
+                'one_time_keyboard' => true, 'resize_keyboard' => true,
+            ], JSON_UNESCAPED_UNICODE);
+        }
 
         return $this->call(fn () => Http::timeout(8)
-            ->post("https://api.telegram.org/bot{$token}/sendMessage", ['chat_id' => $chatId, 'text' => $text]))['ok'];
+            ->post("https://api.telegram.org/bot{$token}/sendMessage", $payload))['ok'];
     }
 
     /** Telegram「輸入中…」動畫（sendChatAction）。約 5 秒過期，生成期間需節流補發。 */
@@ -85,18 +96,26 @@ class Notifier
             ->post('https://api.line.me/v2/bot/chat/loading/start', ['chatId' => $to, 'loadingSeconds' => $seconds]))['ok'];
     }
 
-    /** 回覆/推送到指定的 LINE 對象（userId/groupId/roomId）— 用 push API（雙向）。 */
-    public function sendLineTo(string $to, string $text): bool
+    /**
+     * 回覆/推送到指定的 LINE 對象（push API）。$quickReplies 給快速回覆鈕（點一下即送出該文字）。
+     *
+     * @param  list<string>  $quickReplies
+     */
+    public function sendLineTo(string $to, string $text, array $quickReplies = []): bool
     {
         $token = $this->settings->get('notify.line.token');
         if (! $token) {
             return false;
         }
+        $msg = ['type' => 'text', 'text' => $text];
+        if ($quickReplies !== []) {
+            $msg['quickReply'] = ['items' => array_map(fn ($t) => [
+                'type' => 'action', 'action' => ['type' => 'message', 'label' => mb_substr($t, 0, 20), 'text' => $t],
+            ], $quickReplies)];
+        }
 
         return $this->call(fn () => Http::timeout(8)->withToken($token)
-            ->post('https://api.line.me/v2/bot/message/push', [
-                'to' => $to, 'messages' => [['type' => 'text', 'text' => $text]],
-            ]))['ok'];
+            ->post('https://api.line.me/v2/bot/message/push', ['to' => $to, 'messages' => [$msg]]))['ok'];
     }
 
     /**
