@@ -45,10 +45,13 @@ class AutoRouteTest extends TestCase
         $e = $this->event('主機中了勒索病毒幫我處理');
         RouteCommandJob::dispatchSync($e->id);
 
-        $e->refresh();
-        $this->assertSame('sec-ir', $e->domain);
-        $this->assertSame('routed', $e->status->value);
-        Bus::assertDispatched(RunCoordinatorJob::class, fn ($j) => $j->eventId === $e->id);
+        // 委派給對話大腦：實際路由會建立一個帶 domain 的任務事件並喚醒協調者
+        $taskEvent = PaiEvent::where('domain', 'sec-ir')->latest('id')->first();
+        $this->assertNotNull($taskEvent);
+        $this->assertSame('routed', $taskEvent->status->value);
+        Bus::assertDispatched(RunCoordinatorJob::class, fn ($j) => $j->eventId === $taskEvent->id);
+        // 原 console 指令事件不再靜默 ignored，而是處理完成
+        $this->assertSame('normalized', $e->refresh()->status->value);
     }
 
     public function test_new_domain_generates_and_saves_pack(): void
@@ -88,6 +91,6 @@ class AutoRouteTest extends TestCase
         RouteCommandJob::dispatchSync($e->id);
 
         $this->assertSame('TKN', $this->app->make(Settings::class)->get('notify.telegram.token'));
-        $this->assertSame('configure-notify', $e->refresh()->intent);
+        $this->assertSame('console:configure_notify', $e->refresh()->intent);
     }
 }

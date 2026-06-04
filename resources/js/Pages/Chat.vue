@@ -256,20 +256,22 @@ function newChat() { router.post('/chat/new'); }
                         <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
                             <div class="flex items-start gap-4">
                                 <!-- 核心旋轉動畫 -->
-                                <div class="relative h-12 w-12 shrink-0">
-                                    <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_8s_linear_infinite]"></div>
-                                    <div class="absolute inset-2 rounded-full border-2 border-dotted border-sky-400/50 animate-[spin-reverse_4s_linear_infinite]"></div>
-                                    <div class="absolute inset-0 flex items-center justify-center text-xl animate-pulse">🧠</div>
+                                <div class="relative h-14 w-14 shrink-0">
+                                    <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
+                                    <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
+                                    <!-- 雷達掃描線 -->
+                                    <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
+                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🦾</div>
                                 </div>
                                 <div class="flex-1 space-y-2 font-mono text-xs">
-                                    <div class="flex items-center justify-between text-indigo-300">
-                                        <span class="font-bold tracking-wider">DEEP_COGNITION // 背景生成中</span>
-                                        <span class="flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
+                                    <div class="flex items-center justify-between text-sky-300">
+                                        <span class="font-bold tracking-widest text-[10px] uppercase">OPEN_CLAW // 意圖擷取中</span>
+                                        <span class="flex gap-1.5"><span class="dot-sky"></span><span class="dot-sky" style="animation-delay:.2s"></span><span class="dot-sky" style="animation-delay:.4s"></span></span>
                                     </div>
-                                    <div class="space-y-1 text-slate-400">
-                                        <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> 建立安全連線...</div>
-                                        <div class="flex items-center gap-2"><span class="text-emerald-500">✓</span> 載入會話上下文...</div>
-                                        <div class="flex items-center gap-2"><span class="text-sky-400">></span> 喚醒神經網絡中...<span class="typing-cursor-chat">_</span></div>
+                                    <div class="grid grid-cols-1 gap-1 text-[10px] text-slate-400">
+                                        <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 掃描通訊協定... [OK]</div>
+                                        <div class="flex items-center gap-2"><span class="text-emerald-500 opacity-70">>></span> 檢索領域資料庫... [OK]</div>
+                                        <div class="flex items-center gap-2"><span class="text-sky-400 animate-pulse">>></span> 正在利用 OpenClaw 擷取知識...<span class="typing-cursor-chat">_</span></div>
                                     </div>
                                     <div class="mt-2 flex items-center justify-between gap-2 border-t border-white/5 pt-2">
                                         <span class="text-[10px] italic text-slate-500">{{ status === '終止中…' ? '終止中…' : '可先處理其他任務，完成後會自動顯示。' }}</span>
@@ -323,6 +325,7 @@ function newChat() { router.post('/chat/new'); }
 .btn-send:disabled { opacity: 0.5; }
 .ooda-dot { width: 8px; height: 8px; border-radius: 9999px; background: #34d399; box-shadow: 0 0 8px #34d399; }
 .dot { width: 6px; height: 6px; border-radius: 9999px; background: #94a3b8; display: inline-block; animation: blink 1s infinite; }
+.dot-sky { width: 4px; height: 4px; border-radius: 9999px; background: #38bdf8; display: inline-block; animation: blink 1s infinite; }
 .cursor { animation: blink 1s steps(1) infinite; color: #818cf8; }
 @keyframes blink { 0%,100% { opacity: .2 } 50% { opacity: 1 } }
 
