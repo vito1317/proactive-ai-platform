@@ -70,11 +70,13 @@ onMounted(scrollDown);
 watch([streamed, status, () => props.messages.length], scrollDown);
 
 // 若最後一則是使用者訊息且尚無 AI 回覆 → 代表回覆仍在背景生成（例如剛重新整理、
-// 或關掉串流連線後）。輪詢直到回覆出現，避免「重整後 AI 像沒回應」。
+// 或關掉串流連線後）。輪詢直到回覆出現，避免「重整後 AI像沒回應」。
 const awaitingReply = computed(() => {
     const m = props.messages;
     return !sending.value && m.length > 0 && m[m.length - 1].role === 'user';
 });
+let pollTimer = null;
+let pollCount = 0;
 function syncAwaiting() {
     if (awaitingReply.value && !pollTimer) {
         pollCount = 0;
@@ -150,7 +152,6 @@ async function stopReply() {
 async function stopAwaiting() {
     status.value = '終止中…';
     await requestStop();
-    // 背景程序停下後會存一則回覆，輪詢會自動帶出
 }
 
 async function send() {
@@ -272,27 +273,20 @@ function newChat() { router.post('/chat/new'); }
                                     <!-- AI 執行歷程動畫圖 (Visual Trace) -->
                                     <div v-if="steps.length || (!streamed && status)" class="trace-container">
                                         <div v-for="(s, i) in (steps.length ? steps : [status])" :key="i" class="trace-item">
-                                            <!-- 連接線 (最後一項不畫) -->
                                             <div v-if="i < (steps.length ? steps.length : 1) - 1" 
-                                                 class="trace-line" 
-                                                 :class="{ 'trace-line--active': true }"
+                                                 class="trace-line trace-line--active" 
                                                  :style="{ '--from-color': getStepColor(s), '--to-color': steps[i+1] ? getStepColor(steps[i+1]) : 'transparent' }">
                                             </div>
-
-                                            <!-- 節點 -->
-                                            <div class="trace-node" 
-                                                 :class="{ 'trace-node--active': true, 'trace-node--pulsing': i === (steps.length ? steps.length : 1) - 1 && !streamed }"
+                                            <div class="trace-node trace-node--active" 
+                                                 :class="{ 'trace-node--pulsing': !streamed && i === (steps.length ? steps.length : 1) - 1 }"
                                                  :style="{ '--accent': getStepColor(s) }">
                                                 {{ getStepIcon(s) }}
                                             </div>
-
-                                            <!-- 標籤 -->
-                                            <div class="trace-label" :class="{ 'trace-label--active': i === (steps.length ? steps.length : 1) - 1 }">
+                                            <div class="trace-label trace-label--active">
                                                 {{ s }}<span v-if="i === (steps.length ? steps.length : 1) - 1 && !streamed" class="typing-cursor-chat">_</span>
                                             </div>
                                         </div>
                                     </div>
-
                                     <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
                                 </template>
                                 <template v-else>
@@ -305,11 +299,9 @@ function newChat() { router.post('/chat/new'); }
                                         </div>
                                         <div class="mb-2 border-b border-white/5"></div>
                                     </div>
-
-                                    <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
                                     <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
-
+                                    
                                     <!-- 操作進度與動畫 (歷史項目) -->
                                     <div v-if="catLabel(m.meta)" class="mt-3 space-y-1.5 border-t border-white/10 pt-2">
                                         <div class="flex items-center justify-between text-[10px] font-bold tracking-tighter uppercase">
@@ -326,30 +318,27 @@ function newChat() { router.post('/chat/new'); }
                                                  :style="{ width: `${eventStatuses[m.meta.event_id]?.percent || 100}%` }"></div>
                                         </div>
                                     </div>
-                                    </template>
-                                    </div>
-                                    </div>
-                                    </TransitionGroup>
-
-                                    <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
-                                    <div v-if="awaitingReply" class="flex justify-start">
-                                    <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
-                                    <div class="flex items-start gap-4">
-                                    <!-- 核心旋轉動畫 -->
-                                    <div class="relative h-14 w-14 shrink-0">
+                                </template>
+                            </div>
+                        </div>
+                    </TransitionGroup>
+                    
+                    <!-- 重整後仍在背景生成的回覆：顯示等待中 -->
+                    <div v-if="awaitingReply" class="flex justify-start">
+                        <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
+                            <div class="flex items-start gap-4">
+                                <div class="relative h-14 w-14 shrink-0">
                                     <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
                                     <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
-                                    <!-- 雷達掃描線 -->
                                     <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
                                     <div class="absolute inset-0 flex items-center justify-center text-2xl animate-[bounce_2s_ease-in-out_infinite]">🧠</div>
-                                    </div>
-                                    <div class="flex-1 space-y-2 font-mono text-xs">
+                                </div>
+                                <div class="flex-1 space-y-2 font-mono text-xs">
                                     <div class="flex items-center justify-between text-sky-300">
                                         <span class="font-bold tracking-widest text-[10px] uppercase">NEURAL_SYNC // 意圖擷取中</span>
                                         <span class="flex gap-1.5"><span class="dot-sky"></span><span class="dot-sky" style="animation-delay:.2s"></span><span class="dot-sky" style="animation-delay:.4s"></span></span>
                                     </div>
                                     <div class="grid grid-cols-1 gap-1 text-[10px] text-slate-400">
-                                        <!-- 顯示真實進度步驟 -->
                                         <template v-if="eventStatuses[conversation.active_event_id]?.runs?.[0]?.steps?.length">
                                             <div v-for="(s, idx) in eventStatuses[conversation.active_event_id].runs[0].steps" :key="idx" class="flex items-center gap-2">
                                                 <span class="text-emerald-500 opacity-70">>></span> {{ s }} [OK]
@@ -372,18 +361,17 @@ function newChat() { router.post('/chat/new'); }
                                             <button type="button" class="shrink-0 rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/20" @click="stopAwaiting">■ 終止</button>
                                         </div>
                                     </div>
-                                    </div>
-                                    </div>
-                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <p v-if="errorText" class="text-center text-xs text-red-400">{{ errorText }}</p>
                 </div>
 
-                <!-- 對話框（獨立分離於底部）；TG/LINE session 為唯讀檢視 -->
                 <div v-if="conversation.channel" class="border-t border-white/10 bg-slate-950/60 px-5 py-3 text-center text-xs text-slate-500">
                     {{ conversation.channel === 'tg' ? '✈️ Telegram' : '💬 LINE' }} 會話 — bot 自動回覆中，此處為唯讀檢視
                 </div>
                 <div v-else class="border-t border-white/10 bg-slate-950/60 px-5 py-3">
-                    <!-- 生成中的進度條（不再卡在「送出中」）-->
                     <div v-if="sending" class="mb-2 flex items-center justify-between gap-2 text-xs text-indigo-300">
                         <span class="inline-flex items-center gap-2">
                             <span class="dot"></span>
@@ -392,17 +380,10 @@ function newChat() { router.post('/chat/new'); }
                         <button type="button" class="rounded-md border border-red-400/40 bg-red-500/10 px-2 py-0.5 text-red-300 hover:bg-red-500/20" @click="stopReply">■ 終止</button>
                     </div>
                     <form class="flex items-end gap-2" @submit.prevent="send">
-                        <textarea
-                            v-model="input"
-                            rows="1"
-                            :placeholder="sending ? '生成中也可直接打字插話（會打斷目前回覆）…' : '跟 AI 說一句話…（Enter 送出，Shift+Enter 換行）'"
-                            class="inp flex-1 resize-none"
-                            @keydown.enter="onEnter"
-                        ></textarea>
+                        <textarea v-model="input" rows="1" :placeholder="sending ? '生成中也可直接打字插話…' : '跟 AI 說一句話…'" class="inp flex-1 resize-none" @keydown.enter="onEnter"></textarea>
                         <button v-if="sending" type="button" class="btn-send !bg-red-600 hover:!bg-red-500" @click="stopReply">■</button>
                         <button type="submit" :disabled="!input.trim()" class="btn-send">{{ sending ? '插話' : '送出' }}</button>
                     </form>
-                    <p class="mt-1 text-[10px] text-slate-600">即時串流；可隨時按「終止」停止，或直接打字「插話」打斷目前回覆。</p>
                 </div>
             </main>
         </div>
@@ -422,8 +403,6 @@ function newChat() { router.post('/chat/new'); }
 .dot-sky { width: 4px; height: 4px; border-radius: 9999px; background: #38bdf8; display: inline-block; animation: blink 1s infinite; }
 .cursor { animation: blink 1s steps(1) infinite; color: #818cf8; }
 @keyframes blink { 0%,100% { opacity: .2 } 50% { opacity: 1 } }
-
-/* Markdown 渲染（對話框）：補回 Tailwind preflight 移除的清單/標題等樣式 */
 .md { font-size: 0.875rem; line-height: 1.6; word-break: break-word; }
 .md :first-child { margin-top: 0; }
 .md :last-child { margin-bottom: 0; }
@@ -442,105 +421,19 @@ function newChat() { router.post('/chat/new'); }
 .md th, .md td { border: 1px solid rgba(255,255,255,0.15); padding: 0.3rem 0.55rem; }
 .md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.12); margin: 0.7rem 0; }
 .md strong { font-weight: 700; color: #f1f5f9; }
-
-/* Mini Terminal Animations */
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-@keyframes spin-reverse {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(-360deg); }
-}
-@keyframes terminal-scan {
-    0% { background-position: 0% -100%; }
-    100% { background-position: 0% 200%; }
-}
-.mini-terminal {
-    position: relative;
-    overflow: hidden;
-    background-image: linear-gradient(0deg, transparent 0%, rgba(56,189,248,0.1) 50%, transparent 100%);
-    background-size: 100% 200%;
-    animation: terminal-scan 3s linear infinite;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
-}
-.typing-cursor-chat {
-    animation: blink 1s step-end infinite;
-    font-weight: bold;
-    color: #38bdf8;
-}
-
-/* ---------- 歷程動畫圖 (Visual Trace) ---------- */
-.trace-container {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    margin-bottom: 0.75rem;
-    padding-left: 0.5rem;
-}
-.trace-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    position: relative;
-}
-/* 連接線 */
-.trace-line {
-    position: absolute;
-    left: 9px;
-    top: 20px;
-    bottom: -4px;
-    width: 2px;
-    background: linear-gradient(to bottom, var(--from-color), var(--to-color, transparent));
-    opacity: 0.3;
-    z-index: 1;
-}
-.trace-line--active {
-    opacity: 0.8;
-    box-shadow: 0 0 8px var(--from-color);
-}
-/* 節點 */
-.trace-node {
-    position: relative;
-    z-index: 10;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    transition: all 0.3s ease;
-}
-.trace-node--active {
-    border-color: var(--accent);
-    box-shadow: 0 0 12px var(--accent), inset 0 0 4px var(--accent);
-    transform: scale(1.1);
-}
-.trace-label {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11px;
-    color: #94a3b8;
-    padding-top: 2px;
-    transition: color 0.3s;
-}
-.trace-label--active {
-    color: #f1f5f9;
-    text-shadow: 0 0 8px rgba(255,255,255,0.3);
-}
-
-@keyframes pulse-ring {
-    0% { transform: scale(0.8); opacity: 0.5; }
-    100% { transform: scale(1.5); opacity: 0; }
-}
-.trace-node--pulsing::before {
-    content: '';
-    position: absolute;
-    inset: -4px;
-    border-radius: 50%;
-    border: 1px solid var(--accent);
-    animation: pulse-ring 1.5s cubic-bezier(0.24, 0, 0.38, 1) infinite;
-}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+@keyframes spin-reverse { 0% { transform: rotate(0deg); } 100% { transform: rotate(-360deg); } }
+@keyframes terminal-scan { 0% { background-position: 0% -100%; } 100% { background-position: 0% 200%; } }
+.mini-terminal { position: relative; overflow: hidden; background-image: linear-gradient(0deg, transparent 0%, rgba(56,189,248,0.1) 50%, transparent 100%); background-size: 100% 200%; animation: terminal-scan 3s linear infinite; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
+.typing-cursor-chat { animation: blink 1s step-end infinite; font-weight: bold; color: #38bdf8; }
+.trace-container { display: flex; flex-direction: column; gap: 0; margin-bottom: 0.75rem; padding-left: 0.5rem; }
+.trace-item { display: flex; align-items: flex-start; gap: 0.75rem; position: relative; }
+.trace-line { position: absolute; left: 9px; top: 20px; bottom: -4px; width: 2px; background: linear-gradient(to bottom, var(--from-color), var(--to-color, transparent)); opacity: 0.3; z-index: 1; }
+.trace-line--active { opacity: 0.8; box-shadow: 0 0 8px var(--from-color); }
+.trace-node { position: relative; z-index: 10; width: 20px; height: 20px; border-radius: 50%; background: #1e293b; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 10px; transition: all 0.3s ease; }
+.trace-node--active { border-color: var(--accent); box-shadow: 0 0 12px var(--accent), inset 0 0 4px var(--accent); transform: scale(1.1); }
+.trace-label { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; color: #94a3b8; padding-top: 2px; transition: color 0.3s; }
+.trace-label--active { color: #f1f5f9; text-shadow: 0 0 8px rgba(255,255,255,0.3); }
+@keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(1.5); opacity: 0; } }
+.trace-node--pulsing::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--accent); animation: pulse-ring 1.5s cubic-bezier(0.24, 0, 0.38, 1) infinite; }
 </style>

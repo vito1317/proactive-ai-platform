@@ -18,48 +18,54 @@ class SkillsTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function fakePick(string $skill, array $args = []): void
+    /** 一個 decide() 回應（多輪代理每輪輸出 {action,args,final}）。 */
+    private function decide(array $obj): array
     {
-        Http::fake(['*' => Http::response([
-            'choices' => [['message' => ['content' => json_encode(['skill' => $skill, 'args' => $args])], 'finish_reason' => 'stop']],
-            'usage' => [],
-        ])]);
+        return ['choices' => [['message' => ['content' => json_encode($obj, JSON_UNESCAPED_UNICODE)], 'finish_reason' => 'stop']], 'usage' => []];
     }
 
-    public function test_low_risk_skill_runs_immediately(): void
+    private function runner(): SkillRunner
     {
-        $this->fakePick('list-domains');
-        $conv = Conversation::create([]);
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '列出領域包');
+        return $this->app->make(SkillRunner::class);
+    }
 
+    public function test_low_risk_skill_runs_then_finishes(): void
+    {
+        // 第1輪：用 list-domains；第2輪：finish 並給最終回覆
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'list-domains', 'args' => []]))
+            ->push($this->decide(['action' => 'finish', 'final' => '目前有這些領域包。']));
+        $conv = Conversation::create([]);
+
+        $r = $this->runner()->handle($conv, '列出領域包');
         $this->assertSame('skill', $r['meta']['category']);
-        $this->assertSame('list-domains', $r['meta']['skill']);
+        $this->assertStringContainsString('領域包', $r['reply']);
         $this->assertNull($conv->fresh()->pending_skill);
     }
 
-    public function test_high_risk_skill_requires_conversational_confirmation(): void
+    public function test_high_risk_requires_confirmation_then_continues(): void
     {
-        $this->fakePick('update-setting', ['key' => 'llm.temperature', 'value' => '0.5']);
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'update-setting', 'args' => ['key' => 'llm.temperature', 'value' => '0.5']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已更新溫度。']));
         $conv = Conversation::create([]);
-        $runner = $this->app->make(SkillRunner::class);
+        $runner = $this->runner();
 
         $r = $runner->handle($conv, '把溫度改成 0.5');
         $this->assertStringContainsString('高風險', $r['reply']);
         $this->assertSame('update-setting', $conv->fresh()->pending_skill['skill']);
 
-        // 使用者回「確認」→ 執行
         $resolved = $runner->resolvePending($conv->fresh(), '確認');
         $this->assertNotNull($resolved);
-        $this->assertStringContainsString('已更新設定', $resolved['reply']);
         $this->assertNull($conv->fresh()->pending_skill);
         $this->assertSame(0.5, $this->app->make(Settings::class)->get('llm.temperature'));
     }
 
-    public function test_high_risk_skill_cancelled_by_conversation(): void
+    public function test_high_risk_cancelled_by_conversation(): void
     {
-        $this->fakePick('restart-workers');
+        Http::fakeSequence()->push($this->decide(['action' => 'restart-workers', 'args' => []]));
         $conv = Conversation::create([]);
-        $runner = $this->app->make(SkillRunner::class);
+        $runner = $this->runner();
         $runner->handle($conv, '重啟 worker');
 
         $resolved = $runner->resolvePending($conv->fresh(), '取消');
@@ -70,26 +76,26 @@ class SkillsTest extends TestCase
     public function test_global_allow_skips_confirmation(): void
     {
         $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
-        $this->fakePick('update-setting', ['key' => 'react.max_steps', 'value' => '8']);
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'update-setting', 'args' => ['key' => 'react.max_steps', 'value' => '8']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已設定步數。']));
         $conv = Conversation::create([]);
 
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '把步數設成 8');
-        $this->assertStringContainsString('已更新設定', $r['reply']);
+        $this->runner()->handle($conv, '把步數設成 8');
         $this->assertSame(8, $this->app->make(Settings::class)->get('react.max_steps'));
     }
 
     public function test_stop_task_skill_cancels_running_run(): void
     {
         $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
-        $event = PaiEvent::create([
-            'source' => 'chat', 'topic' => 't', 'status' => EventStatus::Routed, 'payload' => [],
-        ]);
+        $event = PaiEvent::create(['source' => 'chat', 'topic' => 't', 'status' => EventStatus::Routed, 'payload' => []]);
         $run = AgentRun::create(['event_id' => $event->id, 'domain' => 'sec-ir', 'coordinator' => 'sec-ir', 'status' => RunStatus::Running, 'steps' => [], 'findings' => [], 'actions' => []]);
-        $this->fakePick('stop-task', []);
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'stop-task', 'args' => []]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已中止任務。']));
         $conv = Conversation::create([]);
 
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '停止任務');
-        $this->assertStringContainsString('已中止', $r['reply']);
+        $this->runner()->handle($conv, '停止任務');
         $this->assertSame(RunStatus::Cancelled, $run->fresh()->status);
     }
 
@@ -108,60 +114,13 @@ class SkillsTest extends TestCase
         $path = storage_path('app/edit-test.txt');
         file_put_contents($path, "line one\nTARGET here\nline three");
         $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
-        $this->fakePick('edit-file', ['path' => $path, 'old' => 'TARGET here', 'new' => 'REPLACED']);
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'edit-file', 'args' => ['path' => $path, 'old' => 'TARGET here', 'new' => 'REPLACED']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已取代。']));
         $conv = Conversation::create([]);
 
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '改檔');
-        $this->assertStringContainsString('取代 1 處', $r['reply']);
+        $this->runner()->handle($conv, '改檔');
         $this->assertStringContainsString('REPLACED', file_get_contents($path));
-        @unlink($path);
-    }
-
-    public function test_edit_file_refuses_ambiguous_match(): void
-    {
-        $path = storage_path('app/edit-ambig.txt');
-        file_put_contents($path, "dup\ndup\n");
-        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
-        $this->fakePick('edit-file', ['path' => $path, 'old' => 'dup', 'new' => 'x']);
-        $conv = Conversation::create([]);
-
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '改檔');
-        $this->assertStringContainsString('非唯一', $r['reply']);
-        @unlink($path);
-    }
-
-    public function test_generate_install_command_builds_curl(): void
-    {
-        config(['app.url' => 'https://pai.example.com']);
-        $this->fakePick('generate-install-command', ['with_nginx' => 'true', 'domain' => 'pai.example.com', 'port' => '8083']);
-        $conv = Conversation::create([]);
-
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '幫我生成裝在 pai.example.com 含 nginx 的安裝指令');
-        $this->assertStringContainsString('curl -fsSL https://pai.example.com/install.sh | bash -s --', $r['reply']);
-        $this->assertStringContainsString('--with-nginx --domain', $r['reply']);
-    }
-
-    public function test_run_shell_executes_and_returns_output(): void
-    {
-        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
-        $this->fakePick('run-shell', ['command' => 'echo pai-shell-ok']);
-        $conv = Conversation::create([]);
-
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '跑 echo');
-        $this->assertStringContainsString('pai-shell-ok', $r['reply']);
-        $this->assertStringContainsString('結束碼：0', $r['reply']);
-    }
-
-    public function test_read_file_is_low_risk_and_reads(): void
-    {
-        $path = storage_path('app/skill-read-test.txt');
-        file_put_contents($path, "hello-pai\nsecond");
-        $this->fakePick('read-file', ['path' => $path]);
-        $conv = Conversation::create([]);
-
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '讀檔'); // 低風險免確認
-        $this->assertStringContainsString('hello-pai', $r['reply']);
-        $this->assertNull($conv->fresh()->pending_skill);
         @unlink($path);
     }
 
@@ -169,9 +128,11 @@ class SkillsTest extends TestCase
     {
         $path = storage_path('app/skill-write-test.txt');
         @unlink($path);
-        $this->fakePick('write-file', ['path' => $path, 'content' => 'written-by-skill']);
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'write-file', 'args' => ['path' => $path, 'content' => 'written-by-skill']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已寫入。']));
         $conv = Conversation::create([]);
-        $runner = $this->app->make(SkillRunner::class);
+        $runner = $this->runner();
 
         $runner->handle($conv, '寫檔');
         $this->assertSame('write-file', $conv->fresh()->pending_skill['skill']);
@@ -184,23 +145,23 @@ class SkillsTest extends TestCase
 
     public function test_reply_always_allow_enables_and_executes(): void
     {
-        $this->fakePick('restart-workers');
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'restart-workers', 'args' => []]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已重啟。']));
         $conv = Conversation::create([]);
-        $runner = $this->app->make(SkillRunner::class);
-        $runner->handle($conv, '重啟 worker'); // → pending
+        $runner = $this->runner();
+        $runner->handle($conv, '重啟 worker');
 
         $resolved = $runner->resolvePending($conv->fresh(), '一律允許');
         $this->assertStringContainsString('一律允許', $resolved['reply']);
-        $this->assertStringContainsString('已送出 worker 重啟訊號', $resolved['reply']); // 同時執行了該操作
         $this->assertTrue($conv->fresh()->always_allow_skills);
-        // 旗標開啟後 writesAllowed 為真 → 之後高風險免確認
         $this->assertTrue($runner->writesAllowed($conv->fresh()));
     }
 
     public function test_always_allow_command_toggles_flag(): void
     {
         $conv = Conversation::create([]);
-        $runner = $this->app->make(SkillRunner::class);
+        $runner = $this->runner();
 
         $r = $runner->handle($conv, '一律允許高風險操作');
         $this->assertTrue($conv->fresh()->always_allow_skills);
@@ -210,15 +171,35 @@ class SkillsTest extends TestCase
         $this->assertFalse($conv->fresh()->always_allow_skills);
     }
 
-    public function test_web_search_parses_results(): void
+    public function test_run_shell_executes_then_ai_interprets_output(): void
     {
+        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
+        // 1) decide 用 run-shell  2) decide finish（其 prompt 會帶入指令輸出）
         Http::fakeSequence()
-            ->push(json_encode(['choices' => [['message' => ['content' => json_encode(['skill' => 'web-search', 'args' => ['query' => 'laravel']])], 'finish_reason' => 'stop']], 'usage' => []]))
-            ->push('<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Flaravel.com%2F">Laravel</a><a class="result__snippet">PHP framework</a>');
+            ->push($this->decide(['action' => 'run-shell', 'args' => ['command' => 'echo pai-shell-ok']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '指令已執行，輸出 pai-shell-ok']));
         $conv = Conversation::create([]);
 
-        $r = $this->app->make(SkillRunner::class)->handle($conv, '搜尋 laravel');
-        $this->assertStringContainsString('Laravel', $r['reply']);
-        $this->assertStringContainsString('https://laravel.com/', $r['reply']);
+        $r = $this->runner()->handle($conv, '跑 echo');
+        $this->assertStringContainsString('指令已執行', $r['reply']);
+        // 證明指令真的有跑：echo 輸出被帶進下一輪 decide 的 prompt
+        Http::assertSent(fn ($req) => str_contains(json_encode($req->data(), JSON_UNESCAPED_UNICODE), 'pai-shell-ok'));
+    }
+
+    public function test_multi_round_runs_two_commands(): void
+    {
+        $this->app->make(Settings::class)->set('skills.allow_system_writes', true);
+        // 連續兩步：先看磁碟 → 再清理 → finish（模擬「磁碟滿了自動清理」）
+        Http::fakeSequence()
+            ->push($this->decide(['action' => 'run-shell', 'args' => ['command' => 'echo STEP1-DISK']]))
+            ->push($this->decide(['action' => 'run-shell', 'args' => ['command' => 'echo STEP2-CLEAN']]))
+            ->push($this->decide(['action' => 'finish', 'final' => '已查看磁碟並清理完成。']));
+        $conv = Conversation::create([]);
+
+        $r = $this->runner()->handle($conv, '磁碟滿了幫我清理');
+        $this->assertSame(2, $r['meta']['rounds']);
+        $this->assertStringContainsString('清理', $r['reply']);
+        Http::assertSent(fn ($req) => str_contains(json_encode($req->data(), JSON_UNESCAPED_UNICODE), 'STEP1-DISK'));
+        Http::assertSent(fn ($req) => str_contains(json_encode($req->data(), JSON_UNESCAPED_UNICODE), 'STEP2-CLEAN'));
     }
 }

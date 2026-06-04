@@ -78,29 +78,136 @@ class SkillRunner
             ];
         }
 
-        $step('🧠 判斷要用哪個能力…');
-        $pick = $this->pick($message);
-        $skill = $pick ? $this->registry->get($pick['skill']) : null;
-        if (! $skill) {
-            // 對應不到具體技能 → 交回對話大腦正常回答（而非丟一串技能清單）
-            return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
+        // 進入多輪代理迴圈：AI 可連續用工具（看結果再決定下一步），直到完成
+        return $this->agentic($conv, $message, $onStep, []);
+    }
+
+    /** 連續執行步數上限（避免失控）。 */
+    private const MAX_ROUNDS = 6;
+
+    /**
+     * 多輪代理：每輪讓 AI 依「目前已執行結果」決定下一個工具，跑完看結果再決定下一步，
+     * 直到 finish 或達上限。高風險步驟若未允許 → 暫存請求確認（確認後接續同一迴圈）。
+     *
+     * @param  list<array{action:string,args:array,result:string}>  $obs  已累積的觀察
+     * @return array{reply: string, meta: array<string,mixed>}
+     */
+    private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs): array
+    {
+        $step = $onStep ?? fn (string $t) => null;
+        $picked = false;
+
+        for ($round = count($obs); $round < self::MAX_ROUNDS; $round++) {
+            $d = $this->decide($message, $obs);
+            $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
+
+            // 完成 / 沒有合適工具
+            if (in_array($action, ['finish', 'none', ''], true)) {
+                $final = trim((string) ($d['final'] ?? ''));
+                if (! $picked && $obs === [] && $final === '') {
+                    // 第一步就判定無工具可用 → 交回對話大腦正常回答
+                    return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
+                }
+
+                return ['reply' => $final !== '' ? $final : $this->summarize($message, $obs), 'meta' => ['category' => 'skill', 'rounds' => count($obs)]];
+            }
+
+            $skill = $this->registry->get($action);
+            if (! $skill) {
+                $obs[] = ['action' => $action, 'args' => [], 'result' => "未知工具「{$action}」，略過"];
+
+                continue;
+            }
+            $args = is_array($d['args'] ?? null) ? $d['args'] : [];
+            $picked = true;
+
+            // 高風險未允許 → 暫存（含已累積 obs）、請求對話確認；確認後由 resolvePending 接續迴圈
+            if ($skill->isHighRisk() && ! $this->writesAllowed($conv)) {
+                $conv->update(['pending_skill' => ['skill' => $skill->name(), 'args' => $args, 'message' => $message, 'obs' => $obs]]);
+                $argText = $args === [] ? '' : '（'.collect($args)->map(fn ($v, $k) => "{$k}={$v}")->implode('，').'）';
+
+                return [
+                    'reply' => "⚠️ 我接下來想執行高風險步驟：「{$skill->description()}」{$argText}\n回覆「確認」執行、「一律允許」之後都不再問、「取消」作罷。",
+                    'meta' => ['category' => 'skill', 'pending' => $skill->name()],
+                ];
+            }
+
+            // 重型生成型技能 → 背景執行，視為終止
+            if (in_array($skill->name(), self::BACKGROUND, true)) {
+                RunSkillJob::dispatch($conv->id, $skill->name(), $args);
+
+                return ['reply' => "🧩 已開始「{$skill->description()}」（背景處理中），完成後會出現在對話。", 'meta' => ['category' => 'skill', 'skill' => $skill->name(), 'background' => true]];
+            }
+
+            $step($this->stepLabel($skill));
+            try {
+                $result = $skill->run($args);
+            } catch (Throwable $e) {
+                $result = '錯誤：'.$e->getMessage();
+            }
+            $obs[] = ['action' => $skill->name(), 'args' => $args, 'result' => mb_substr((string) $result, 0, 3000)];
         }
-        $args = $pick['args'] ?? [];
-        $step($this->stepLabel($skill));
 
-        // 低風險或已允許（全域 / 本對話一律允許）→ 直接執行
-        if (! $skill->isHighRisk() || $this->writesAllowed($conv)) {
-            return $this->execute($conv, $skill, $args);
+        // 達步數上限 → 用目前結果做總結
+        return ['reply' => $this->summarize($message, $obs)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs)]];
+    }
+
+    /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
+    private const BACKGROUND = ['merge-domains'];
+
+    /** 讓 AI 依目前觀察決定下一步工具。 */
+    private function decide(string $message, array $obs): ?array
+    {
+        $catalog = $this->registry->catalog();
+        $obsText = '';
+        foreach ($obs as $i => $o) {
+            $a = json_encode($o['args'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $obsText .= ($i + 1).'. '.$o['action'].'('.$a.') → '.mb_substr((string) $o['result'], 0, 1500)."\n";
+        }
+        $obsText = $obsText !== '' ? $obsText : '（尚未執行任何步驟）';
+
+        $prompt = <<<PROMPT
+        你是平台操作代理，可「連續」使用工具達成使用者目標（例如：看磁碟滿了→再執行清理→再確認）。
+        可用工具：
+        {$catalog}
+
+        使用者目標：「{$message}」
+        已執行步驟與結果：
+        {$obsText}
+
+        決定下一步，只輸出 JSON：
+        {"thought":"簡述","action":"工具名 或 finish","args":{...},"final":"當 action=finish 時，根據實際結果用繁體中文回覆使用者（解讀重點、不要編造）"}
+        規則：一次一個工具；目標已達成/資訊已足夠/無工具可用 → action=finish 並填 final；破壞性操作前先觀察再動手。
+        /no_think
+        PROMPT;
+
+        try {
+            return LlmClient::extractJson($this->llm->chat([['role' => 'user', 'content' => $prompt]], ['max_tokens' => 1024]));
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** 根據累積結果產生最終自然語言回覆。 */
+    private function summarize(string $message, array $obs): string
+    {
+        if ($obs === []) {
+            return '我沒有可執行的步驟。';
+        }
+        $results = collect($obs)->map(fn ($o) => $o['action'].' → '.mb_substr((string) $o['result'], 0, 1500))->implode("\n");
+        try {
+            $r = trim($this->llm->chat([
+                ['role' => 'system', 'content' => '根據以下工具實際執行結果，用繁體中文回答使用者目標的結論與重點；只依結果、不要編造。'],
+                ['role' => 'user', 'content' => "目標：{$message}\n結果：\n{$results}"],
+            ]));
+            if ($r !== '') {
+                return $r;
+            }
+        } catch (Throwable) {
+            // ignore
         }
 
-        // 高風險且未允許 → 暫存、要求對話確認
-        $conv->update(['pending_skill' => ['skill' => $skill->name(), 'args' => $args]]);
-        $argText = $args === [] ? '' : '（'.collect($args)->map(fn ($v, $k) => "{$k}={$v}")->implode('，').'）';
-
-        return [
-            'reply' => "⚠️ 這是高風險操作，會修改系統：\n「{$skill->description()}」{$argText}\n\n確定要執行嗎？回覆「確認」執行一次、「一律允許」之後都不再問、「取消」則作罷。",
-            'meta' => ['category' => 'skill', 'pending' => $skill->name()],
-        ];
+        return $results;
     }
 
     /**
@@ -131,63 +238,26 @@ class SkillRunner
         if (! $skill) {
             return ['reply' => '原本要執行的技能已不存在，已取消。', 'meta' => ['category' => 'skill']];
         }
-        if ($onStep) {
-            $onStep($this->stepLabel($skill).'（執行中，模型較慢請稍候）');
-        }
-        $result = $this->execute($conv, $skill, $pending['args'] ?? []);
-        if ($verdict === 'always') {
-            $result['reply'] = "🔓（已開啟本對話「一律允許」，之後不再逐次詢問）\n".$result['reply'];
-        }
+        $message = $pending['message'] ?? '';
+        $obs = is_array($pending['obs'] ?? null) ? $pending['obs'] : [];
+        $step = $onStep ?? fn (string $t) => null;
 
-        return $result;
-    }
-
-    /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
-    private const BACKGROUND = ['merge-domains'];
-
-    private function execute(Conversation $conv, Skill $skill, array $args): array
-    {
-        if (in_array($skill->name(), self::BACKGROUND, true)) {
-            RunSkillJob::dispatch($conv->id, $skill->name(), $args);
-
-            return [
-                'reply' => "🧩 已開始「{$skill->description()}」，這需要一點時間（背景處理中），完成後會自動出現在對話。",
-                'meta' => ['category' => 'skill', 'skill' => $skill->name(), 'background' => true],
-            ];
-        }
+        // 執行這個被確認的高風險步驟
+        $step($this->stepLabel($skill).'（執行中…）');
         try {
-            $reply = $skill->run($args);
+            $result = $skill->run($pending['args'] ?? []);
         } catch (Throwable $e) {
-            $reply = "執行技能「{$skill->name()}」時發生錯誤：".$e->getMessage();
+            $result = '錯誤：'.$e->getMessage();
+        }
+        $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [], 'result' => mb_substr((string) $result, 0, 3000)];
+
+        // 接續多輪代理迴圈（confirm 一次後若還有後續步驟，會繼續；'always' 則之後不再問）
+        $out = $this->agentic($conv, $message, $onStep, $obs);
+        if ($verdict === 'always') {
+            $out['reply'] = "🔓（已開啟本對話「一律允許」）\n".$out['reply'];
         }
 
-        return ['reply' => $reply, 'meta' => ['category' => 'skill', 'skill' => $skill->name()]];
-    }
-
-    /** LLM：把訊息對應到技能 + 參數。 */
-    private function pick(string $message): ?array
-    {
-        $catalog = $this->registry->catalog();
-        $prompt = <<<PROMPT
-        你是平台操作路由器。根據使用者訊息，從下列技能挑出最合適的一個並填入參數。
-        技能清單：
-        {$catalog}
-
-        只輸出 JSON：{"skill":"技能名稱或 none","args":{...}}
-        若沒有合適技能輸出 {"skill":"none","args":{}}。
-        使用者訊息：「{$message}」
-        PROMPT;
-
-        try {
-            $out = LlmClient::extractJson($this->llm->chat([['role' => 'user', 'content' => $prompt]]));
-        } catch (Throwable) {
-            return null;
-        }
-        if (($out['skill'] ?? 'none') === 'none') {
-            return null;
-        }
-
-        return ['skill' => (string) $out['skill'], 'args' => is_array($out['args'] ?? null) ? $out['args'] : []];
+        return $out;
     }
 
     /**
