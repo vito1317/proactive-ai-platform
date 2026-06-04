@@ -65,7 +65,7 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}
      */
-    public function handle(Conversation $conv, string $message, ?callable $onStep = null): array
+    public function handle(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null): array
     {
         $step = $onStep ?? fn (string $t) => null;
 
@@ -82,7 +82,7 @@ class SkillRunner
         }
 
         // 進入多輪代理迴圈：AI 可連續用工具（看結果再決定下一步），直到完成
-        return $this->agentic($conv, $message, $onStep, []);
+        return $this->agentic($conv, $message, $onStep, [], $onDelta);
     }
 
     /** 連續執行步數上限（避免失控）。 */
@@ -95,21 +95,39 @@ class SkillRunner
      * @param  list<array{action:string,args:array,result:string}>  $obs  已累積的觀察
      * @return array{reply: string, meta: array<string,mixed>}
      */
-    private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs): array
+    private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs, ?callable $onDelta = null): array
     {
         $step = $onStep ?? fn (string $t) => null;
         $picked = false;
+        $forcedTool = false; // 是否已因「空談承諾」逼它選過一次工具（避免無限迴圈）
 
         for ($round = count($obs); $round < self::MAX_ROUNDS; $round++) {
-            $d = $this->decide($conv, $message, $obs);
+            $d = $this->decide($conv, $message, $obs, $forcedTool);
             $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
 
             // 完成 / 沒有合適工具
             if (in_array($action, ['finish', 'none', ''], true)) {
                 $final = trim((string) ($d['final'] ?? ''));
+
+                // 防「空談承諾」：還沒實際做任何事，卻用未來式說「我來/我會去做…」
+                // → 它其實該選工具去做，而不是 finish。逼它再決策一次、這次必須選工具。
+                if (! $picked && ! $forcedTool && $this->isEmptyPromise($final)) {
+                    $forcedTool = true;
+                    $round--; // 不耗用步數
+
+                    continue;
+                }
+
                 if (! $picked && $obs === [] && $final === '') {
                     // 第一步就判定無工具可用 → 交回對話大腦正常回答
                     return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
+                }
+
+                // 有實際跑過工具 → 用串流方式把「解讀結果」的最終回覆逐字輸出（即時看到 AI 輸出內容）
+                if ($obs !== [] && $onDelta !== null) {
+                    $reply = $this->summarize($message, $obs, $onDelta);
+
+                    return ['reply' => $reply, 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => true]];
                 }
 
                 return ['reply' => $final !== '' ? $final : $this->summarize($message, $obs), 'meta' => ['category' => 'skill', 'rounds' => count($obs)]];
@@ -152,14 +170,32 @@ class SkillRunner
         }
 
         // 達步數上限 → 用目前結果做總結
-        return ['reply' => $this->summarize($message, $obs)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs)]];
+        return ['reply' => $this->summarize($message, $obs, $onDelta)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => $onDelta !== null]];
     }
 
     /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
     private const BACKGROUND = ['merge-domains'];
 
+    /**
+     * 偵測「空談承諾」：AI 沒實際做事卻用未來式說「我來/我會/讓我…去做某事」。
+     * 這種回覆代表它該選工具去做，而不是 finish。
+     */
+    private function isEmptyPromise(string $final): bool
+    {
+        if ($final === '') {
+            return false;
+        }
+
+        // 未來式承諾語氣 + 動作動詞（安裝/執行/檢查/查看/讀取…）
+        return (bool) preg_match(
+            '/(我(來|會|這就|先|現在|稍後|馬上|接下來)|讓我|稍候|等我|我幫(你|您))[^。\n]{0,12}'
+            .'(安裝|執行|跑|檢查|查看|查詢|看一?下|確認|讀取|抓取|搜尋|處理|試試|操作|部署|設定|查|找)/u',
+            $final
+        );
+    }
+
     /** 讓 AI 依目前觀察決定下一步工具（帶最近對話脈絡，避免上下文丟失）。 */
-    private function decide(Conversation $conv, string $message, array $obs): ?array
+    private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false): ?array
     {
         $catalog = $this->registry->catalog();
         $obsText = '';
@@ -173,6 +209,12 @@ class SkillRunner
         $history = $conv->activeMessages()->latest('id')->limit(6)->get()->reverse()
             ->map(fn ($m) => "{$m->role}: ".mb_substr((string) $m->content, 0, 300))->implode("\n");
         $ctx = ($conv->summary ? "（先前摘要）{$conv->summary}\n" : '').($history !== '' ? $history : '（無）');
+
+        // 上一輪只「空談要做某事」卻沒選工具 → 這一輪硬性要求選出工具
+        $forceNote = $forceTool
+            ? "⚠️ 上一輪你只是說要做某事卻沒有選工具（空談承諾）。這一輪 action【絕對不可以是 finish】，"
+                ."必須直接選出能達成使用者目標的工具去執行。\n"
+            : '';
 
         $prompt = <<<PROMPT
         你是平台操作代理，可「連續」使用工具達成使用者目標（例如：看磁碟滿了→再執行清理→再確認）。
@@ -193,7 +235,10 @@ class SkillRunner
         - 嚴禁為了用工具而用工具：不要用 list-domains / describe-domain 去回答與領域包無關的問題。
         - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
         - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
-        /no_think
+        - **【最重要】禁止「空談承諾」**：絕對不要在 final 用未來式說「好，我來執行…」「我來檢查一下…」「讓我跑一下…」「我幫你看…」這種【說要做卻沒做】的話。
+          如果達成目標需要實際動作（安裝、跑指令、檢查狀態、讀檔、查日誌、確認結果…），你【現在這一步就直接選對應工具去做】（例如安裝/檢查狀態→run-shell，讀檔→read-file），不要 finish 空講。
+          只有在「動作已真的做完、結果已在上面」或「純聊天不需動作」時才 finish。
+        {$forceNote}/no_think
         PROMPT;
 
         try {
@@ -203,18 +248,32 @@ class SkillRunner
         }
     }
 
-    /** 根據累積結果產生最終自然語言回覆。 */
-    private function summarize(string $message, array $obs): string
+    /**
+     * 根據累積結果產生最終自然語言回覆。
+     * 帶 $onDelta 時逐 token 串流輸出（讓前端即時看到 AI 在打字），並回傳完整文字。
+     */
+    private function summarize(string $message, array $obs, ?callable $onDelta = null): string
     {
         if ($obs === []) {
             return '我沒有可執行的步驟。';
         }
         $results = collect($obs)->map(fn ($o) => $o['action'].' → '.mb_substr((string) $o['result'], 0, 1500))->implode("\n");
+        $messages = [
+            ['role' => 'system', 'content' => '根據以下工具實際執行結果，用繁體中文回答使用者目標的結論與重點；只依結果、不要編造。'],
+            ['role' => 'user', 'content' => "目標：{$message}\n結果：\n{$results}"],
+        ];
         try {
-            $r = trim($this->llm->chat([
-                ['role' => 'system', 'content' => '根據以下工具實際執行結果，用繁體中文回答使用者目標的結論與重點；只依結果、不要編造。'],
-                ['role' => 'user', 'content' => "目標：{$message}\n結果：\n{$results}"],
-            ]));
+            if ($onDelta !== null) {
+                // 串流：逐 token 推給前端，同時累積完整內容
+                $full = '';
+                $this->llm->stream($messages, function (string $delta) use (&$full, $onDelta) {
+                    $full .= $delta;
+                    $onDelta($delta);
+                });
+                $r = trim($full);
+            } else {
+                $r = trim($this->llm->chat($messages));
+            }
             if ($r !== '') {
                 return $r;
             }
@@ -230,7 +289,7 @@ class SkillRunner
      *
      * @return array{reply: string, meta: array<string,mixed>}|null
      */
-    public function resolvePending(Conversation $conv, string $message, ?callable $onStep = null): ?array
+    public function resolvePending(Conversation $conv, string $message, ?callable $onStep = null, ?callable $onDelta = null): ?array
     {
         $pending = $conv->pending_skill;
         if (! is_array($pending) || empty($pending['skill'])) {
@@ -267,7 +326,7 @@ class SkillRunner
         $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [], 'result' => mb_substr((string) $result, 0, 3000)];
 
         // 接續多輪代理迴圈（confirm 一次後若還有後續步驟，會繼續；'always' 則之後不再問）
-        $out = $this->agentic($conv, $message, $onStep, $obs);
+        $out = $this->agentic($conv, $message, $onStep, $obs, $onDelta);
         if ($verdict === 'always') {
             $out['reply'] = "🔓（已開啟本對話「一律允許」）\n".$out['reply'];
         }

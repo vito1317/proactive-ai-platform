@@ -59,6 +59,10 @@ class ChatStreamController extends Controller
                 $trace[] = $text;
                 $emit('step', ['text' => $text]);
             };
+            // 技能最終回覆的逐 token 串流（讓使用者即時看到 AI 輸出內容）
+            $onDelta = function (string $delta) use ($emit) {
+                $emit('delta', ['text' => $delta]);
+            };
             // 心跳：任何 LLM 等待期間持續送 keepalive；同時檢查中止旗標——
             // 一旦使用者按「終止」，丟 StopStreaming 連阻塞中的 LLM 請求都會被即時打斷。
             $abortKey = "pai:chat:abort:{$conv->id}";
@@ -76,8 +80,11 @@ class ChatStreamController extends Controller
 
             try {
                 // 1) 待確認的高風險技能（使用者回「確認/取消」）—— 直接處理（含進度回報）
-                if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep)) {
-                    $this->emitTyped($emit, $resolved['reply']);
+                if ($resolved = $responder->skills()->resolvePending($conv, $message, $onStep, $onDelta)) {
+                    // 已串流過就不再逐字重播，避免內容重複
+                    if (empty($resolved['meta']['streamed'])) {
+                        $this->emitTyped($emit, $resolved['reply']);
+                    }
                     $conv->addMessage('assistant', $resolved['reply'], array_merge($resolved['meta'], ['trace' => $trace]));
                     $emit('done', ['conversation_id' => $conv->id, 'meta' => $resolved['meta']]);
 
@@ -99,11 +106,13 @@ class ChatStreamController extends Controller
                 if ($category === 'chat') {
                     // 閒聊：逐 token 串流（持續有資料，不會閒置）
                     [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
-                } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep))['meta']['no_skill'])) {
-                    // 平台操作技能：同步執行（快），逐步回報；高風險則回覆要求對話確認
+                } elseif ($category === 'skill' && empty(($skillResult = $responder->skills()->handle($conv, $message, $onStep, $onDelta))['meta']['no_skill'])) {
+                    // 平台操作技能：同步執行，逐步回報；最終解讀已串流則不重播
                     $reply = $skillResult['reply'];
                     $meta = $skillResult['meta'];
-                    $this->emitTyped($emit, $reply);
+                    if (empty($meta['streamed'])) {
+                        $this->emitTyped($emit, $reply);
+                    }
                 } elseif ($category === 'chat' || (isset($skillResult) && ! empty($skillResult['meta']['no_skill']))) {
                     // 閒聊，或技能對應不到 → 退回正常對話、逐 token 串流
                     [$reply, $meta] = $this->streamChatReply($llm, $responder, $conv, $emit, $onStep);
