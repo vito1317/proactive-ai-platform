@@ -363,10 +363,11 @@ class CognitiveEngine
     /** @return array<string, mixed> 反思步驟 */
     private function reflect(AgentContext $ctx, int &$tokens): array
     {
-        $prompt = "請以資深審查者角度，對以下處理做一句話自我批判：是否有遺漏或過度？\n"
+        $prompt = "請以資深審查者角度，對以下處理做一句話自我批判：推理是否有遺漏或過度？\n"
             .'發現：'.json_encode($ctx->findings, JSON_UNESCAPED_UNICODE)."\n"
             .'動作：'.json_encode(array_column($ctx->actions, 'action'), JSON_UNESCAPED_UNICODE)."\n"
-            .'只回一句話。';
+            .'注意：很多任務是純查詢/診斷/回報，本來就「不需要採取任何動作」——這種情況動作為空是正常且正確的，**不要因為動作欄位空白就批評或視為遺漏**。'
+            .'只有在「明明該採取處置卻沒提出」時才指出。若處理得當就回「處理完整，無明顯遺漏」。只回一句話。';
 
         try {
             $res = $this->llm->complete([

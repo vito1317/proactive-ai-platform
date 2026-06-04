@@ -70,7 +70,7 @@ class ChatStreamController extends Controller
                 }
                 if (time() - $lastBeat >= 2) {
                     $lastBeat = time();
-                    $emit('status', ['text' => '生成中…']);
+                    $emit('status', ['text' => '正在生成中…']);
                 }
             });
 
@@ -162,8 +162,8 @@ class ChatStreamController extends Controller
      */
     private function streamChatReply(LlmClient $llm, ChatResponder $responder, Conversation $conv, callable $emit, callable $onStep): array
     {
-        $onStep('🧠 [COGNITIVE_SYNTHESIS] 正在合成認知邏輯...');
-        $emit('status', ['text' => '思考中…']);
+        $onStep('🌀 [COGNITIVE_SYNTHESIS] 正在合成認知邏輯...');
+        $emit('status', ['text' => '正在合成邏輯…']);
         $abortKey = "pai:chat:abort:{$conv->id}";
         Cache::forget($abortKey); // 清掉上一輪的殘留旗標
         $full = '';

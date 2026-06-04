@@ -70,8 +70,7 @@ function scrollDown() {
 onMounted(scrollDown);
 watch([streamed, status, () => props.messages.length], scrollDown);
 
-// 若最後一則是使用者訊息且尚無 AI 回覆 → 代表回覆仍在背景生成（例如剛重新整理、
-// 或關掉串流連線後）。輪詢直到回覆出現，避免「重整後 AI像沒回應」。
+// 若最後一則是使用者訊息且尚無 AI 回覆 → 代表回覆仍在背景生成
 const awaitingReply = computed(() => {
     const m = props.messages;
     return !sending.value && m.length > 0 && m[m.length - 1].role === 'user';
@@ -81,12 +80,11 @@ let pollCount = 0;
 function syncAwaiting() {
     if (awaitingReply.value && !pollTimer) {
         pollCount = 0;
-        // 如果有背景事件，開始追蹤真實進度
         if (props.conversation.active_event_id) {
             trackEvent(props.conversation.active_event_id);
         }
         pollTimer = setInterval(() => {
-            if (++pollCount > 90) { clearInterval(pollTimer); pollTimer = null; return; } // ~5 分鐘上限
+            if (++pollCount > 90) { clearInterval(pollTimer); pollTimer = null; return; }
             router.reload({ only: ['messages', 'conversation'], preserveScroll: true, preserveState: true });
         }, 3500);
     } else if (!awaitingReply.value && pollTimer) {
@@ -106,15 +104,15 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer); });
 const catLabel = (m) => ({ task: '已觸發任務', new_domain: '已新增領域', configure_notify: '已設定通知' }[m?.category]);
 
 function onEnter(e) {
-    // 中文/日文輸入法選字組字中（IME composition）→ 不送出
     if (e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     send();
 }
 
 const formattedStep = (txt) => {
-    // 將 [TAG] 轉為帶樣式的 span
-    return txt.replace(/\[(.*?)\]/, '<span class="opacity-50 text-[9px] font-bold mr-1">$1</span>');
+    if (!txt) return '';
+    let clean = txt.replace(/^[\u2000-\u32ff\ud83c\udc00-\ud83d\udeff\udbb9\udce5-\udbb9\udcee]/g, '').trim();
+    return clean.replace(/\[(.*?)\]/, '<span class="opacity-50 text-[9px] font-bold mr-1 text-sky-400">$1</span>');
 };
 
 const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -124,13 +122,13 @@ let controller = null;
 const stepIcons = {
     '感知': '📡', '分析': '🧠', '載入': '📚', '讀取': '📚', '修改': '🛠️', 
     '執行': '⚡', '驗證': '🛡️', '通知': '🔔', '連線': '🔗', '喚醒': '🦾',
-    '思考': '💡', '搜尋': '🔍', '儲存': '💾', 'INTENT': '💠', 'SYNTHESIS': '🧠',
+    '思考': '🌀', '搜尋': '🔍', '儲存': '💾', 'INTENT': '💠', 'SYNTHESIS': '🌀',
     'EXECUTING': '⚙️', 'DECODING': '💠'
 };
 const getStepIcon = (txt) => {
     const icon = Object.entries(stepIcons).find(([k]) => txt.includes(k))?.[1];
     if (icon) return icon;
-    return '💠'; // 高科技感預設圖示
+    return '💠';
 };
 const getStepColor = (txt) => {
     if (txt.includes('載入') || txt.includes('讀取')) return '#fbbf24'; // amber
@@ -141,7 +139,6 @@ const getStepColor = (txt) => {
     return '#38bdf8'; // sky
 };
 
-// 通知後端設定中止旗標（背景生成迴圈會即時停下並存檔）
 async function requestStop() {
     try {
         await fetch('/chat/stop', {
@@ -152,7 +149,6 @@ async function requestStop() {
     } catch { /* ignore */ }
 }
 
-// 終止回覆（串流中）：通知後端 + 中斷前端串流
 async function stopReply() {
     if (!sending.value) return;
     status.value = '已終止';
@@ -160,7 +156,6 @@ async function stopReply() {
     controller?.abort();
 }
 
-// 終止背景生成（重整後的「生成中」狀態，已無串流連線可中斷）
 async function stopAwaiting() {
     status.value = '終止中…';
     await requestStop();
@@ -170,10 +165,9 @@ async function send() {
     const msg = input.value.trim();
     if (!msg) return;
 
-    // 插話：生成中又送新訊息 → 先終止目前回覆，再送新的
     if (sending.value) {
         await stopReply();
-        await new Promise((r) => setTimeout(r, 250)); // 等舊串流收尾
+        await new Promise((r) => setTimeout(r, 250));
     }
 
     lastSent.value = msg;
@@ -216,7 +210,6 @@ async function send() {
     } finally {
         sending.value = false;
         controller = null;
-        // 同步伺服器端已持久化的訊息（含標題/側欄）
         router.reload({ only: ['messages', 'conversations', 'conversation'], preserveScroll: true, preserveState: true });
     }
 
@@ -285,10 +278,10 @@ function newChat() { router.post('/chat/new'); }
                                 <!-- 串流中的 AI 泡泡 -->
                                 <template v-if="m.streaming">
                                     <!-- AI 思考過程 (Reasoning/Thought) -->
-                                    <div v-if="thought" class="mb-3 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-[11px] leading-relaxed text-purple-200/80">
+                                    <div v-if="thought" class="mb-3 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3 text-[11px] leading-relaxed text-purple-200/80 shadow-[inset_0_0_15px_rgba(168,85,247,0.05)]">
                                         <div class="mb-1.5 flex items-center gap-1.5 font-bold tracking-tight text-purple-400 uppercase">
                                             <span class="h-1 w-1 rounded-full bg-purple-400 animate-pulse"></span>
-                                            COGNITIVE_ENGINE // 思考中
+                                            COGNITIVE_SYNTHESIS // 思考中
                                         </div>
                                         <div class="whitespace-pre-wrap italic opacity-80">{{ thought }}<span class="typing-cursor-chat">_</span></div>
                                     </div>
@@ -306,7 +299,7 @@ function newChat() { router.post('/chat/new'); }
                                                 {{ getStepIcon(s) }}
                                             </div>
                                             <div class="trace-label trace-label--active">
-                                                <span v-html="formattedStep(s)"></span><span v-if="i === (steps.length ? steps : [status]).length - 1 && !streamed" class="typing-cursor-chat">_</span>
+                                                <span v-html="formattedStep(s)"></span><span v-if="i === (steps.length ? steps.length : 1) - 1 && !streamed" class="typing-cursor-chat">_</span>
                                             </div>
                                         </div>
                                     </div>
@@ -323,7 +316,7 @@ function newChat() { router.post('/chat/new'); }
                                         </details>
                                     </div>
 
-                                    <!-- 歷史訊息的歷程圖 (如果有 trace) -->
+                                    <!-- 歷史訊息的歷程圖 -->
                                     <div v-if="m.meta?.trace?.length" class="trace-container opacity-60 hover:opacity-100 transition-opacity">
                                         <div v-for="(s, i) in m.meta.trace" :key="i" class="trace-item">
                                             <div v-if="i < m.meta.trace.length - 1" class="trace-line" :style="{ '--from-color': getStepColor(s), '--to-color': getStepColor(m.meta.trace[i+1]) }"></div>
@@ -356,15 +349,15 @@ function newChat() { router.post('/chat/new'); }
                         </div>
                     </TransitionGroup>
                     
-                    <!-- 重整後仍在背景生成的回覆：顯示等待中 -->
+                    <!-- 重整後仍在背景生成的回覆 -->
                     <div v-if="awaitingReply" class="flex justify-start">
                         <div class="max-w-[85%] mini-terminal rounded-2xl border border-indigo-500/30 bg-slate-900/60 p-4 shadow-[0_0_20px_rgba(79,70,229,0.1)]">
                             <div class="flex items-start gap-4">
                                 <div class="relative h-14 w-14 shrink-0">
                                     <div class="absolute inset-0 rounded-full border-2 border-dashed border-indigo-500/40 animate-[spin_10s_linear_infinite]"></div>
-                                    <div class="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
+                                    <div class="absolute inset-2 rounded-full border border-sky-400/30"></div>
                                     <div class="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(56,189,248,0.2)_360deg)] animate-[spin_3s_linear_infinite] opacity-60"></div>
-                                    <div class="absolute inset-0 flex items-center justify-center text-2xl animate-pulse">🧠</div>
+                                    <div class="absolute inset-0 flex items-center justify-center text-2xl">🧠</div>
                                 </div>
                                 <div class="flex-1 space-y-2 font-mono text-xs">
                                     <div class="flex items-center justify-between text-sky-300">

@@ -51,11 +51,11 @@ class ChatResponder
 
         // 2) 自訂斜線指令 /name → 展開成內容後照常處理（聊天室/TG/LINE 共用）
         if ($expanded = app(SlashCommands::class)->expand($userMessage)) {
-            $step('⚡ 執行自訂指令…');
+            $step('⚡ [COMMAND_EXPAND] 正在執行自訂指令...');
             $userMessage = $expanded;
         }
 
-        $step('🧭 判斷意圖中…');
+        $step('💠 [INTENT_DECODING] 正在解碼指令意圖...');
         $category = $this->category($conv, $userMessage);
         if ($category === 'chat') {
             return ['stream' => true, 'messages' => $this->chatMessages($conv)];
@@ -70,10 +70,10 @@ class ChatResponder
             return ['stream' => false, ...$r];
         }
         $step(match ($category) {
-            'task' => '🗂️ 交給領域協調者處理…',
-            'new_domain' => '🧩 生成新領域包…',
-            'configure_notify' => '🔔 設定通知…',
-            default => '⚙️ 處理中…',
+            'task' => '📂 [COORDINATOR_HANDOFF] 正在委派領域協調者...',
+            'new_domain' => '🧩 [COMPILE_DOMAIN] 正在編譯新領域組件...',
+            'configure_notify' => '🔔 [SYNC_NOTIFY] 正在同步通知通訊協定...',
+            default => '⚙️ [SYSTEM_EXECUTING] 正在處理系統指令...',
         });
 
         return ['stream' => false, ...$this->act($category, $userMessage, $conv)];
@@ -126,9 +126,10 @@ class ChatResponder
         $content = '你是 PAI 主動式 AI 平台的助理。平台能：監聽事件與日誌、資安事件響應、'
             .'開發自動化（讀 repo、跑測試、提修補）、新增監控領域、設定通知（Telegram/LINE）。'
             .'用繁體中文、簡潔友善地回答。若使用者想做事，鼓勵他直接用白話描述，你會自動處理。'
-            ."\n\n【重要】你在這個回合沒有即時執行工具的能力。**絕對不要模擬、假裝或編造**讀檔、查 log、跑指令、連線等「查詢過程」或結果。"
-            .'只根據下方已提供的資訊（領域包摘要、對話脈絡）誠實回答；若需要真實系統資料（檔案內容、日誌、指令輸出、某領域實際監控的對象），'
-            .'就直接說明你需要查，並請使用者用具體指令觸發（例如「查看 X 領域細節」會用 describe-domain、「讀取 /路徑」會用 read-file、「執行 df -h」會用 run-shell、「上網查…」會用 answer-from-web）。';
+            ."\n\n【重要】這一則是純對話回合，**絕對不要模擬、假裝或編造**讀檔、查 log、跑指令、docker exec 等查詢過程或結果。"
+            .'但平台「實際上有能力」去執行這些（讀檔、查 log、跑指令、上網查、看 nginx 設定 / docker 日誌…）。'
+            .'所以若使用者想要真實資料或實際操作，**不要說你做不到、也不要叫使用者用特殊指令格式**——只要簡短說「好，我來讀取／執行」並請他直接講（例如「讀取 nginx error log」「跑 df -h」），下一則就會自動以工具實際執行並回報。'
+            .'其餘一般問題就依下方已提供的資訊（領域包摘要、對話脈絡）誠實作答。';
 
         // 注入目前已載入的領域包摘要，讓 AI 能回答「有哪些領域 / 各做什麼」
         $packs = array_values(app(DomainRegistry::class)->all());
