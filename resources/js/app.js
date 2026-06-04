@@ -4,7 +4,7 @@ import { createApp, h } from 'vue';
 import { createInertiaApp } from '@inertiajs/vue3';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 
-const appName = import.meta.env.VITE_APP_NAME || 'PAI 主動式 AI 平台';
+const appName = 'PAI 主動式 AI 平台';
 
 createInertiaApp({
     title: (title) => (title ? `${title} · ${appName}` : appName),

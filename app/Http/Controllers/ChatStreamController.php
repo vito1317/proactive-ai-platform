@@ -120,7 +120,10 @@ class ChatStreamController extends Controller
                 $conv->addMessage('assistant', $reply, $meta);
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
             } catch (Throwable $e) {
+                // 一律存一則回覆，避免對話永遠卡在「生成中」（前端輪詢才會結束）
+                $conv->addMessage('assistant', '抱歉，這次處理失敗了：'.$e->getMessage().'　可以再試一次或換個說法。', ['error' => true]);
                 $emit('error', ['text' => 'AI 回覆失敗：'.$e->getMessage()]);
+                $emit('done', ['conversation_id' => $conv->id, 'meta' => ['error' => true]]);
             } finally {
                 LlmClient::setHeartbeat(null);
             }

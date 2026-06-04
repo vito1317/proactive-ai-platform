@@ -284,26 +284,25 @@ const animationDuration = computed(() => {
     animation-name: stream-flow;
     animation-timing-function: linear;
     animation-iteration-count: infinite;
+    animation-duration: 3s; /* 預設值，會被 inline style 覆蓋 */
 }
 
 @keyframes stream-flow {
-    from { stroke-dashoffset: 100; }
-    to { stroke-dashoffset: 0; }
+    0% { stroke-dashoffset: 100; }
+    100% { stroke-dashoffset: 0; }
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 @keyframes spin-slow {
-    to { transform: rotate(360deg); }
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 @keyframes spin-reverse {
-    to { transform: rotate(-360deg); }
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .cyber-ring-outer, .cyber-ring-inner { animation: none !important; }
-    .data-stream { animation: none !important; stroke-dasharray: 100 0; opacity: 0.5; }
-    .node-bloom { opacity: 0.2; }
-}
 </style>

@@ -200,35 +200,45 @@ function newChat() { router.post('/chat/new'); }
                         你好 👋 我是 PAI 指揮 AI。用白話跟我說，我會自動判斷要「執行任務、新增領域、還是設定通知」。
                     </div>
 
-                    <div v-for="m in view" :key="m.id" class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
-                        <div class="max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-                             :class="m.role === 'user' ? 'bg-indigo-600 text-white' : 'border border-white/10 bg-white/5 text-slate-200'">
-                            <!-- 串流中的 AI 泡泡 -->
-                            <template v-if="m.streaming">
-                                <!-- AI 活動軌跡：每一步在幹嘛 -->
-                                <div v-if="steps.length" class="mb-2 space-y-1 border-l-2 border-indigo-400/40 pl-2.5">
-                                    <div v-for="(s, i) in steps" :key="i"
-                                         class="flex items-center gap-1.5 text-xs"
-                                         :class="i === steps.length - 1 && !streamed ? 'text-indigo-300' : 'text-slate-500'">
-                                        <span v-if="i === steps.length - 1 && !streamed" class="dot"></span>
-                                        <span v-else class="text-emerald-400/70">✓</span>
-                                        {{ s }}
+                    <TransitionGroup name="msg">
+                        <div v-for="m in view" :key="m.id" class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+                            <div class="max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+                                :class="m.role === 'user' ? 'bg-indigo-600 text-white shadow-[0_4px_12px_rgba(79,70,229,0.3)]' : 'border border-white/10 bg-white/5 text-slate-200'">
+                                <!-- 串流中的 AI 泡泡 -->
+                                <template v-if="m.streaming">
+                                    <!-- AI 微型終端機 -->
+                                    <div v-if="steps.length || (!streamed && status)" class="mini-terminal mb-3 rounded-lg border border-sky-500/30 bg-slate-900/90 p-3 font-mono text-xs shadow-[0_0_15px_rgba(56,189,248,0.1)]">
+                                        <div class="mb-2 flex items-center gap-2 border-b border-white/10 pb-1 text-sky-400">
+                                            <span class="relative flex h-2 w-2">
+                                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+                                                <span class="relative inline-flex h-2 w-2 rounded-full bg-sky-500"></span>
+                                            </span>
+                                            <span class="font-bold">SYSTEM_ACTIVE</span>
+                                            <span v-if="status && !streamed && !steps.length" class="ml-auto text-slate-400 animate-pulse">{{ status }}</span>
+                                        </div>
+                                        <div class="space-y-1.5 pl-1 text-slate-300">
+                                            <div v-for="(s, i) in steps" :key="i" class="flex items-start gap-2">
+                                                <span v-if="i < steps.length - 1" class="mt-0.5 text-emerald-400/80">✓</span>
+                                                <span v-else class="mt-0.5 text-sky-400">></span>
+                                                <span :class="{ 'text-sky-300 font-medium': i === steps.length - 1 }">
+                                                    {{ s }}<span v-if="i === steps.length - 1 && !streamed" class="typing-cursor-chat">_</span>
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                                <span v-if="status && !streamed && !steps.length" class="inline-flex items-center gap-2 text-slate-400">
-                                    <span class="inline-flex gap-1"><span class="dot"></span><span class="dot" style="animation-delay:.2s"></span><span class="dot" style="animation-delay:.4s"></span></span>
-                                    {{ status }}
-                                </span>
-                                <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
-                            </template>
-                            <template v-else>
-                                <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
-                                <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
-                                <div v-else class="md" v-html="renderMd(m.content)"></div>
-                                <div v-if="catLabel(m.meta)" class="mt-1 text-[10px] text-emerald-300/70">⚙ {{ catLabel(m.meta) }}</div>
-                            </template>
+                                    
+                                    <span v-if="streamed" class="md" v-html="renderMd(streamed)"></span><span v-if="streamed" class="cursor">▍</span>
+                                </template>
+                                <template v-else>
+                                    <!-- 使用者訊息純文字；AI 回覆渲染 Markdown -->
+                                    <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
+                                    <div v-else class="md" v-html="renderMd(m.content)"></div>
+                                    <div v-if="catLabel(m.meta)" class="mt-1 text-[10px] text-emerald-300/70 border-t border-white/5 pt-1">⚙ {{ catLabel(m.meta) }}</div>
+                                </template>
+                            </div>
                         </div>
-                    </div>
+                    </TransitionGroup>
+                    
                     <!-- 重整後仍在背景生成的回覆：顯示等待中（完成會自動出現） -->
                     <div v-if="awaitingReply" class="flex justify-start">
                         <div class="max-w-[80%] rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-400">
@@ -304,4 +314,23 @@ function newChat() { router.post('/chat/new'); }
 .md th, .md td { border: 1px solid rgba(255,255,255,0.15); padding: 0.3rem 0.55rem; }
 .md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.12); margin: 0.7rem 0; }
 .md strong { font-weight: 700; color: #f1f5f9; }
+
+/* Mini Terminal Animations */
+@keyframes terminal-scan {
+    0% { background-position: 0% -100%; }
+    100% { background-position: 0% 200%; }
+}
+.mini-terminal {
+    position: relative;
+    overflow: hidden;
+    background-image: linear-gradient(0deg, transparent 0%, rgba(56,189,248,0.1) 50%, transparent 100%);
+    background-size: 100% 200%;
+    animation: terminal-scan 3s linear infinite;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+}
+.typing-cursor-chat {
+    animation: blink 1s step-end infinite;
+    font-weight: bold;
+    color: #38bdf8;
+}
 </style>

@@ -7,3 +7,55 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* --- Cyberpunk Global Background --- */
+body {
+    background-color: #020617;
+    position: relative;
+    overflow-x: hidden;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background-image: 
+        linear-gradient(rgba(18, 24, 45, 0.5) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(18, 24, 45, 0.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: center center;
+    mask-image: radial-gradient(circle at center, black, transparent 80%);
+    animation: grid-move 20s linear infinite;
+}
+
+@keyframes grid-move {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(40px); }
+}
+
+/* --- Global Glass Effect --- */
+.glass {
+    @apply border border-white/10 bg-slate-900/40 backdrop-blur-md shadow-xl rounded-2xl;
+}
+
+/* --- Input & Button Polish --- */
+.inp {
+    @apply w-full rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-white focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/60 transition-all outline-none;
+}
+.btn-primary {
+    @apply w-full rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-700 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:from-indigo-500 hover:to-indigo-600 active:scale-[0.98] transition-all disabled:opacity-50;
+}
+
+/* --- Message Transitions --- */
+.msg-enter-active, .msg-leave-active {
+    transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.msg-enter-from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+}
+.msg-leave-to {
+    opacity: 0;
+}
+

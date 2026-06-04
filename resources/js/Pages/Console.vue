@@ -91,8 +91,25 @@ let timer = null;
 function refresh() {
     router.reload({ only: ['events', 'runs', 'stats', 'auth'], preserveScroll: true, preserveState: true });
 }
-onMounted(() => { timer = setInterval(refresh, 4000); });
-onUnmounted(() => clearInterval(timer));
+
+/* ---------- AI 思考動畫 (終端機打字效果) ---------- */
+const activeRun = computed(() => props.runs.find(r => r.status === 'running'));
+const thinkingSteps = ['載入領域知識...', '分析上下文關聯...', '評估可用工具...', '構建執行計畫...', '發送 API 請求...', '等待結果回傳...', '驗證護欄規則...'];
+const currentThinkingStep = ref(thinkingSteps[0]);
+let thinkingTimer = null;
+
+onMounted(() => { 
+    timer = setInterval(refresh, 4000); 
+    thinkingTimer = setInterval(() => {
+        if (activeRun.value) {
+            currentThinkingStep.value = thinkingSteps[Math.floor(Math.random() * thinkingSteps.length)];
+        }
+    }, 2500); // 每 2.5 秒切換一次假動作
+});
+onUnmounted(() => { 
+    clearInterval(timer); 
+    clearInterval(thinkingTimer);
+});
 
 /* ---------- 樣式 ---------- */
 const severityClass = (x) => ({
@@ -120,6 +137,35 @@ const actionStatusClass = (x) => ({
     rejected: 'bg-red-500/25 text-red-300', proposed: 'bg-slate-600/40 text-slate-300',
 }[x] || 'bg-slate-700/40 text-slate-400');
 </script>
+
+<style scoped>
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+.typing-cursor {
+    animation: blink 1s step-end infinite;
+    font-weight: bold;
+    color: #38bdf8; /* sky-400 */
+}
+
+@keyframes scan-line {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}
+.ooda-badge {
+    position: relative;
+    overflow: hidden;
+}
+.ooda-badge::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 100%;
+    background: linear-gradient(to bottom, transparent, rgba(56,189,248,0.4), transparent);
+    animation: scan-line 2s linear infinite;
+    pointer-events: none;
+}
+</style>
 
 <template>
     <Head title="中控台" />
@@ -296,6 +342,26 @@ const actionStatusClass = (x) => ({
                 <div class="flex items-center justify-between border-b border-white/10 px-5 py-3">
                     <h2 class="font-semibold text-white">🧠 AI 認知運行 · Decide → Act → Guardrail</h2>
                     <span class="text-xs text-slate-500">{{ runs.length }} 筆運行</span>
+                </div>
+
+                <!-- AI 核心終端機狀態 -->
+                <div class="border-b border-white/5 bg-slate-900/50 px-5 py-3 font-mono text-xs">
+                    <div v-if="activeRun" class="flex items-center gap-3 text-sky-400">
+                        <span class="flex h-2 w-2 items-center justify-center">
+                            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75"></span>
+                            <span class="relative inline-flex h-2 w-2 rounded-full bg-sky-500"></span>
+                        </span>
+                        <div class="flex flex-col">
+                            <span class="font-bold">SYSTEM_ACTIVE // 執行中</span>
+                            <span class="mt-1 text-slate-300">
+                                > [{{ activeRun.goal }}] <span class="text-sky-300">{{ currentThinkingStep }}</span><span class="typing-cursor">_</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div v-else class="flex items-center gap-3 text-slate-500">
+                        <span class="h-2 w-2 rounded-full bg-slate-700"></span>
+                        <span>SYSTEM_IDLE // 待機中</span>
+                    </div>
                 </div>
 
                 <div v-if="!runs.length" class="px-5 py-10 text-center text-slate-500">
