@@ -77,9 +77,33 @@ class SkillRegistry
                 $skill = app($class);
                 $this->skills[$skill->name()] = $skill;
             }
+            // 已接入的 MCP server 工具 → 包成對話技能，讓 agentic 也能呼叫（如 gateway 遠端執行）
+            foreach ($this->mcpSkills() as $skill) {
+                $this->skills[$skill->name()] = $skill;
+            }
         }
 
         return $this->skills;
+    }
+
+    /** 把所有啟用中的 MCP server 工具包成 McpSkill。 */
+    private function mcpSkills(): array
+    {
+        $out = [];
+        try {
+            $client = app(\App\Pai\Mcp\McpClient::class);
+            foreach (\App\Pai\Mcp\McpServer::where('enabled', true)->get() as $server) {
+                foreach (($server->tools ?? []) as $tool) {
+                    if (isset($tool['name'])) {
+                        $out[] = new McpSkill($client, $server, $tool);
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // MCP 表不存在 / 連線問題 → 略過，不影響內建技能
+        }
+
+        return $out;
     }
 
     public function get(string $name): ?Skill
