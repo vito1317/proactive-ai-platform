@@ -52,7 +52,7 @@ class VoiceAgentController extends Controller
         $conv->addMessage('user', $transcript, ['source' => 'voice']);
 
         // 直達指令：明確的「打開/開啟 X」直接跑 open-app，不繞 LLM（快又不會被反問）
-        if ($direct = $this->directCommand($transcript, $data['geo'] ?? null)) {
+        if ($direct = $this->directCommand($transcript, $data['geo'] ?? null, $conv)) {
             $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
 
             return response()->json([
@@ -160,7 +160,7 @@ class VoiceAgentController extends Controller
             $conv->addMessage('user', $transcript, ['source' => 'voice']);
 
             // 直達指令／重型背景任務：結果立即一次回（本來就快）
-            if ($direct = $this->directCommand($transcript, $data['geo'] ?? null)) {
+            if ($direct = $this->directCommand($transcript, $data['geo'] ?? null, $conv)) {
                 $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
                 $emit('step', ['text' => $direct['step'] ?? '⚡ 直接執行']);
                 $emit('done', [
@@ -265,7 +265,7 @@ class VoiceAgentController extends Controller
      *
      * @return array{reply:string,meta:array,step?:string}|null
      */
-    private function directCommand(string $transcript, ?array $geo = null): ?array
+    private function directCommand(string $transcript, ?array $geo = null, ?Conversation $conv = null): ?array
     {
         $t = trim($transcript);
 
@@ -334,8 +334,17 @@ class VoiceAgentController extends Controller
         }
 
         // 音量 / 顯示器亮度（直接在目標節點調整；Mac 用 osascript，Linux 用 pactl/brightnessctl）
-        if (preg_match('/(音量|聲音|声音|靜音|静音|\bvolume\b|\bmute\b|亮度|螢幕亮|屏幕亮|\bbrightness\b)/iu', $t)) {
-            $isBright = (bool) preg_match('/(亮度|螢幕亮|屏幕亮|brightness)/iu', $t);
+        // 也支援接續句：「再暗一點」「再大聲一點」「再小一點」（模糊時看上一個動作判斷音量或亮度）
+        $avKeyword = (bool) preg_match('/(音量|聲音|声音|靜音|静音|\bvolume\b|\bmute\b|亮度|螢幕亮|屏幕亮|\bbrightness\b)/iu', $t);
+        $avFollow = (bool) preg_match('/^(再|在)?\s*(調|调)?\s*(亮|暗|大聲|大声|小聲|小声|大|小)\s*(一點|一点|一些|點|点)?[。!！]?$/u', $t);
+        if ($avKeyword || $avFollow) {
+            $isBright = (bool) preg_match('/(亮度|螢幕亮|屏幕亮|brightness|調亮|调亮|調暗|调暗|亮一點|亮一点|暗一點|暗一点|變亮|变亮|變暗|变暗)/iu', $t)
+                || ($avFollow && preg_match('/(亮|暗)/u', $t));
+            // 「再大一點/再小一點」沒講是音量還亮度 → 看上一個語音動作的脈絡
+            if ($avFollow && ! $isBright && ! preg_match('/(大聲|大声|小聲|小声)/u', $t) && $conv !== null) {
+                $lastAction = $conv->messages()->where('role', 'assistant')->latest('id')->value('meta')['action'] ?? null;
+                $isBright = $lastAction === 'brightness';
+            }
             // 阿拉伯數字% / 百分之N / 調到N（N 可為中文數字，STT 常輸出「百分之五十」）
             $pct = null;
             if (preg_match('/(\d{1,3})\s*(%|％|趴)/u', $t, $m)) {
