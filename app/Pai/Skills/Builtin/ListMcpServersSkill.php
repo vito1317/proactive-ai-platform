@@ -17,7 +17,7 @@ class ListMcpServersSkill implements Skill
 
     public function description(): string
     {
-        return '列出已接入的 MCP 工具伺服器、啟用狀態與其提供的工具';
+        return '列出所有節點 / gateway / MCP 伺服器的「即時連線狀態」（線上🟢/離線🔴、延遲、工具）。問「有哪些節點 / gateway 狀態 / 節點線上嗎」就用這個（即時 ping，不可憑空回答）';
     }
 
     public function parameters(): array

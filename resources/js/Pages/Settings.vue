@@ -167,6 +167,9 @@ function chLabel(c) {
                                        v-model="form.settings[f.key]" class="inp" />
                                 <input v-else-if="f.type === 'secret'" type="password" autocomplete="off"
                                        v-model="form.settings[f.key]" class="inp" placeholder="••••••••" />
+                                <select v-else-if="f.type === 'select'" v-model="form.settings[f.key]" class="inp">
+                                    <option v-for="o in (f.options || [])" :key="o.value" :value="o.value">{{ o.label }}</option>
+                                </select>
                                 <input v-else type="text" v-model="form.settings[f.key]" class="inp" />
                             </div>
                         </div>

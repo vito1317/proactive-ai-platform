@@ -29,7 +29,7 @@ class Settings
         'voice.fullduplex_path' => ['label' => '全雙工語音 Socket.IO path', 'type' => 'string', 'group' => '語音'],
         'voice.agent_secret' => ['label' => '語音橋接共用密鑰（voice_server → 平台）', 'type' => 'secret', 'group' => '語音'],
         'voice.system_prompt' => ['label' => '語音助理人格 (system prompt)', 'type' => 'string', 'group' => '語音'],
-        'voice.default_gateway' => ['label' => '預設操作節點（local=主節點，或 MCP gateway 名稱如 mac）', 'type' => 'string', 'group' => '語音'],
+        'voice.default_gateway' => ['label' => '預設操作節點（開/關程式預設在哪台）', 'type' => 'select', 'group' => '語音'],
         'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
         'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
         'notify.telegram.chat_id' => ['label' => 'Telegram Chat ID', 'type' => 'string', 'group' => '通知'],
@@ -75,6 +75,20 @@ class Settings
     {
         $out = [];
         foreach (self::FIELDS as $key => $meta) {
+            // 預設操作節點：選單動態帶入「主節點 + 已註冊的 gateway 節點」
+            if ($key === 'voice.default_gateway') {
+                $opts = [['value' => 'local', 'label' => '主節點（本機）']];
+                try {
+                    foreach (PaiSetting::query()->getConnection()->table('mcp_servers')->where('enabled', true)->get(['name']) as $s) {
+                        if ($s->name !== 'gateway') {
+                            $opts[] = ['value' => $s->name, 'label' => $s->name];
+                        }
+                    }
+                } catch (Throwable) {
+                    // mcp_servers 表不存在 → 只給 local
+                }
+                $meta['options'] = $opts;
+            }
             $out[] = [...$meta, 'key' => $key, 'value' => $this->get($key)];
         }
 
