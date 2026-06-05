@@ -116,8 +116,18 @@ export function useVoiceChat() {
         };
 
         status.value = '請說話';
-        socket.emit('prompt_text', { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '' });
+        socket.emit('prompt_text', promptPayload());
         socket.emit('recording-started');
+    }
+
+    function promptPayload() {
+        return { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '', wake: !!cfg.wake };
+    }
+
+    // 語音喚醒（Hey Siri 式）即時開關：重送 prompt_text 更新伺服器端 wake 旗標
+    function setWake(enabled) {
+        cfg.wake = !!enabled;
+        if (socket && socket.connected) socket.emit('prompt_text', promptPayload());
     }
 
     async function start(c = {}, cbs = {}) {
@@ -173,5 +183,5 @@ export function useVoiceChat() {
         socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
-    return { active, connected, speaking, status, volume, isMuted, toggleMute, start, stop };
+    return { active, connected, speaking, status, volume, isMuted, toggleMute, setWake, start, stop };
 }

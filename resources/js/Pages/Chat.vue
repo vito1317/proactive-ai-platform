@@ -277,6 +277,7 @@ function newChat() { router.post('/chat/new'); }
             <aside class="hidden w-60 shrink-0 flex-col border-r border-white/10 bg-slate-950/60 p-3 md:flex">
                 <Link href="/" class="mb-3 text-xs text-slate-400 hover:text-white">← 回中控台</Link>
                 <button class="mb-3 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500" @click="newChat">＋ 新對話</button>
+                <Link href="/voice" class="mb-3 flex items-center justify-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-300 hover:bg-sky-500/20">🎙️ 語音連線</Link>
                 <div class="flex-1 space-y-1 overflow-y-auto">
                     <Link v-for="c in conversations" :key="c.id" :href="`/chat?c=${c.id}`"
                           class="flex items-center gap-1.5 truncate rounded-lg px-3 py-2 text-xs"

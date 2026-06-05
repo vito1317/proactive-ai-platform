@@ -178,20 +178,36 @@ class VoiceAgentController extends Controller
         }
 
         // 播放/搜尋音樂：有指定歌/歌手 → 瀏覽器開 YouTube 搜尋；沒指定 → 開 YouTube Music
+        $mq = null;
         if (preg_match('/(播放|播|聽|听|放|搜尋|搜寻|搜索|找|\bplay\b).{0,12}(音樂|音乐|歌|\bmusic\b)/iu', $t)
             || preg_match('/(音樂|音乐|歌|\bmusic\b).{0,6}(播放|播|放|\bplay\b)/iu', $t)) {
+            $mq = $this->extractMusicQuery($t);
+        } elseif (preg_match('/^(請|请|麻煩|麻烦|幫我|帮我|我)?\s*(想|要)?(聽|听)\s*(.{1,30})$/u', $t, $m)) {
+            $mq = $this->extractMusicQuery($m[4]);  // 「我想聽稻香」→ 稻香
+        } elseif (preg_match('/^(請|请|麻煩|麻烦|幫我|帮我)?\s*(播放|播)\s*(.{1,30})$/u', $t, $m)) {
+            $mq = $this->extractMusicQuery($m[3]);  // 「播放稻香」→ 稻香
+        }
+        if ($mq !== null) {
             [$target, $targetLabel] = $this->targetGateway($t);
-            $q = $this->extractMusicQuery($t);
-            $url = $q !== ''
-                ? 'https://www.youtube.com/results?search_query='.rawurlencode($q)
-                : 'https://music.youtube.com/';
+            $q = $mq;
+            $playing = false;
+            $url = 'https://music.youtube.com/';
+            if ($q !== '') {
+                // 直接播放：解析 YouTube 搜尋第一筆影片 → 開 watch 頁（進去就播）
+                $vid = $this->youtubeFirstVideo($q);
+                $playing = $vid !== '';
+                $url = $playing
+                    ? "https://www.youtube.com/watch?v={$vid}&autoplay=1"
+                    : 'https://www.youtube.com/results?search_query='.rawurlencode($q);
+            }
             $res = $this->runGui($target, 'open', 'chrome', $url);
             $fail = $this->guiFailed($res);
-            $what = $q !== '' ? "「{$q}」的音樂" : '音樂';
+            $what = $q !== '' ? "「{$q}」" : '音樂';
+            $verb = $playing ? '播放' : '打開';
 
             return [
-                'reply' => "好，已在{$targetLabel}幫你打開{$what}（{$res}）",
-                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你打開{$what}了。",
+                'reply' => "好，已在{$targetLabel}{$verb}{$what}（{$res}）",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你{$verb}{$what}了。",
                 'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'music', 'target' => $target],
                 'step' => "🎵 播放音樂".($q !== '' ? "：{$q}" : '')."@{$targetLabel}",
             ];
@@ -358,6 +374,24 @@ class VoiceAgentController extends Controller
         return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，需要明細可以再跟我說。";
     }
 
+    /** 用 YouTube 搜尋頁解析第一個影片 ID（免 API key）；失敗回空字串。 */
+    private function youtubeFirstVideo(string $q): string
+    {
+        try {
+            $html = \Illuminate\Support\Facades\Http::timeout(8)
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+                    'Accept-Language' => 'zh-TW,zh;q=0.9',
+                ])
+                ->get('https://www.youtube.com/results', ['search_query' => $q])
+                ->body();
+
+            return preg_match('/"videoId":"([\w-]{11})"/', $html, $m) ? $m[1] : '';
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
     /** 從「播放周杰倫的歌」抽出歌名/歌手；抽不出（如「放點音樂」）回空字串。 */
     private function extractMusicQuery(string $t): string
     {
@@ -365,8 +399,11 @@ class VoiceAgentController extends Controller
         $q = preg_replace('/(請|请|麻煩|麻烦|幫我|帮我|幫忙|帮忙|可以|可不可以|能不能|然後|然后|接著|接着)/u', '', $q);
         $q = preg_replace('/在.{1,10}(上面|上|那邊|那边)/u', '', $q);
         $q = preg_replace('/(播放|聽一下|听一下|聽|听|播|放點|放点|放一首|放些|放|搜尋|搜寻|搜索|找一下|找)/u', '', $q);
-        $q = preg_replace('/(的歌曲|的歌|歌曲|的音樂|的音乐|音樂|音乐|\bmusic\b|\bplay\b|一首|一些|一下)/iu', '', $q);
+        $q = preg_replace('/(的歌曲|的歌|歌曲|的音樂|的音乐|音樂|音乐|\bmusic\b|\bplay\b|這首|这首|那首|一首|一些|一下)/iu', '', $q);
+        // 「播放點音樂吧」→ 殘留「點/吧」等虛詞要清掉，否則被當歌名
+        $q = preg_replace('/(來點|来点|一點|一点|點|点|些)/u', '', $q);
         $q = trim(preg_replace('/[，。！？,.!?\s]+/u', ' ', $q));
+        $q = preg_replace('/[吧啊喔哦嘛呀啦囉咯呢了]+$/u', '', $q);
 
         return mb_strlen($q) >= 2 ? $q : '';
     }

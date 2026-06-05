@@ -6,6 +6,14 @@ import { useVoiceChat } from '@/composables/useVoiceChat';
 const voice = useVoiceChat();
 const transcript = ref('');
 const agentSteps = ref([]);
+// 語音喚醒（Hey Siri 式）：開啟後待機中只回應「嘿助理」開頭的話
+const wakeEnabled = ref(localStorage.getItem('voice.wake') === '1');
+
+function toggleWake() {
+    wakeEnabled.value = !wakeEnabled.value;
+    localStorage.setItem('voice.wake', wakeEnabled.value ? '1' : '0');
+    voice.setWake(wakeEnabled.value);
+}
 
 // 將 useVoiceChat 的狀態映射為能量球的四種視覺狀態
 const visualStatus = computed(() => {
@@ -26,7 +34,7 @@ function toggleConnection() {
         agentSteps.value = [];
         
         voice.start(
-            { mode: 'hybrid', session: 'voice-' + (window.crypto?.randomUUID?.() || Date.now()) }, // 穩定 session id：多輪+背景任務共用同對話、結果可念回
+            { mode: 'hybrid', wake: wakeEnabled.value, session: 'voice-' + (window.crypto?.randomUUID?.() || Date.now()) }, // 穩定 session id：多輪+背景任務共用同對話、結果可念回
             {
                 onAiText: (t) => { transcript.value = t; agentSteps.value = []; }, // 回覆到了→清步驟，不再卡 thinking
                 onTranscript: (t) => { 
@@ -140,6 +148,12 @@ onUnmounted(() => {
                 <button @click="toggleConnection" class="w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all transform hover:scale-105" :class="!voice.active.value ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/30' : 'bg-red-500 hover:bg-red-400 shadow-red-500/30'">
                     <svg v-if="!voice.active.value" class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                     <svg v-else class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+
+                <button @click="toggleWake" :title="wakeEnabled ? '語音喚醒：開（喊「嘿助理」喚醒）' : '語音喚醒：關（隨時聆聽）'"
+                        class="w-12 h-12 rounded-full flex items-center justify-center transition-colors border border-white/10"
+                        :class="wakeEnabled ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-300'">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
                 </button>
 
                 <button @click="router.visit('/settings')" class="w-12 h-12 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-slate-300 transition-colors border border-white/10">
