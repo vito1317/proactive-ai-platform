@@ -136,6 +136,21 @@ class VoiceAgentController extends Controller
     private function directCommand(string $transcript): ?array
     {
         $t = trim($transcript);
+
+        // 系統狀態查詢（磁碟/記憶體/CPU…）→ 在目標節點跑真實指令拿真資料（不繞 LLM、不幻覺）
+        if ($sys = $this->sysQuery($t)) {
+            [$target, $targetLabel] = $this->targetGateway($t);
+            $out = trim($this->runExec($target, $sys['cmd']));
+            $speech = $this->summarizeSys($sys['key'], $out, $targetLabel);
+
+            return [
+                'reply' => "【{$targetLabel}・{$sys['label']}】\n".($out !== '' ? $out : '（沒有輸出）'),
+                'speech' => $speech,
+                'meta' => ['category' => 'skill', 'skill' => 'sysinfo', 'direct' => true, 'target' => $target],
+                'step' => "📊 {$sys['label']}@{$targetLabel}",
+            ];
+        }
+
         // 複雜需求（夾帶「開/關/搜尋」以外的其他動作）→ 交給 LLM agentic。
         // 注意：純連接詞（然後/並…）不算複雜——「打開瀏覽器然後搜尋新聞」仍走直達。
         if (preg_match('/(訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程|安裝|安装|刪除|删除)/u', $t)) {
@@ -201,6 +216,68 @@ class VoiceAgentController extends Controller
             'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'open', 'target' => $target],
             'step' => "🚀 開啟：{$label}@{$targetLabel}",
         ];
+    }
+
+    /**
+     * 系統狀態查詢 → 真實指令。回 ['cmd','label','key'] 或 null。
+     * 故意把「磁鐵/磁盤」等 STT 常見誤聽也對應到磁碟，繞過辨識誤差。
+     */
+    private function sysQuery(string $t): ?array
+    {
+        $n = mb_strtolower($t);
+        $isQuery = (bool) preg_match('/(查|看|顯示|显示|檢查|检查|多少|剩|用量|狀態|状态|還有|还有|有多|空間|空间|容量|多滿|多满)/u', $t);
+        // 磁碟（含誤聽：磁鐵/磁盤/硬盤）
+        if (preg_match('/(磁碟|磁盤|磁盘|磁鐵|磁铁|硬碟|硬盘|disk|儲存空間|存储空间|容量|空間|空间)/u', $t)) {
+            return ['cmd' => 'df -h', 'label' => '磁碟用量', 'key' => 'disk'];
+        }
+        // 記憶體（Mac 無 free，退而用 vm_stat / top）
+        if (preg_match('/(記憶體|记忆体|內存|内存|memory|\bram\b)/iu', $t)) {
+            return ['cmd' => 'free -h 2>/dev/null || (top -l 1 2>/dev/null | grep -i phys) || vm_stat', 'label' => '記憶體', 'key' => 'mem'];
+        }
+        // CPU / 負載 / 開機多久
+        if ($isQuery && preg_match('/(cpu|處理器|处理器|負載|负载|\bload\b|開機多久|开机多久|運行時間|运行时间|uptime)/iu', $t)) {
+            return ['cmd' => 'uptime', 'label' => 'CPU 負載 / 運行時間', 'key' => 'cpu'];
+        }
+        // 概括系統狀態
+        if (preg_match('/(系統狀態|系统状态|系統資訊|系统信息|機器狀態|机器状态)/u', $t)) {
+            return ['cmd' => 'uname -a; echo; uptime; echo; df -h | head -6', 'label' => '系統狀態', 'key' => 'sys'];
+        }
+
+        return null;
+    }
+
+    /** 在目標節點（local=主節點 gateway，或某 MCP gateway）跑唯讀指令，回 stdout。 */
+    private function runExec(string $target, string $cmd): string
+    {
+        $name = ($target === '' || $target === 'local') ? 'gateway' : $target;
+        $server = \App\Pai\Mcp\McpServer::where('name', $name)->where('enabled', true)->first();
+        if (! $server) {
+            return "（節點「{$name}」未連線）";
+        }
+        $r = app(\App\Pai\Mcp\McpClient::class)->callTool($server->url, $server->headers ?? [], 'exec', ['cmd' => $cmd]);
+
+        return ($r['ok'] ?? false) ? (string) ($r['text'] ?? '') : '（執行失敗：'.($r['error'] ?? '未知').'）';
+    }
+
+    /** 把系統指令輸出整理成一句口語朗讀。 */
+    private function summarizeSys(string $key, string $out, string $targetLabel): string
+    {
+        if (str_contains($out, '未連線') || str_contains($out, '執行失敗')) {
+            return "抱歉，{$targetLabel} 目前沒連上線，查不到。";
+        }
+        if ($key === 'disk') {
+            // 取根目錄（/）那行的使用百分比與可用空間
+            foreach (preg_split('/\R/', $out) as $line) {
+                if (preg_match('#(\d+)%\s+/$#', $line, $m) || (str_contains($line, ' /') && preg_match('/(\d+)%/', $line, $m))) {
+                    $avail = preg_match('/([\d.]+\s*[KMGT]i?)\s+\d+%/', $line, $a) ? $a[1] : '';
+                    return "{$targetLabel} 的磁碟使用了 {$m[1]}%".($avail ? "，還有 {$avail} 可用" : '')."。";
+                }
+            }
+
+            return "已查到 {$targetLabel} 的磁碟用量，詳細列在畫面上。";
+        }
+
+        return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，詳細列在畫面上。";
     }
 
     /** 口語句子 → GUI 白名單 key（chrome/firefox/terminal/calculator/files/settings/editor）或 null。 */
