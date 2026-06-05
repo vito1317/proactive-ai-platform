@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 在主節點圖形（Wayland）session 啟動白名單內的 app。預期以該 GUI 使用者身份執行（sudo -u）。
+export XDG_RUNTIME_DIR=/run/user/1000
+export WAYLAND_DISPLAY=wayland-0
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+app="$1"; shift || true
+case "$app" in
+  chrome|chromium|browser) exec setsid chromium-browser --ozone-platform=wayland --no-first-run "$@" ;;
+  firefox)                 exec setsid firefox "$@" ;;
+  files|nautilus)          exec setsid nautilus "$@" ;;
+  calculator)              exec setsid gnome-calculator ;;
+  settings)                exec setsid gnome-control-center ;;
+  terminal)                exec setsid gnome-terminal ;;
+  editor|gedit)            exec setsid gedit "$@" ;;
+  *) echo "app not allowed: $app" >&2; exit 2 ;;
+esac

@@ -1,0 +1,3 @@
+nobody ALL=(intellitrust) NOPASSWD: /usr/local/bin/pai-gui-open
+vito ALL=(intellitrust) NOPASSWD: /usr/local/bin/pai-gui-open
+www-data ALL=(intellitrust) NOPASSWD: /usr/local/bin/pai-gui-open

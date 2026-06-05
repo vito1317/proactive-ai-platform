@@ -127,32 +127,31 @@ class VoiceAgentController extends Controller
         if ($n === '') {
             return null;
         }
-        // 瀏覽器一律用本機實際裝的（server 有 chromium-browser，沒有 google-chrome）；
-        // 用 sh 候選串：有 google-chrome 就用，否則退 chromium-browser/chromium
-        $browser = "sh -c 'command -v google-chrome >/dev/null && exec google-chrome || command -v chromium-browser >/dev/null && exec chromium-browser || exec chromium'";
-        $map = [
-            'chrome' => $browser, 'google chrome' => $browser, 'google' => $browser,
-            'googlechrome' => $browser, '谷歌' => $browser, '瀏覽器' => $browser, '浏览器' => $browser,
-            'chromium' => 'chromium-browser',
+        // 口語名 → GUI 啟動器白名單 key（透過 pai-gui-open 在主節點圖形 session 真的開出視窗）
+        $keys = [
+            'chrome' => 'chrome', 'google chrome' => 'chrome', 'google' => 'chrome', 'googlechrome' => 'chrome',
+            '谷歌' => 'chrome', '瀏覽器' => 'chrome', '浏览器' => 'chrome', 'chromium' => 'chrome', 'safari' => 'chrome', 'edge' => 'chrome',
             'firefox' => 'firefox', '火狐' => 'firefox',
-            'edge' => 'microsoft-edge', 'safari' => $browser,
-            'terminal' => 'gnome-terminal', '終端' => 'gnome-terminal', '終端機' => 'gnome-terminal', '终端' => 'gnome-terminal',
-            'vscode' => 'code', 'vs code' => 'code', 'code' => 'code', '編輯器' => 'code',
-            'calculator' => 'gnome-calculator', '計算機' => 'gnome-calculator', '计算器' => 'gnome-calculator',
-            'files' => 'nautilus', '檔案' => 'nautilus', '文件管理' => 'nautilus', '檔案總管' => 'nautilus',
-            'settings' => 'gnome-control-center', '設定' => 'gnome-control-center', '设置' => 'gnome-control-center',
-            'gedit' => 'gedit', '記事本' => 'gedit', '文字編輯' => 'gedit',
+            'terminal' => 'terminal', '終端' => 'terminal', '終端機' => 'terminal', '终端' => 'terminal',
+            'calculator' => 'calculator', '計算機' => 'calculator', '计算器' => 'calculator', '計算器' => 'calculator',
+            'files' => 'files', '檔案' => 'files', '文件管理' => 'files', '檔案總管' => 'files', 'nautilus' => 'files',
+            'settings' => 'settings', '設定' => 'settings', '设置' => 'settings', '控制台' => 'settings',
+            'gedit' => 'editor', '記事本' => 'editor', '文字編輯' => 'editor', '編輯器' => 'editor',
         ];
-        foreach ($map as $k => $v) {
+        foreach ($keys as $k => $key) {
             if (str_contains($n, $k)) {
-                return $v;
+                // 以 GUI 使用者身份在 Wayland session 啟動（sudoers 已允許 web 使用者）
+                return 'sudo -u '.escapeshellarg($this->guiUser()).' /usr/local/bin/pai-gui-open '.escapeshellarg($key);
             }
         }
-        // 對不到 → 用清理後的名字當指令（去除空白、只留安全字元）
-        $clean = preg_replace('/[^a-z0-9_.\- ]/i', '', $name);
-        $clean = trim(preg_replace('/\s+/', '-', trim($clean)));
 
-        return $clean !== '' ? $clean : null;
+        return null; // 非已知 GUI app → 交回 agentic（可能是別的操作）
+    }
+
+    /** 主節點圖形 session 的使用者（可由 config 覆寫）。 */
+    private function guiUser(): string
+    {
+        return (string) (config('pai.voice.gui_user') ?: 'intellitrust');
     }
 
     /** 用 conversation_id 找既有對話；找不到（如電話來電）則用 session 綁定，最後退回為第一個使用者開新對話。 */
