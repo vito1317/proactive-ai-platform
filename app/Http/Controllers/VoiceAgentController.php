@@ -265,10 +265,11 @@ class VoiceAgentController extends Controller
     /** 從「搜尋 X / 查一下 X」抽出查詢字串。 */
     private function extractQuery(string $t): string
     {
-        if (preg_match('/(?:搜尋|搜索|查一下|查詢|查询|google一下|估狗|search|find)\s*(.+?)\s*(?:的相關|相關|的資料|資料|的新聞)?\s*[。.!！?？]*\s*$/iu', $t, $m)) {
+        // 取搜尋動詞之後的全部當查詢（保留「的新聞」「資料」等，因為它們常是查詢的一部分）
+        if (preg_match('/(?:搜尋|搜索|查一下|查詢|查询|google一下|估狗|search|find)\s*(.+)$/iu', $t, $m)) {
             $q = trim($m[1]);
-            // 去掉開頭可能殘留的「並/和/然後」
-            $q = preg_replace('/^(並|并|和|然後|然后|再|去)\s*/u', '', $q);
+            $q = preg_replace('/^(一下|並|并|和|然後|然后|再|去|的)\s*/u', '', $q);
+            $q = rtrim($q, " 。.!！?？、,，");
 
             return trim($q);
         }
