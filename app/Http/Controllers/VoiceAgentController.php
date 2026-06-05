@@ -136,8 +136,9 @@ class VoiceAgentController extends Controller
     private function directCommand(string $transcript): ?array
     {
         $t = trim($transcript);
-        // 複雜/多步需求（夾帶其他動作）→ 不走直達快路徑，交給 LLM agentic 適當處理
-        if (preg_match('/(然後|然后|接著|接着|之後|之后|順便|顺便|再幫|再帮|訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|計算|计算|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程)/u', $t)) {
+        // 複雜需求（夾帶「開/關/搜尋」以外的其他動作）→ 交給 LLM agentic。
+        // 注意：純連接詞（然後/並…）不算複雜——「打開瀏覽器然後搜尋新聞」仍走直達。
+        if (preg_match('/(訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|計算|计算|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程|安裝|安装|刪除|删除|修改|設定一|设置一)/u', $t)) {
             return null;
         }
         $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
