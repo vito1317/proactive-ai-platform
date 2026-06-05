@@ -118,10 +118,24 @@ export function useVoiceChat() {
         status.value = '請說話';
         socket.emit('prompt_text', promptPayload());
         socket.emit('recording-started');
+        acquireGeo();
     }
 
     function promptPayload() {
-        return { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '', wake: !!cfg.wake };
+        return { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '', wake: !!cfg.wake, geo: cfg.geo || null };
+    }
+
+    // 取得定位（使用者允許才有）；拿到後補送 prompt_text 讓伺服器更新位置
+    function acquireGeo() {
+        if (!navigator.geolocation) return;
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                cfg.geo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                if (socket && socket.connected) socket.emit('prompt_text', promptPayload());
+            },
+            () => { /* 使用者拒絕定位 → 略過，附近搜尋會提示開權限 */ },
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 },
+        );
     }
 
     // 語音喚醒（Hey Siri 式）即時開關：重送 prompt_text 更新伺服器端 wake 旗標

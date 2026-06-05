@@ -38,6 +38,9 @@ class VoiceAgentController extends Controller
             'transcript' => ['required', 'string', 'max:2000'],
             'conversation_id' => ['nullable', 'integer'],
             'session' => ['nullable', 'string', 'max:128'],
+            'geo' => ['nullable', 'array'],
+            'geo.lat' => ['required_with:geo', 'numeric'],
+            'geo.lng' => ['required_with:geo', 'numeric'],
         ]);
 
         $transcript = trim($data['transcript']);
@@ -49,7 +52,7 @@ class VoiceAgentController extends Controller
         $conv->addMessage('user', $transcript, ['source' => 'voice']);
 
         // 直達指令：明確的「打開/開啟 X」直接跑 open-app，不繞 LLM（快又不會被反問）
-        if ($direct = $this->directCommand($transcript)) {
+        if ($direct = $this->directCommand($transcript, $data['geo'] ?? null)) {
             $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
 
             return response()->json([
@@ -133,6 +136,9 @@ class VoiceAgentController extends Controller
             'transcript' => ['required', 'string', 'max:2000'],
             'conversation_id' => ['nullable', 'integer'],
             'session' => ['nullable', 'string', 'max:128'],
+            'geo' => ['nullable', 'array'],
+            'geo.lat' => ['required_with:geo', 'numeric'],
+            'geo.lng' => ['required_with:geo', 'numeric'],
         ]);
 
         return response()->stream(function () use ($data) {
@@ -154,7 +160,7 @@ class VoiceAgentController extends Controller
             $conv->addMessage('user', $transcript, ['source' => 'voice']);
 
             // 直達指令／重型背景任務：結果立即一次回（本來就快）
-            if ($direct = $this->directCommand($transcript)) {
+            if ($direct = $this->directCommand($transcript, $data['geo'] ?? null)) {
                 $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
                 $emit('step', ['text' => $direct['step'] ?? '⚡ 直接執行']);
                 $emit('done', [
@@ -259,9 +265,33 @@ class VoiceAgentController extends Controller
      *
      * @return array{reply:string,meta:array,step?:string}|null
      */
-    private function directCommand(string $transcript): ?array
+    private function directCommand(string $transcript, ?array $geo = null): ?array
     {
         $t = trim($transcript);
+
+        // 附近搜尋（用瀏覽器定位）：「附近有什麼好喝的飲料」→ 開 Google Maps 以使用者位置搜尋
+        if (preg_match('/(附近|這附近|这附近|周邊|周边)/u', $t)) {
+            $q = $this->extractNearbyQuery($t);
+            if ($geo === null) {
+                return [
+                    'reply' => '我還不知道你的位置——請在語音頁允許「定位權限」後再問我一次。',
+                    'speech' => '我還不知道你的位置，請在瀏覽器允許定位後，再問我一次。',
+                    'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'nearby', 'no_geo' => true],
+                    'step' => '📍 缺定位權限',
+                ];
+            }
+            [$target, $targetLabel] = $this->targetGateway($t);
+            $url = 'https://www.google.com/maps/search/'.rawurlencode($q).'/@'.$geo['lat'].','.$geo['lng'].',16z';
+            $res = $this->runGui($target, 'open', 'chrome', $url);
+            $fail = $this->guiFailed($res);
+
+            return [
+                'reply' => "好，已在{$targetLabel}打開附近「{$q}」的地圖搜尋（{$res}）",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，幫你找了附近的{$q}，地圖已經打開了。",
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'nearby', 'target' => $target],
+                'step' => "📍 附近搜尋：{$q}@{$targetLabel}",
+            ];
+        }
 
         // 系統狀態查詢（磁碟/記憶體/CPU…）→ 在目標節點跑真實指令拿真資料（不繞 LLM、不幻覺）
         if ($sys = $this->sysQuery($t)) {
@@ -534,6 +564,25 @@ class VoiceAgentController extends Controller
         }
 
         return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，需要明細可以再跟我說。";
+    }
+
+    /** 從「附近有什麼好喝的飲料」抽出搜尋詞（飲料）；抽不出預設「餐廳」。 */
+    private function extractNearbyQuery(string $t): string
+    {
+        $q = $t;
+        $q = preg_replace('/(請問|请问|幫我|帮我|麻煩|麻烦|找一下|找找|查一下|搜尋|搜寻|搜索)/u', '', $q);
+        $q = preg_replace('/(這附近|这附近|附近的|附近|周邊|周边)/u', '', $q);
+        $q = preg_replace('/(有什麼|有什么|有沒有|有没有|哪裡有|哪里有|哪邊有|哪边有|推薦|推荐|好喝的|好吃的|好玩的|不錯的|不错的)/u', '', $q);
+        $q = trim(preg_replace('/[，。！？,.!?\s]+/u', ' ', $q));
+        $q = preg_replace('/^(有沒有|有没有|有)/u', '', $q);
+        $q = preg_replace('/[吧啊喔哦嘛呀啦囉咯呢了的嗎吗]+$/u', '', $q);
+        if (mb_strlen($q) < 1) {
+            // 抽不出關鍵詞 → 依語氣給合理預設
+            return preg_match('/(好玩|景點|景点|逛)/u', $t) ? '景點'
+                : (preg_match('/(好喝|飲料|饮料|咖啡)/u', $t) ? '飲料店' : '餐廳');
+        }
+
+        return $q;
     }
 
     /** 中文數字 → 整數（支援 0-100：五十、八十五、一百…）；解析不了回 null。 */
