@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" font-family="-apple-system,Segoe UI,Roboto,Noto Sans CJK TC,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#38bdf8"/></marker>
+    <marker id="g" markerWidth="11" markerHeight="11" refX="8" refY="3.5" orient="auto"><path d="M0,0 L9,3.5 L0,7 Z" fill="#10b981"/></marker>
+    <style>
+      .t{fill:#e2e8f0;font-size:13px}.h{fill:#fff;font-size:14px;font-weight:700}
+      .s{fill:#94a3b8;font-size:11px}.lbl{fill:#7dd3fc;font-size:11px}
+      .e{stroke:#38bdf8;stroke-width:2;fill:none;marker-end:url(#a)}
+      .eg{stroke:#10b981;stroke-width:2;fill:none;marker-end:url(#g)}
+    </style>
+  </defs>
+  <rect width="1180" height="720" fill="#0b1120"/>
+  <text x="40" y="42" fill="#fff" font-size="22" font-weight="700">全雙工語音 — agent 流程圖</text>
+  <text x="40" y="64" class="s">語音輸入 → STT → PAI agentic（真資料/可操控系統） → TTS 念回 · 全程繁體中文</text>
+
+  <!-- row 1: capture -->
+  <rect x="40" y="92" width="200" height="78" rx="10" fill="#0f172a" stroke="#38bdf8"/>
+  <text x="56" y="116" class="h">🎙 瀏覽器</text>
+  <text x="56" y="136" class="t">麥克風 48k→16k</text>
+  <text x="56" y="154" class="s">Gain×2 · ScriptProcessor</text>
+
+  <rect x="300" y="92" width="210" height="78" rx="10" fill="#0f172a" stroke="#38bdf8"/>
+  <text x="316" y="116" class="h">Socket.IO</text>
+  <text x="316" y="136" class="t">/voice-rt → :8891</text>
+  <text x="316" y="154" class="s">WAF/nginx 反代 · VAD 斷句</text>
+
+  <rect x="570" y="92" width="230" height="78" rx="10" fill="#0f172a" stroke="#22d3ee"/>
+  <text x="586" y="116" class="h">voice_server（MiniCPM-o）</text>
+  <text x="586" y="136" class="t">STT 轉錄（你說的話）</text>
+  <text x="586" y="154" class="s">transformers 4.44.2 · agent 模式</text>
+
+  <path class="e" d="M240,131 L300,131"/>
+  <path class="e" d="M510,131 L570,131"/>
+
+  <!-- to PAI -->
+  <path class="e" d="M685,170 L685,210"/><text x="695" y="195" class="lbl">POST /api/voice/agent（逐字稿 + 共用密鑰）</text>
+
+  <!-- PAI box -->
+  <rect x="300" y="210" width="600" height="270" rx="12" fill="#0f172a" stroke="#3b82f6"/>
+  <text x="318" y="236" class="h">PAI Agentic（真實處理，不幻覺）</text>
+
+  <rect x="320" y="250" width="250" height="60" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="334" y="272" class="t">① 直達指令？</text>
+  <text x="334" y="292" class="s">「打開 X」→ open-app 秒開（不繞 LLM）</text>
+
+  <rect x="600" y="250" width="280" height="60" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="614" y="272" class="t">② MetaRouter 意圖路由</text>
+  <text x="614" y="292" class="s">chat / skill / task</text>
+
+  <rect x="320" y="324" width="560" height="68" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="334" y="346" class="h">SkillRunner（ReAct 多輪）</text>
+  <text x="334" y="366" class="t">run-shell · open-app · web-search（上網查）· tail-logs · 讀寫檔</text>
+  <text x="334" y="383" class="s">高風險→確認 · 用真實工具資料作答（禁編造）</text>
+
+  <rect x="320" y="404" width="270" height="60" rx="8" fill="#13233f" stroke="#a855f7"/>
+  <text x="334" y="426" class="t">llama-server :10003</text>
+  <text x="334" y="446" class="s">綜合解讀 → 繁體中文回覆</text>
+
+  <rect x="610" y="404" width="270" height="60" rx="8" fill="#13233f" stroke="#10b981"/>
+  <text x="624" y="426" class="t">MCP → Gateway 節點</text>
+  <text x="624" y="446" class="s">主節點 / Mac：exec · open_app</text>
+
+  <path class="e" d="M570,280 L600,280"/>
+  <path class="e" d="M600,358 L600,358" />
+  <path class="eg" d="M745,392 L745,404"/>
+
+  <!-- back: reply + TTS -->
+  <path class="e" d="M900,300 L960,300"/>
+  <rect x="960" y="250" width="190" height="120" rx="10" fill="#0f172a" stroke="#22d3ee"/>
+  <text x="976" y="274" class="h">回覆</text>
+  <text x="976" y="296" class="t">文字（繁中）</text>
+  <text x="976" y="316" class="t">+ 活動步驟</text>
+  <text x="976" y="338" class="s">model.chat TTS</text>
+  <text x="976" y="356" class="s">→ 合成語音 24k</text>
+
+  <path class="e" d="M1055,250 C1055,200 1055,140 800,131"/><text x="900" y="205" class="lbl">audio + ai_text（Socket.IO 回推）</text>
+
+  <!-- browser playback -->
+  <rect x="40" y="250" width="200" height="120" rx="10" fill="#0f172a" stroke="#38bdf8"/>
+  <text x="56" y="274" class="h">🔊 瀏覽器播放</text>
+  <text x="56" y="296" class="t">PCM16 24k 佇列播放</text>
+  <text x="56" y="316" class="t">畫面顯示逐字稿+回覆</text>
+  <text x="56" y="338" class="s">說話即打斷（barge-in）</text>
+  <path class="e" d="M300,330 L240,320"/>
+
+  <!-- footer notes -->
+  <rect x="40" y="520" width="1110" height="160" rx="12" fill="#0f172a" stroke="#334155"/>
+  <text x="58" y="546" class="h">重點</text>
+  <text x="58" y="572" class="t">• agent 模式：每一輪都用 PAI 的真實工具與資料回答 → 不會像純 S2S 那樣「胡說八道」、不會用簡體。</text>
+  <text x="58" y="596" class="t">• 「打開 chrome」走直達快路徑（不繞 LLM）；「搜尋 / 查資料」走 web-search 上網查。</text>
+  <text x="58" y="620" class="t">• 要操控某台機器（如你的 Mac）：在該機跑 connect.sh（cloudflared 通道 + 自動註冊 MCP）後，說「在 &lt;主機&gt; 上開 chrome」。</text>
+  <text x="58" y="644" class="t">• 全雙工語音音訊已修：transformers 4.44.2 + tokenizers patch + OmniOutput 解析；STT/TTS/S2S 皆正常。</text>
+  <text x="58" y="668" class="s">純全雙工 S2S（hybrid）較快但會幻覺；agent 較慢但正確 —— 已選 agent。</text>
+</svg>
