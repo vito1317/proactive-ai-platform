@@ -61,6 +61,26 @@ class VoiceAgentController extends Controller
             ]);
         }
 
+        // 重型多步任務（比價/研究/分析/規劃…）→ 在背景連續操作，語音先回快ack，完成後通知
+        // （這類在本地思考模型上要數分鐘，同步等會逾時 504）
+        if ($this->isHeavyTask($transcript)) {
+            $event = \App\Pai\Perception\PaiEvent::create([
+                'source' => 'voice', 'topic' => 'console.request',
+                'payload' => ['message' => $transcript, 'conversation_id' => $conv->id],
+                'status' => \App\Pai\Perception\EventStatus::Received,
+            ]);
+            \App\Pai\Cognition\RouteCommandJob::dispatch($event->id);
+            $ack = '好的，這個需要連續查幾個來源、做比較，我在背景幫你處理，完成後通知你並會出現在對話裡。';
+            $conv->addMessage('assistant', $ack, ['source' => 'voice', 'category' => 'task', 'event_id' => $event->id]);
+
+            return response()->json([
+                'reply' => $ack, 'speech' => $ack,
+                'steps' => ['🧠 背景連續操作中…'],
+                'meta' => ['category' => 'task', 'background' => true, 'event_id' => $event->id],
+                'conversation_id' => $conv->id,
+            ]);
+        }
+
         // 用與 SSE / TG / LINE 相同的路由 → 可閒聊也可實際跑技能操控系統
         $steps = [];
         $onStep = function (string $t) use (&$steps) {
@@ -216,6 +236,12 @@ class VoiceAgentController extends Controller
             'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'open', 'target' => $target],
             'step' => "🚀 開啟：{$label}@{$targetLabel}",
         ];
+    }
+
+    /** 是否為「重型多步任務」（需連續上網/比較/研究，數分鐘）→ 改背景跑，避免同步逾時。 */
+    private function isHeavyTask(string $t): bool
+    {
+        return (bool) preg_match('/(比價|比价|研究|調查|调查|分析|彙整|汇整|整理出|規劃|规划|行程|攻略|最便宜|最划算|哪間|哪家|住宿|機票|机票|飯店|饭店|報告|报告)/u', $t);
     }
 
     /**
