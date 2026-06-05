@@ -19,36 +19,50 @@ export function useVoiceChat() {
 
     let socket = null;
     let micStream = null, audioCtx = null, scriptNode = null, gainNode = null;
-    let audioQueue = [], isPlayingAudio = false;
     let handlers = {}, cfg = {};
-    let micMuteUntil = 0; // AI 說話期間（+尾音緩衝）暫停送麥克風，避免回授把 AI 自己的聲音當成輸入
-
-    function toggleMute() { isMuted.value = !isMuted.value; }
+    let micMuteUntil = 0; // AI 播放期間暫停麥克風（純時間判斷，自動過期）
+    let playCtx = null, playHead = 0, speakingTimer = null;
 
     function toggleMute() {
-        if (!micStream) return;
         isMuted.value = !isMuted.value;
-        micStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value);
+        if (micStream) micStream.getAudioTracks().forEach((t) => { t.enabled = !isMuted.value; });
     }
 
-    function playNext() {
-        if (isPlayingAudio || audioQueue.length === 0) return;
-        isPlayingAudio = true;
-        const pcm16 = audioQueue.shift();
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-        const buf = ctx.createBuffer(1, pcm16.length, 24000);
-        const ch = buf.getChannelData(0);
-        for (let i = 0; i < pcm16.length; i++) ch[i] = pcm16[i] / 32768.0;
+    function ensurePlayCtx() {
+        if (!playCtx || playCtx.state === 'closed') {
+            playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            playHead = 0;
+        }
+        if (playCtx.state === 'suspended') playCtx.resume();
+        return playCtx;
+    }
+
+    // 無縫排程播放：把每段 PCM16(24k) 接在播放時鐘上，不靠 onended（避免網路抖動造成空隙/斷句）
+    function enqueuePcm(pcm16) {
+        if (!pcm16 || !pcm16.length) return;
+        const ctx = ensurePlayCtx();
+        const f32 = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) f32[i] = pcm16[i] / 32768.0;
+        const buf = ctx.createBuffer(1, f32.length, 24000);
+        buf.getChannelData(0).set(f32);
+        const startAt = Math.max(ctx.currentTime + 0.08, playHead);
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);
-        src.onended = () => {
-            ctx.close().catch(() => {});
-            isPlayingAudio = false;
-            if (audioQueue.length > 0) playNext();
-            else speaking.value = false;
-        };
-        src.start(0);
+        src.start(startAt);
+        playHead = startAt + buf.duration;
+        speaking.value = true;
+        const remainMs = (playHead - ctx.currentTime) * 1000;
+        micMuteUntil = performance.now() + remainMs + 600; // 播完 + 緩衝才開麥克風（防回授）
+        clearTimeout(speakingTimer);
+        speakingTimer = setTimeout(() => { speaking.value = false; }, remainMs + 200);
+    }
+
+    function stopPlayback() {
+        clearTimeout(speakingTimer);
+        speaking.value = false;
+        playHead = 0;
+        if (playCtx) { try { playCtx.close(); } catch (e) { /* noop */ } playCtx = null; }
     }
 
     async function startListening() {
@@ -133,15 +147,10 @@ export function useVoiceChat() {
         socket.on('connect_error', () => { status.value = '連線失敗'; });
         socket.on('too_many_users', () => { status.value = '語音通道已滿，請稍後'; stop(); });
         socket.on('audio', (data) => {
-            const pcm = new Int16Array(data);
-            if (!pcm.length) return;
-            audioQueue.push(pcm);
-            speaking.value = true;
-            // 這段音訊播放時間 + 800ms 尾音緩衝，期間麥克風不送（防回授）
-            micMuteUntil = performance.now() + (pcm.length / 24000) * 1000 + 800;
-            playNext();
+            const buf = data instanceof ArrayBuffer ? data : (data?.buffer ?? data);
+            enqueuePcm(new Int16Array(buf));
         });
-        socket.on('stop_tts', () => { audioQueue = []; speaking.value = false; });
+        socket.on('stop_tts', () => stopPlayback());
         socket.on('ai_text', (t) => handlers.onAiText && handlers.onAiText(String(t || '')));
         socket.on('user_transcript', (t) => handlers.onTranscript && handlers.onTranscript(String(t || '')));
         socket.on('agent_step', (s) => handlers.onStep && handlers.onStep(String(s || '')));
@@ -159,8 +168,8 @@ export function useVoiceChat() {
         try { gainNode && gainNode.disconnect(); } catch (e) { /* noop */ }
         try { micStream && micStream.getTracks().forEach((t) => t.stop()); } catch (e) { /* noop */ }
         try { audioCtx && audioCtx.close(); } catch (e) { /* noop */ }
+        stopPlayback();
         try { socket && socket.disconnect(); } catch (e) { /* noop */ }
-        audioQueue = []; isPlayingAudio = false;
         socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
