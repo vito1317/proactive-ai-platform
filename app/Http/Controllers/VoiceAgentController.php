@@ -138,7 +138,7 @@ class VoiceAgentController extends Controller
         $t = trim($transcript);
         // 複雜需求（夾帶「開/關/搜尋」以外的其他動作）→ 交給 LLM agentic。
         // 注意：純連接詞（然後/並…）不算複雜——「打開瀏覽器然後搜尋新聞」仍走直達。
-        if (preg_match('/(訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|計算|计算|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程|安裝|安装|刪除|删除|修改|設定一|设置一)/u', $t)) {
+        if (preg_match('/(訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程|安裝|安装|刪除|删除)/u', $t)) {
             return null;
         }
         $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|使用|叫出|呼叫|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b|\buse\b)/iu', $t);
@@ -212,7 +212,7 @@ class VoiceAgentController extends Controller
             '谷歌' => 'chrome', '瀏覽器' => 'chrome', '浏览器' => 'chrome', 'chromium' => 'chrome', 'safari' => 'chrome', 'edge' => 'chrome',
             'firefox' => 'firefox', '火狐' => 'firefox',
             'terminal' => 'terminal', '終端' => 'terminal', '終端機' => 'terminal', '终端' => 'terminal',
-            'calculator' => 'calculator', '計算機' => 'calculator', '计算器' => 'calculator', '計算器' => 'calculator',
+            'calculator' => 'calculator', '計算機' => 'calculator', '计算器' => 'calculator', '計算器' => 'calculator', '计算机' => 'calculator', '計算机' => 'calculator', '計算' => 'calculator', '计算' => 'calculator',
             'files' => 'files', '檔案' => 'files', '文件管理' => 'files', '檔案總管' => 'files', 'nautilus' => 'files',
             'settings' => 'settings', '設定' => 'settings', '设置' => 'settings', '控制台' => 'settings',
             'gedit' => 'editor', '記事本' => 'editor', '文字編輯' => 'editor', '編輯器' => 'editor',
