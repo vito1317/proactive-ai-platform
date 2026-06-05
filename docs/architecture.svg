@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" font-family="-apple-system,Segoe UI,Roboto,Noto Sans CJK TC,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/></marker>
+    <style>
+      .t{fill:#e2e8f0;font-size:13px} .h{fill:#fff;font-size:14px;font-weight:700}
+      .s{fill:#94a3b8;font-size:11px} .lbl{fill:#64748b;font-size:10px}
+      .box{rx:10;stroke-width:1.5} .edge{stroke:#64748b;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1180" height="760" fill="#0b1120"/>
+  <text x="40" y="40" fill="#fff" font-size="22" font-weight="700">指揮 AI 平台 — 架構圖</text>
+  <text x="40" y="62" class="s">Proactive AI Platform · Laravel + Vue · 全雙工語音 · 節點 Gateway</text>
+
+  <!-- Clients -->
+  <rect x="40" y="90" width="250" height="150" rx="12" fill="#0f172a" stroke="#334155"/>
+  <text x="56" y="114" class="h">用戶端 Clients</text>
+  <rect x="56" y="126" width="100" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="70" y="148" class="t">Chat 網頁</text>
+  <rect x="166" y="126" width="108" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="180" y="148" class="t">/voice 語音頁</text>
+  <rect x="56" y="168" width="70" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="68" y="190" class="t">Telegram</text>
+  <rect x="136" y="168" width="60" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="150" y="190" class="t">LINE</text>
+  <rect x="206" y="168" width="68" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="218" y="190" class="t">麥克風</text>
+  <text x="56" y="224" class="s">瀏覽器：SSE 串流 + Socket.IO 語音</text>
+
+  <!-- Edge -->
+  <rect x="40" y="270" width="250" height="120" rx="12" fill="#0f172a" stroke="#334155"/>
+  <text x="56" y="294" class="h">邊緣 Edge</text>
+  <rect x="56" y="306" width="218" height="32" rx="8" fill="#1e293b" stroke="#475569"/><text x="70" y="327" class="t">Cloudflare → Security One WAF</text>
+  <rect x="56" y="344" width="218" height="32" rx="8" fill="#1e293b" stroke="#475569"/><text x="70" y="365" class="t">nginx :8083（反代 / WS upgrade）</text>
+
+  <!-- PAI core -->
+  <rect x="330" y="90" width="430" height="430" rx="12" fill="#0f172a" stroke="#3b82f6"/>
+  <text x="348" y="116" class="h">PAI 核心（Laravel）</text>
+  <rect x="348" y="128" width="394" height="58" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="362" y="150" class="t">控制器：ChatStream(SSE) · VoiceAgent · Console · Gateway</text>
+  <text x="362" y="170" class="s">/stream/chat · /api/voice/agent · /api/gateway/register</text>
+
+  <rect x="348" y="196" width="394" height="86" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="362" y="218" class="h">認知 / Agentic</text>
+  <text x="362" y="238" class="t">ChatResponder → MetaRouter（意圖路由）</text>
+  <text x="362" y="258" class="t">SkillRunner（ReAct 多輪：思考→工具→觀察）</text>
+  <text x="362" y="275" class="s">react.max_steps 可調 · 直達指令快路徑</text>
+
+  <rect x="348" y="292" width="192" height="120" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="362" y="314" class="h">技能 Skills</text>
+  <text x="362" y="334" class="t">run-shell · open-app</text>
+  <text x="362" y="352" class="t">read/write/edit-file</text>
+  <text x="362" y="370" class="t">web-search · tail-logs</text>
+  <text x="362" y="388" class="t">領域/設定/MCP 管理</text>
+  <text x="362" y="406" class="s">高風險→確認/一律允許</text>
+
+  <rect x="550" y="292" width="192" height="120" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="564" y="314" class="h">MCP Client</text>
+  <text x="564" y="334" class="t">JSON-RPC / Streamable</text>
+  <text x="564" y="352" class="t">→ Gateway 節點工具</text>
+  <text x="564" y="370" class="t">exec/spawn/open_app…</text>
+  <text x="564" y="388" class="s">{{vault}} 憑證注入</text>
+
+  <rect x="348" y="422" width="394" height="84" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="362" y="444" class="h">記憶 / 狀態</text>
+  <text x="362" y="464" class="t">SQLite（對話 / 事件 / 設定 / MCP servers）</text>
+  <text x="362" y="484" class="t">Queue（pai-queue · pai-chat） · Scheduler</text>
+
+  <!-- Brain -->
+  <rect x="800" y="90" width="340" height="120" rx="12" fill="#0f172a" stroke="#a855f7"/>
+  <text x="818" y="116" class="h">大腦 LLM</text>
+  <rect x="818" y="128" width="304" height="32" rx="8" fill="#1e293b" stroke="#475569"/><text x="832" y="149" class="t">llama-server :10003（OpenAI 相容）</text>
+  <text x="818" y="184" class="s">逐 token 串流 · reasoning 思考過程</text>
+
+  <!-- Voice -->
+  <rect x="800" y="230" width="340" height="150" rx="12" fill="#0f172a" stroke="#22d3ee"/>
+  <text x="818" y="256" class="h">語音服務</text>
+  <rect x="818" y="268" width="304" height="34" rx="8" fill="#1e293b" stroke="#475569"/><text x="832" y="290" class="t">voice_server :8891 — MiniCPM-o（全雙工 S2S）</text>
+  <rect x="818" y="308" width="304" height="30" rx="8" fill="#0f172a" stroke="#334155"/><text x="832" y="328" class="s">transformers 4.44.2（修好音訊）· STT + TTS</text>
+  <text x="818" y="360" class="s">Freeze-Omni :8892（備用，停用）</text>
+
+  <!-- Nodes / gateways -->
+  <rect x="800" y="400" width="340" height="200" rx="12" fill="#0f172a" stroke="#10b981"/>
+  <text x="818" y="426" class="h">節點 Gateways（HTTP/WS/MCP）</text>
+  <rect x="818" y="438" width="304" height="48" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="832" y="458" class="t">主節點 gateway :8099</text>
+  <text x="832" y="476" class="s">exec/spawn/kill/logs/open_app · pai-gui-open(Wayland)</text>
+  <rect x="818" y="494" width="304" height="58" rx="8" fill="#13233f" stroke="#475569"/>
+  <text x="832" y="514" class="t">Mac / 其他節點 gateway</text>
+  <text x="832" y="532" class="s">cloudflared 通道 → 自助註冊 MCP</text>
+  <text x="832" y="548" class="s">macOS: open -a · Linux: 圖形 session</text>
+  <text x="818" y="576" class="lbl">一鍵：curl .../gateway/connect.sh | REGISTER_TOKEN=… bash</text>
+
+  <!-- edges -->
+  <path class="edge" d="M165,240 L165,270"/>
+  <path class="edge" d="M290,330 L330,300"/>
+  <path class="edge" d="M760,150 L800,150"/><text x="765" y="142" class="lbl">推理</text>
+  <path class="edge" d="M760,250 L800,290"/><text x="763" y="270" class="lbl">語音</text>
+  <path class="edge" d="M760,400 L800,470"/><text x="763" y="430" class="lbl">MCP</text>
+  <path class="edge" d="M800,300 L745,260"/><text x="748" y="300" class="lbl">STT/TTS↔PAI</text>
+</svg>

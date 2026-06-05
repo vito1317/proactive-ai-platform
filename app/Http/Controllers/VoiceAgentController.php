@@ -95,12 +95,11 @@ class VoiceAgentController extends Controller
     private function directCommand(string $transcript): ?array
     {
         $t = trim($transcript);
-        // 開啟程式：打開/開啟/啟動/打开/开启/启动/開一下/幫我開 + 目標
-        if (preg_match('/^\s*(?:幫我|帮我|請|请)?\s*(?:打開|打开|開啟|开启|啟動|启动|開一下|开一下|開|开|執行|执行|run|open|launch|start)\s*[一個個了]*\s*(.+?)\s*[。.!！?？]*\s*$/iu', $t, $m)) {
-            $target = trim($m[1]);
-            // 去掉常見贅詞
-            $target = preg_replace('/(這個|這|那個|程式|程序|應用程式|应用|app|軟體|软件|瀏覽器|浏览器)$/u', '', trim($target));
-            $cmd = $this->resolveAppCommand($target !== '' ? $target : $m[1]);
+        // 句中任一處出現「開啟動詞」即視為開程式意圖（不限句首，容許「你可以打開…嗎」這類問句）
+        $hasOpenVerb = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
+        if ($hasOpenVerb) {
+            // 直接掃整句裡的已知 app 關鍵字（chrome/瀏覽器/計算機…）
+            $cmd = $this->resolveAppCommand($t);
             if ($cmd === null) {
                 return null;
             }
@@ -111,7 +110,7 @@ class VoiceAgentController extends Controller
             $result = $skill->run(['command' => $cmd]);
 
             return [
-                'reply' => "好，已幫你開啟「{$target}」。{$result}",
+                'reply' => "好，已在主節點幫你開啟了。{$result}",
                 'meta' => ['category' => 'skill', 'skill' => 'open-app', 'direct' => true, 'command' => $cmd],
                 'step' => "🚀 直接啟動：{$cmd}",
             ];
