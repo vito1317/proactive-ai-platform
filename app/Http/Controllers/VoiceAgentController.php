@@ -70,7 +70,7 @@ class VoiceAgentController extends Controller
                 'status' => \App\Pai\Perception\EventStatus::Received,
             ]);
             \App\Pai\Cognition\RouteCommandJob::dispatch($event->id);
-            $ack = '好的，這個需要連續查幾個來源、做比較，我在背景幫你處理，完成後通知你並會出現在對話裡。';
+            $ack = '好的，這需要連續查資料、整理，我在背景幫你處理，完成後會通知你並出現在對話裡。';
             $conv->addMessage('assistant', $ack, ['source' => 'voice', 'category' => 'task', 'event_id' => $event->id]);
 
             return response()->json([
