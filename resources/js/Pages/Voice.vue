@@ -1,7 +1,15 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { useVoiceChat } from '@/composables/useVoiceChat';
+
+marked.setOptions({ gfm: true, breaks: true });
+// 回覆常含 markdown（行程表/清單/粗體）→ 渲染後顯示（與 /chat 同一套，已消毒）
+function md(text) {
+    try { return DOMPurify.sanitize(marked.parse(String(text))); } catch { return String(text); }
+}
 
 const voice = useVoiceChat();
 const transcript = ref('');
@@ -138,9 +146,7 @@ onUnmounted(() => {
                 </div>
                 
                 <div v-if="transcript" ref="transcriptBox" class="transcript-box">
-                    <p class="text-lg md:text-xl font-light tracking-wide text-slate-200">
-                        {{ transcript }}
-                    </p>
+                    <div class="md-body text-lg md:text-xl font-light tracking-wide text-slate-200" v-html="md(transcript)"></div>
                 </div>
             </div>
         </main>
@@ -209,10 +215,46 @@ onUnmounted(() => {
     scrollbar-width: thin;
     scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
 }
-.transcript-box p {
-    white-space: pre-wrap;
+.transcript-box .md-body {
     word-break: break-word;
     line-height: 1.9;
+    text-align: left;
+}
+/* markdown 元素樣式（深色主題、緊湊） */
+.md-body :deep(h1), .md-body :deep(h2), .md-body :deep(h3), .md-body :deep(h4) {
+    font-weight: 600;
+    color: #e2e8f0;
+    margin: 0.9em 0 0.35em;
+    font-size: 1.05em;
+}
+.md-body :deep(p) { margin: 0.4em 0; }
+.md-body :deep(ul), .md-body :deep(ol) { margin: 0.4em 0; padding-left: 1.4em; }
+.md-body :deep(ul) { list-style: disc; }
+.md-body :deep(ol) { list-style: decimal; }
+.md-body :deep(li) { margin: 0.2em 0; }
+.md-body :deep(strong) { color: #f1f5f9; font-weight: 600; }
+.md-body :deep(a) { color: #7dd3fc; text-decoration: underline; }
+.md-body :deep(code) {
+    background: rgba(148, 163, 184, 0.15);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+.md-body :deep(table) {
+    border-collapse: collapse;
+    margin: 0.6em auto;
+    font-size: 0.85em;
+}
+.md-body :deep(th), .md-body :deep(td) {
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    padding: 0.3em 0.7em;
+}
+.md-body :deep(th) { background: rgba(148, 163, 184, 0.1); }
+.md-body :deep(hr) { border-color: rgba(148, 163, 184, 0.2); margin: 0.8em 0; }
+.md-body :deep(blockquote) {
+    border-left: 3px solid rgba(125, 211, 252, 0.4);
+    padding-left: 0.8em;
+    color: #94a3b8;
 }
 @keyframes transcript-in {
     from { opacity: 0; transform: translateY(8px); }
