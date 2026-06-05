@@ -102,14 +102,120 @@ class VoiceAgentController extends Controller
             $reply = '我沒有產生回覆，請再說一次。';
         }
 
+        $reply = $this->utf8($reply); // LLM/工具輸出可能夾壞 UTF-8 → json_encode 會 500
         $conv->addMessage('assistant', $reply, array_merge($meta, ['source' => 'voice', 'trace' => $steps]));
 
         return response()->json([
             'reply' => $reply,
             'speech' => $this->speechClean($reply), // 朗讀用：去掉指令/路徑/網址/emoji，避免 TTS 念出怪聲
-            'steps' => $steps,
+            'steps' => array_map(fn ($s) => $this->utf8($s), $steps),
             'meta' => $meta,
             'conversation_id' => $conv->id,
+        ]);
+    }
+
+    /** 清掉無效 UTF-8（LLM 截斷的多位元組字會讓 json_encode 直接炸 500）。 */
+    private function utf8(string $s): string
+    {
+        return (string) mb_convert_encoding($s, 'UTF-8', 'UTF-8');
+    }
+
+    /**
+     * SSE 串流版：邊生成邊回（voice_server 收到一句念一句，不用等全部跑完）。
+     * 事件：step（執行步驟）/ delta（回覆文字片段）/ done（完整結果）。
+     */
+    public function stream(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
+        abort_if($secret === '' || ! hash_equals($secret, (string) $request->header('X-Voice-Secret')), 401);
+
+        $data = $request->validate([
+            'transcript' => ['required', 'string', 'max:2000'],
+            'conversation_id' => ['nullable', 'integer'],
+            'session' => ['nullable', 'string', 'max:128'],
+        ]);
+
+        return response()->stream(function () use ($data) {
+            $emit = function (string $event, array $payload): void {
+                echo "event: {$event}\ndata: ".json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)."\n\n";
+                if (ob_get_level() > 0) {
+                    @ob_flush();
+                }
+                flush();
+            };
+
+            $transcript = trim($data['transcript']);
+            if ($transcript === '') {
+                $emit('done', ['reply' => '', 'speech' => '', 'conversation_id' => $data['conversation_id'] ?? null]);
+
+                return;
+            }
+            $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
+            $conv->addMessage('user', $transcript, ['source' => 'voice']);
+
+            // 直達指令／重型背景任務：結果立即一次回（本來就快）
+            if ($direct = $this->directCommand($transcript)) {
+                $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
+                $emit('step', ['text' => $direct['step'] ?? '⚡ 直接執行']);
+                $emit('done', [
+                    'reply' => $direct['reply'], 'speech' => $direct['speech'] ?? $direct['reply'],
+                    'meta' => $direct['meta'], 'conversation_id' => $conv->id,
+                ]);
+
+                return;
+            }
+            if ($this->isHeavyTask($transcript)) {
+                $event = \App\Pai\Perception\PaiEvent::create([
+                    'source' => 'voice', 'topic' => 'console.request',
+                    'payload' => ['message' => $transcript, 'conversation_id' => $conv->id],
+                    'status' => \App\Pai\Perception\EventStatus::Received,
+                ]);
+                \App\Pai\Cognition\RouteCommandJob::dispatch($event->id);
+                $ack = '好的，這需要連續查資料、整理，我在背景幫你處理，完成後會通知你並出現在對話裡。';
+                $conv->addMessage('assistant', $ack, ['source' => 'voice', 'category' => 'task', 'event_id' => $event->id]);
+                $emit('step', ['text' => '🧠 背景連續操作中…']);
+                $emit('done', ['reply' => $ack, 'speech' => $ack, 'meta' => ['category' => 'task', 'background' => true], 'conversation_id' => $conv->id]);
+
+                return;
+            }
+
+            // 一般路由：技能步驟即時推、閒聊類逐 token 推
+            $steps = [];
+            $onStep = function (string $t) use (&$steps, $emit) {
+                $steps[] = $t;
+                $emit('step', ['text' => $t]);
+            };
+            try {
+                $r = $this->responder->route($conv, $transcript, $onStep);
+                if ($r['stream']) {
+                    $full = '';
+                    $this->llm->stream($r['messages'], function (string $delta) use (&$full, $emit) {
+                        $full .= $delta;
+                        $emit('delta', ['text' => $delta]);
+                    });
+                    $reply = trim($full);
+                    $meta = ['category' => 'chat'];
+                } else {
+                    $reply = (string) $r['reply'];
+                    $meta = $r['meta'] ?? [];
+                }
+            } catch (Throwable $e) {
+                $reply = '抱歉，這次處理失敗了：'.$e->getMessage();
+                $meta = ['error' => true];
+            }
+            if ($reply === '') {
+                $reply = '我沒有產生回覆，請再說一次。';
+            }
+            $conv->addMessage('assistant', $reply, array_merge($meta, ['source' => 'voice', 'trace' => $steps]));
+            $emit('done', [
+                'reply' => $reply, 'speech' => $this->speechClean($reply),
+                'meta' => $meta, 'conversation_id' => $conv->id,
+            ]);
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'Cache-Control' => 'no-cache',
+            'X-Accel-Buffering' => 'no',
+            'Connection' => 'keep-alive',
         ]);
     }
 
@@ -197,6 +303,29 @@ class VoiceAgentController extends Controller
             ];
         }
 
+        // 音量 / 顯示器亮度（直接在目標節點調整；Mac 用 osascript，Linux 用 pactl/brightnessctl）
+        if (preg_match('/(音量|聲音|声音|靜音|静音|\bvolume\b|\bmute\b|亮度|螢幕亮|屏幕亮|\bbrightness\b)/iu', $t)) {
+            $isBright = (bool) preg_match('/(亮度|螢幕亮|屏幕亮|brightness)/iu', $t);
+            $pct = preg_match('/(\d{1,3})\s*(%|％|趴)/u', $t, $m) ? max(0, min(100, (int) $m[1])) : null;
+            $up = (bool) preg_match('/(調高|调高|大聲|大声|提高|增加|調大|调大|大一點|大一点|高一點|高一点|調亮|调亮|亮一點|亮一点)/u', $t);
+            $down = (bool) preg_match('/(調低|调低|小聲|小声|降低|減少|調小|调小|小一點|小一点|低一點|低一点|調暗|调暗|暗一點|暗一点)/u', $t);
+            $unmute = (bool) preg_match('/(取消靜音|取消静音|解除靜音|解除静音|\bunmute\b)/iu', $t);
+            $mute = ! $unmute && ! $isBright && (bool) preg_match('/(靜音|静音|\bmute\b)/iu', $t);
+            [$cmd, $say] = $this->avCommand($isBright, $pct, $up, $down, $mute, $unmute);
+            if ($cmd !== '') {
+                [$target, $targetLabel] = $this->targetGateway($t);
+                $out = trim($this->runExec($target, $cmd));
+                $fail = str_contains($out, '未連線') || str_contains($out, '執行失敗');
+
+                return [
+                    'reply' => $fail ? "（{$targetLabel} 沒連上線，調不了）" : "好，已在{$targetLabel}{$say}。",
+                    'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，{$say}了。",
+                    'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => $isBright ? 'brightness' : 'volume', 'target' => $target],
+                    'step' => ($isBright ? '🔆 ' : '🔊 ').$say."@{$targetLabel}",
+                ];
+            }
+        }
+
         // 播放/搜尋音樂：有指定歌/歌手 → 瀏覽器開 YouTube 搜尋；沒指定 → 開 YouTube Music
         $mq = null;
         if (preg_match('/(播放|播|聽|听|放|搜尋|搜寻|搜索|找|\bplay\b).{0,12}(音樂|音乐|歌|\bmusic\b)/iu', $t)
@@ -206,6 +335,10 @@ class VoiceAgentController extends Controller
             $mq = $this->extractMusicQuery($m[4]);  // 「我想聽稻香」→ 稻香
         } elseif (preg_match('/^(請|请|麻煩|麻烦|幫我|帮我)?\s*(播放|播)\s*(.{1,30})$/u', $t, $m)) {
             $mq = $this->extractMusicQuery($m[3]);  // 「播放稻香」→ 稻香
+        } elseif (preg_match('/^(請|请|麻煩|麻烦|幫我|帮我|我)?\s*(想|要)看\s*(.{1,30})$/u', $t, $m)) {
+            // 「我想看你的名字」「我想看電影」→ YouTube 直接播（電影/影片這種泛稱就搜該詞）
+            $mq = trim(preg_replace('/(的影片|影片|视频|電影|电影)$/u', '', $m[3]));
+            $mq = $mq !== '' ? $mq : trim($m[3]);
         }
         if ($mq !== null) {
             [$target, $targetLabel] = $this->targetGateway($t);
@@ -392,6 +525,43 @@ class VoiceAgentController extends Controller
         }
 
         return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，需要明細可以再跟我說。";
+    }
+
+    /** 組音量/亮度調整指令（跨平台：osascript ↘ pactl/brightnessctl）。回 [cmd, 口語描述]。 */
+    private function avCommand(bool $isBright, ?int $pct, bool $up, bool $down, bool $mute, bool $unmute): array
+    {
+        if ($isBright) {
+            if ($pct !== null) {
+                $frac = $pct / 100;
+
+                return ["brightness {$frac} 2>/dev/null || brightnessctl set {$pct}% 2>/dev/null || echo unsupported", "把亮度調到 {$pct}%"];
+            }
+            if ($up || $down) {
+                $key = $up ? 144 : 145; // macOS 亮度快捷鍵 key code
+                $bc = $up ? '+10%' : '10%-';
+
+                return ["osascript -e 'tell application \"System Events\"' -e 'repeat 4 times' -e 'key code {$key}' -e 'end repeat' -e 'end tell' 2>/dev/null || brightnessctl set {$bc} 2>/dev/null || echo unsupported", $up ? '把亮度調高' : '把亮度調低'];
+            }
+
+            return ['', ''];
+        }
+        if ($mute) {
+            return ["osascript -e 'set volume output muted true' 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ 1 2>/dev/null", '靜音'];
+        }
+        if ($unmute) {
+            return ["osascript -e 'set volume output muted false' 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null", '取消靜音'];
+        }
+        if ($pct !== null) {
+            return ["osascript -e 'set volume output volume {$pct}' 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ {$pct}% 2>/dev/null", "把音量調到 {$pct}%"];
+        }
+        if ($up || $down) {
+            $delta = $up ? '+ 10' : '- 10';
+            $pa = $up ? '+10%' : '-10%';
+
+            return ["osascript -e 'set volume output volume ((output volume of (get volume settings)) {$delta})' 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ {$pa} 2>/dev/null", $up ? '把音量調大' : '把音量調小'];
+        }
+
+        return ['', ''];
     }
 
     /** 用 YouTube 搜尋頁解析第一個影片 ID（免 API key）；失敗回空字串。 */

@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useVoiceChat } from '@/composables/useVoiceChat';
 
 const voice = useVoiceChat();
@@ -62,6 +62,13 @@ watch(() => voice.status.value, (newStatus) => {
             transcript.value = newStatus;
         }
     }
+});
+
+// 長字幕自動捲到最新（串流逐句更新時跟著捲）
+const transcriptBox = ref(null);
+watch(transcript, async () => {
+    await nextTick();
+    transcriptBox.value?.scrollTo({ top: transcriptBox.value.scrollHeight, behavior: 'smooth' });
 });
 
 onUnmounted(() => {
@@ -128,11 +135,11 @@ onUnmounted(() => {
                     </div>
                 </div>
                 
-                <transition name="fade" mode="out-in">
-                    <p :key="transcript" class="text-lg md:text-xl font-light tracking-wide text-slate-200" v-if="transcript">
+                <div v-if="transcript" ref="transcriptBox" class="transcript-box">
+                    <p class="text-lg md:text-xl font-light tracking-wide text-slate-200">
                         {{ transcript }}
                     </p>
-                </transition>
+                </div>
             </div>
         </main>
 
@@ -187,6 +194,28 @@ onUnmounted(() => {
 .bg-glow.listening { background: radial-gradient(circle at center, rgba(56,189,248,0.15) 0%, transparent 70%); }
 .bg-glow.thinking { background: radial-gradient(circle at center, rgba(168,85,247,0.15) 0%, transparent 70%); }
 .bg-glow.speaking { background: radial-gradient(circle at center, rgba(16,185,129,0.15) 0%, transparent 70%); }
+
+/* 長字幕：限制高度、可捲動、上下漸隱、進場動畫（不會蓋到底部控制列） */
+.transcript-box {
+    max-height: 32vh;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    padding: 0.75rem 1rem;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    animation: transcript-in 0.35s ease;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+.transcript-box p {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.9;
+}
+@keyframes transcript-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+}
 
 /* 玻璃質感控制列 */
 .glass {

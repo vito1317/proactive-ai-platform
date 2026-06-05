@@ -76,6 +76,7 @@ Route::post('/webhooks/line', [LineWebhookController::class, 'handle'])->name('w
 
 // 全雙工語音橋接：voice_server 把每輪逐字稿回送 agentic 引擎（共用密鑰驗證，CSRF 豁免）
 Route::post('/api/voice/agent', [VoiceAgentController::class, 'handle'])->name('voice.agent');
+Route::post('/api/voice/agent-stream', [VoiceAgentController::class, 'stream'])->name('voice.agent.stream');
 
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
 
