@@ -28,7 +28,7 @@ function toggleConnection() {
         voice.start(
             { mode: 'hybrid' }, // agent：每輪都走 PAI 真實 agentic（真資料、不亂編、繁中），不傳 url/path 用預設 /voice-rt/socket.io
             {
-                onAiText: (t) => { transcript.value = t; },
+                onAiText: (t) => { transcript.value = t; agentSteps.value = []; }, // 回覆到了→清步驟，不再卡 thinking
                 onTranscript: (t) => { 
                     transcript.value = t; 
                     agentSteps.value = []; // 新對話開始，清空舊步驟

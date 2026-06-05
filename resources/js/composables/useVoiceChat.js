@@ -71,8 +71,8 @@ export function useVoiceChat() {
             const out0 = e.outputBuffer.getChannelData(0);
             for (let i = 0; i < out0.length; i++) out0[i] = 0; // 永遠輸出靜音
             if (!socket || !socket.connected) return;
-            // AI 說話中 / 剛說完 / 手動靜音 → 不送麥克風（防回授把 AI 聲音當輸入）
-            if (isMuted.value || speaking.value || performance.now() < micMuteUntil) {
+            // AI 播放期間（+尾音緩衝，純時間判斷會自動過期）/ 手動靜音 → 不送麥克風（防回授）
+            if (isMuted.value || performance.now() < micMuteUntil) {
                 volume.value = 0;
                 return;
             }

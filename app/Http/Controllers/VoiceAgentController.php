@@ -141,12 +141,17 @@ class VoiceAgentController extends Controller
         if (preg_match('/(訂|购买|購買|寄|寫一|写一|發送|发送|傳給|传给|計算|计算|分析|總結|总结|翻譯|翻译|比較|比较|規劃|规划|整理|預訂|预订|提醒我|排程|安裝|安装|刪除|删除|修改|設定一|设置一)/u', $t)) {
             return null;
         }
-        $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
+        $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|使用|叫出|呼叫|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b|\buse\b)/iu', $t);
         $hasClose = (bool) preg_match('/(關閉|關掉|關起來|关闭|关掉|結束|结束|退出|\bclose\b|\bquit\b)/iu', $t);
         // 搜尋（含簡體：STT 常輸出簡體）
         $hasSearch = (bool) preg_match('/(搜尋|搜寻|搜索|查一下|查詢|查询|尋找|寻找|找一下|google一下|估狗|\bsearch\b|\bfind\b)/iu', $t);
+        $hasBrowser = (bool) preg_match('/(瀏覽器|浏览器|chrome|google|browser|safari|firefox)/iu', $t);
         // 「打開視窗/窗口/網頁 + 搜尋」也視為要開瀏覽器
         $isWindow = (bool) preg_match('/(視窗|窗口|網頁|网页|window|分頁|分页)/iu', $t);
+        // 「(瀏覽器或視窗) + 搜尋」即使沒明講「打開」也視為要開瀏覽器搜尋
+        if (! $hasOpen && $hasSearch && ($hasBrowser || $isWindow)) {
+            $hasOpen = true;
+        }
         if (! $hasOpen && ! $hasClose) {
             return null;
         }
@@ -164,10 +169,11 @@ class VoiceAgentController extends Controller
 
         if ($hasClose) {
             $res = $this->runGui($target, 'close', $key, null);
+            $fail = $this->guiFailed($res);
 
             return [
                 'reply' => "好，已在{$targetLabel}關閉「{$label}」（{$res}）",
-                'speech' => "好的，已經幫你關閉{$label}了。",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你關閉{$label}了。",
                 'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'close', 'target' => $target],
                 'step' => "🛑 關閉：{$label}@{$targetLabel}",
             ];
@@ -183,8 +189,11 @@ class VoiceAgentController extends Controller
             }
         }
         $res = $this->runGui($target, 'open', $key, $arg);
+        $fail = $this->guiFailed($res);
         $disp = $q !== '' ? "「{$label}」並搜尋「{$q}」" : "「{$label}」";
-        $spk = $q !== '' ? "好的，已經幫你打開{$label}並搜尋{$q}了。" : "好的，已經幫你打開{$label}了。";
+        $spk = $fail
+            ? $this->guiFailSpeech($targetLabel)
+            : ($q !== '' ? "好的，已經幫你打開{$label}並搜尋{$q}了。" : "好的，已經幫你打開{$label}了。");
 
         return [
             'reply' => "好，已在{$targetLabel}開啟{$disp}（{$res}）",
@@ -271,6 +280,18 @@ class VoiceAgentController extends Controller
         }
 
         return ($r['ok'] ?? false) ? (string) ($r['text'] ?? '已執行') : ('遠端執行失敗：'.($r['error'] ?? '未知'));
+    }
+
+    /** runGui 結果是否代表失敗（節點離線/找不到/遠端錯誤）。 */
+    private function guiFailed(string $res): bool
+    {
+        return (bool) preg_match('/(找不到節點|遠端執行失敗|找不到 open-app|失敗|error|refused|not found)/iu', $res);
+    }
+
+    /** 節點離線時的朗讀提示。 */
+    private function guiFailSpeech(string $targetLabel): string
+    {
+        return "抱歉，{$targetLabel} 目前沒有連上線，沒辦法在那台開啟。請先把該節點的 gateway 連線起來。";
     }
 
     /** 從「搜尋 X / 查一下 X」抽出查詢字串。 */

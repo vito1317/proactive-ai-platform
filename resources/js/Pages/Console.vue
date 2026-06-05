@@ -28,6 +28,19 @@ function copyGateway() {
     setTimeout(() => { copiedGw.value = false; }, 1500);
 }
 
+/* ---------- 節點 / Gateway 連線狀態 ---------- */
+const nodes = ref([]);
+const nodesLoading = ref(false);
+async function fetchNodes() {
+    nodesLoading.value = true;
+    try {
+        const r = await fetch('/mcp/health', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const d = await r.json();
+        nodes.value = d.nodes || [];
+    } catch (e) { /* ignore */ }
+    nodesLoading.value = false;
+}
+
 const expanded = ref(new Set());
 const toggle = (id) => {
     const s = new Set(expanded.value);
@@ -106,8 +119,9 @@ const thinkingSteps = ['載入領域知識...', '分析上下文關聯...', '評
 const currentThinkingStep = ref(thinkingSteps[0]);
 let thinkingTimer = null;
 
-onMounted(() => { 
-    timer = setInterval(refresh, 4000); 
+onMounted(() => {
+    fetchNodes();
+    timer = setInterval(refresh, 4000);
     thinkingTimer = setInterval(() => {
         if (activeRun.value) {
             currentThinkingStep.value = thinkingSteps[Math.floor(Math.random() * thinkingSteps.length)];
@@ -293,6 +307,22 @@ const actionStatusClass = (x) => ({
                                 </div>
                                 <p class="mt-1 text-xs text-slate-400">{{ d.description }}</p>
                                 <p class="mt-1 text-xs text-slate-500">{{ d.agents.length }} agents · {{ d.events.length }} 事件 · {{ d.high_risk_tools.length }} 高風險工具</p>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- 節點 / Gateway 連線狀態 -->
+                    <div class="glass p-5">
+                        <div class="flex items-center justify-between">
+                            <h2 class="flex items-center gap-2 font-semibold text-white">🛰️ 節點連線狀態</h2>
+                            <button class="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:text-white" @click="fetchNodes">{{ nodesLoading ? '檢測中…' : '↻ 重新檢測' }}</button>
+                        </div>
+                        <p v-if="!nodes.length && !nodesLoading" class="mt-2 text-xs text-slate-500">尚無節點。用下方指令在其他機器接上 Gateway。</p>
+                        <ul class="mt-3 space-y-2">
+                            <li v-for="n in nodes" :key="n.name" class="flex items-center gap-2 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-sm">
+                                <span class="text-base">{{ n.ok ? '🟢' : '🔴' }}</span>
+                                <span class="font-medium text-white">{{ n.name }}</span>
+                                <span class="text-xs text-slate-400">{{ n.ok ? (n.ms + 'ms · ' + (n.tools?.length || 0) + ' 工具') : (n.error || '離線') }}</span>
                             </li>
                         </ul>
                     </div>

@@ -79,9 +79,10 @@ class Settings
             if ($key === 'voice.default_gateway') {
                 $opts = [['value' => 'local', 'label' => '主節點（本機）']];
                 try {
-                    foreach (PaiSetting::query()->getConnection()->table('mcp_servers')->where('enabled', true)->get(['name']) as $s) {
+                    // 列出所有已註冊節點（含離線，標示出來讓使用者仍可選）
+                    foreach (PaiSetting::query()->getConnection()->table('mcp_servers')->get(['name', 'enabled']) as $s) {
                         if ($s->name !== 'gateway') {
-                            $opts[] = ['value' => $s->name, 'label' => $s->name];
+                            $opts[] = ['value' => $s->name, 'label' => $s->name.($s->enabled ? '' : '（離線）')];
                         }
                     }
                 } catch (Throwable) {
