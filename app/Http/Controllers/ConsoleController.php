@@ -44,6 +44,8 @@ class ConsoleController extends Controller
 
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),
+            // Node Gateway 一鍵安裝（在別的節點/Mac 上跑，讓本平台能操控該節點）
+            'gatewayInstallCommand' => rtrim((string) config('app.url'), '/').'/gateway/install.sh',
         ]);
     }
 

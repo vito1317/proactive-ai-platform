@@ -11,6 +11,7 @@ const props = defineProps({
     runs: { type: Array, default: () => [] },
     stats: { type: Object, default: () => ({}) },
     installCommand: { type: String, default: '' },
+    gatewayInstallCommand: { type: String, default: '' },
 });
 
 const copied = ref(false);
@@ -18,6 +19,13 @@ function copyInstall() {
     navigator.clipboard?.writeText(props.installCommand);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 1500);
+}
+
+const copiedGw = ref(false);
+function copyGateway() {
+    navigator.clipboard?.writeText(`curl -fsSL ${props.gatewayInstallCommand} | bash`);
+    copiedGw.value = true;
+    setTimeout(() => { copiedGw.value = false; }, 1500);
 }
 
 const expanded = ref(new Set());
@@ -214,6 +222,7 @@ const actionStatusClass = (x) => ({
                         </div>
                     </div>
 
+                    <Link href="/voice" class="rounded-full border border-sky-500/40 bg-sky-500/15 px-3 py-1 text-xs text-sky-200 hover:text-white">🎙️ 語音連線</Link>
                     <Link href="/chat" class="rounded-full border border-indigo-500/40 bg-indigo-500/15 px-3 py-1 text-xs text-indigo-200 hover:text-white">💬 對話</Link>
                     <Link href="/packs" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">🧩 領域包</Link>
                     <Link href="/settings" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">⚙ 設定</Link>
@@ -298,6 +307,15 @@ const actionStatusClass = (x) => ({
                                 {{ copied ? '✓ 已複製' : '複製' }}
                             </button>
                         </div>
+
+                        <p class="mt-4 text-xs text-slate-400">🛰️ 在其他節點 / Mac 安裝 Gateway（讓本平台能在該節點跑指令、開程式）：</p>
+                        <div class="mt-2 flex items-center gap-2">
+                            <code class="flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-sky-300">curl -fsSL {{ gatewayInstallCommand }} | bash</code>
+                            <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs text-slate-300 hover:text-white" @click="copyGateway">
+                                {{ copiedGw ? '✓ 已複製' : '複製' }}
+                            </button>
+                        </div>
+                        <p class="mt-1 text-[10px] text-slate-500">裝好後會印出該節點的密鑰；到「設定／MCP」用它的網址＋密鑰註冊即可。macOS 用 open -a 開 app、Linux 進圖形 session。</p>
                     </div>
                 </section>
 
