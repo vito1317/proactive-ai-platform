@@ -62,7 +62,7 @@ class VoiceAgentController extends Controller
             return response()->json([
                 'reply' => $direct['reply'],          // 顯示用（含技術細節）
                 'speech' => $direct['speech'] ?? $direct['reply'], // 朗讀用（乾淨口語）
-                'steps' => [$direct['step'] ?? '⚡ 直接執行'],
+                'steps' => $direct['steps'] ?? [$direct['step'] ?? '⚡ 直接執行'],
                 'meta' => $direct['meta'],
                 'conversation_id' => $conv->id,
             ]);
@@ -181,11 +181,38 @@ class VoiceAgentController extends Controller
                 : "{$label}{$place}有 ".count($rain).' 天可能下雨：'.implode('、', $rain)."；{$temp}，記得帶傘。";
         }
 
+        // 把真實預報資料丟給 PAI 的腦彙整成完整自然的摘要（失敗就用上面的模板句）
+        $wk2 = ['日', '一', '二', '三', '四', '五', '六'];
+        $rows = [];
+        foreach ($daily['time'] as $i => $d) {
+            if ($d < $from || $d > $to) {
+                continue;
+            }
+            $rows[] = $d.'（週'.$wk2[\Carbon\Carbon::parse($d)->dayOfWeek].'）：降雨機率 '
+                .($daily['precipitation_probability_max'][$i] ?? '?').'%，'
+                .round((float) ($daily['temperature_2m_min'][$i] ?? 0)).'～'
+                .round((float) ($daily['temperature_2m_max'][$i] ?? 0)).' 度';
+        }
+        $reply = "🌦 {$label}{$place}天氣：".($rain === [] ? '降雨機率不高' : '可能下雨 '.implode('、', $rain))."，{$temp}。";
+        try {
+            $summary = trim($this->llm->chat([
+                ['role' => 'system', 'content' => '你是天氣播報助理。根據提供的「真實預報資料」用台灣正體中文寫一段自然、完整、口語的天氣摘要（含穿著/帶傘/行程建議），3-5 句。只能依資料說話，不要編造。'],
+                ['role' => 'user', 'content' => "問題：{$t}\n地點：{$place}\n範圍：{$label}\n預報資料：\n".implode("\n", $rows)],
+            ], ['max_tokens' => 512, 'timeout' => 30]));
+            if ($summary !== '') {
+                $reply = "🌦 {$summary}";
+                $speech = $this->speechClean($summary);
+            }
+        } catch (Throwable) {
+            // LLM 掛了 → 模板句照用
+        }
+
         return [
-            'reply' => "🌦 {$label}{$place}天氣：".($rain === [] ? '降雨機率不高' : '可能下雨 '.implode('、', $rain))."，{$temp}。（資料：open-meteo）",
+            'reply' => $reply."\n\n（資料：open-meteo 實時預報）",
             'speech' => $speech,
             'meta' => ['category' => 'skill', 'skill' => 'weather', 'direct' => true, 'action' => 'weather'],
             'step' => "🌦 天氣：{$place}・{$label}",
+            'steps' => ["🌦 取得氣象資料（open-meteo）：{$place}・{$label}", '🧠 AI 彙整天氣摘要…'],
         ];
     }
 
@@ -332,7 +359,9 @@ class VoiceAgentController extends Controller
             // 直達指令／重型背景任務：結果立即一次回（本來就快）
             if ($direct = $this->directCommand($transcript, $geo, $conv)) {
                 $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
-                $emit('step', ['text' => $direct['step'] ?? '⚡ 直接執行']);
+                foreach ($direct['steps'] ?? [$direct['step'] ?? '⚡ 直接執行'] as $st) {
+                    $emit('step', ['text' => $st]);
+                }
                 $emit('done', [
                     'reply' => $direct['reply'], 'speech' => $direct['speech'] ?? $direct['reply'],
                     'meta' => $direct['meta'], 'conversation_id' => $conv->id,
