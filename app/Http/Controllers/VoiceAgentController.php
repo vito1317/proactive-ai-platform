@@ -121,6 +121,108 @@ class VoiceAgentController extends Controller
         ]);
     }
 
+    /** 天氣問答：解析地點+時間範圍 → open-meteo 預報 → 口語摘要。無法判斷回 null（交給 LLM）。 */
+    private function weatherAnswer(string $t, ?array $geo): ?array
+    {
+        $place = null;
+        $coord = null;
+        if (preg_match('/(台北|臺北|新北|桃園|桃园|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|云林|嘉義|嘉义|屏東|屏东|宜蘭|宜兰|花蓮|花莲|台東|台东|澎湖|金門|金门|馬祖|马祖)/u', $t, $m)) {
+            $place = $m[1];
+            $coord = $this->geocodePlace($place.'市') ?? $this->geocodePlace($place);
+        } elseif ($geo !== null) {
+            $place = '你這裡';
+            $coord = ['lat' => $geo['lat'], 'lng' => $geo['lng']];
+        }
+        if ($coord === null) {
+            return null;
+        }
+        [$from, $to, $label] = $this->weatherRange($t);
+        try {
+            $daily = \Illuminate\Support\Facades\Http::timeout(8)
+                ->get('https://api.open-meteo.com/v1/forecast', [
+                    'latitude' => $coord['lat'], 'longitude' => $coord['lng'],
+                    'daily' => 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+                    'timezone' => 'Asia/Taipei', 'forecast_days' => 16,
+                ])->json('daily');
+        } catch (Throwable) {
+            return null;
+        }
+        if (! is_array($daily) || empty($daily['time'])) {
+            return null;
+        }
+        $rain = [];
+        $tmin = null;
+        $tmax = null;
+        $wk = ['日', '一', '二', '三', '四', '五', '六'];
+        foreach ($daily['time'] as $i => $d) {
+            if ($d < $from || $d > $to) {
+                continue;
+            }
+            $tmax = max($tmax ?? -99, (float) ($daily['temperature_2m_max'][$i] ?? -99));
+            $tmin = $tmin === null ? (float) ($daily['temperature_2m_min'][$i] ?? 99) : min($tmin, (float) ($daily['temperature_2m_min'][$i] ?? 99));
+            $p = $daily['precipitation_probability_max'][$i] ?? null;
+            if ($p !== null && (int) $p >= 40) {
+                $rain[] = '週'.$wk[\Carbon\Carbon::parse($d)->dayOfWeek]."（{$p}%）";
+            }
+        }
+        if ($tmin === null) {
+            return null;
+        }
+        $temp = '氣溫大約 '.round($tmin).' 到 '.round($tmax).' 度';
+        if ($from === $to) {
+            // 單日問法：「明天會下雨嗎」→ 直接講機率，不要說「有 1 天」
+            $p = $rain !== [] ? (int) preg_replace('/\D/', '', $rain[0]) : 0;
+            $speech = $rain !== []
+                ? "{$label}{$place}很可能下雨（降雨機率 {$p}%），{$temp}，記得帶傘。"
+                : "{$label}{$place}應該不太會下雨，{$temp}。";
+        } else {
+            $speech = $rain === []
+                ? "{$label}{$place}降雨機率不高，{$temp}，放心安排行程。"
+                : "{$label}{$place}有 ".count($rain).' 天可能下雨：'.implode('、', $rain)."；{$temp}，記得帶傘。";
+        }
+
+        return [
+            'reply' => "🌦 {$label}{$place}天氣：".($rain === [] ? '降雨機率不高' : '可能下雨 '.implode('、', $rain))."，{$temp}。（資料：open-meteo）",
+            'speech' => $speech,
+            'meta' => ['category' => 'skill', 'skill' => 'weather', 'direct' => true, 'action' => 'weather'],
+            'step' => "🌦 天氣：{$place}・{$label}",
+        ];
+    }
+
+    /** 「今天/明天/後天/這週/週末/下週」→ [起日, 迄日, 標籤]（Asia/Taipei）。 */
+    private function weatherRange(string $t): array
+    {
+        $now = now('Asia/Taipei')->startOfDay();
+        if (preg_match('/下週|下周/u', $t)) {
+            $s = $now->copy()->next(\Carbon\CarbonInterface::MONDAY);
+
+            return [$s->toDateString(), $s->copy()->addDays(6)->toDateString(), '下週'];
+        }
+        if (preg_match('/週末|周末/u', $t)) {
+            $s = $now->isWeekend() ? $now->copy() : $now->copy()->next(\Carbon\CarbonInterface::SATURDAY);
+
+            return [$s->toDateString(), $s->copy()->next(\Carbon\CarbonInterface::SUNDAY)->toDateString(), '週末'];
+        }
+        if (preg_match('/這週|这周|本週|本周/u', $t)) {
+            return [$now->toDateString(), $now->copy()->endOfWeek(\Carbon\CarbonInterface::SUNDAY)->toDateString(), '這週'];
+        }
+        if (str_contains($t, '後天') || str_contains($t, '后天')) {
+            $d = $now->copy()->addDays(2);
+
+            return [$d->toDateString(), $d->toDateString(), '後天'];
+        }
+        if (str_contains($t, '明天')) {
+            $d = $now->copy()->addDay();
+
+            return [$d->toDateString(), $d->toDateString(), '明天'];
+        }
+        if (str_contains($t, '今天')) {
+            return [$now->toDateString(), $now->toDateString(), '今天'];
+        }
+
+        return [$now->toDateString(), $now->copy()->addDays(6)->toDateString(), '接下來幾天'];
+    }
+
     /** 地名 → 座標（Nominatim/OSM，臺灣優先；快取一天）。失敗回 null。 */
     private function geocodePlace(string $q): ?array
     {
@@ -336,6 +438,13 @@ class VoiceAgentController extends Controller
     private function directCommand(string $transcript, ?array $geo = null, ?Conversation $conv = null): ?array
     {
         $t = trim($transcript);
+
+        // 天氣查詢（open-meteo 免金鑰、真實預報）：「下週台中會下雨嗎」→ 直接回答降雨機率/氣溫
+        if (preg_match('/(天氣|天气|下雨|降雨|會不會雨|会不会雨|氣溫|气温|溫度|温度)/u', $t)) {
+            if ($w = $this->weatherAnswer($t, $geo)) {
+                return $w;
+            }
+        }
 
         // 附近搜尋（用瀏覽器定位）：「附近有什麼好喝的飲料」→ 開 Google Maps 以使用者位置搜尋
         if (preg_match('/(附近|這附近|这附近|周邊|周边)/u', $t)) {
