@@ -136,40 +136,60 @@ class VoiceAgentController extends Controller
     private function directCommand(string $transcript): ?array
     {
         $t = trim($transcript);
-        // 句中任一處出現「開啟動詞」即視為開程式意圖（不限句首，容許「你可以打開…嗎」這類問句）
-        $hasOpenVerb = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
-        if ($hasOpenVerb) {
-            // 直接掃整句裡的已知 app 關鍵字（chrome/瀏覽器/計算機…）
-            $cmd = $this->resolveAppCommand($t);
-            if ($cmd === null) {
-                return null;
-            }
-            $skill = app(\App\Pai\Skills\SkillRegistry::class)->get('open-app');
-            if (! $skill) {
-                return null;
-            }
-            $result = $skill->run(['command' => $cmd]);
-            $label = $this->appLabel($t);
+        $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
+        $hasClose = (bool) preg_match('/(關閉|關掉|關起來|关闭|关掉|結束|结束|退出|\bclose\b|\bquit\b)/iu', $t);
+        $hasSearch = (bool) preg_match('/(搜尋|搜索|查一下|查詢|查询|google一下|估狗|\bsearch\b|\bfind\b)/iu', $t);
+        if (! $hasOpen && ! $hasClose) {
+            return null;
+        }
+
+        $key = $this->appKey($t);
+        // 要搜尋但沒指明程式 → 用瀏覽器
+        if ($key === null && $hasSearch && $hasOpen) {
+            $key = 'chrome';
+        }
+        if ($key === null) {
+            return null;
+        }
+        $label = $this->appLabel($t);
+        [$target, $targetLabel] = $this->targetGateway($t);
+
+        if ($hasClose) {
+            $res = $this->runGui($target, 'close', $key, null);
 
             return [
-                'reply' => "好，已在主節點幫你開啟「{$label}」🚀（{$result}）",  // 顯示含細節
-                'speech' => "好的，已經幫你打開{$label}了。",                      // 朗讀乾淨口語
-                'meta' => ['category' => 'skill', 'skill' => 'open-app', 'direct' => true, 'command' => $cmd],
-                'step' => "🚀 直接啟動：{$cmd}",
+                'reply' => "好，已在{$targetLabel}關閉「{$label}」（{$res}）",
+                'speech' => "好的，已經幫你關閉{$label}了。",
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'close', 'target' => $target],
+                'step' => "🛑 關閉：{$label}@{$targetLabel}",
             ];
         }
 
-        return null;
+        // 開啟（可帶搜尋）
+        $arg = null;
+        $q = '';
+        if ($hasSearch && $key === 'chrome') {
+            $q = $this->extractQuery($t);
+            if ($q !== '') {
+                $arg = 'https://www.google.com/search?q='.rawurlencode($q);
+            }
+        }
+        $res = $this->runGui($target, 'open', $key, $arg);
+        $disp = $q !== '' ? "「{$label}」並搜尋「{$q}」" : "「{$label}」";
+        $spk = $q !== '' ? "好的，已經幫你打開{$label}並搜尋{$q}了。" : "好的，已經幫你打開{$label}了。";
+
+        return [
+            'reply' => "好，已在{$targetLabel}開啟{$disp}（{$res}）",
+            'speech' => $spk,
+            'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'open', 'target' => $target],
+            'step' => "🚀 開啟：{$label}@{$targetLabel}",
+        ];
     }
 
-    /** 把口語的程式名對應成可執行指令；對不到常見清單就用清理後的名字本身。 */
-    private function resolveAppCommand(string $name): ?string
+    /** 口語句子 → GUI 白名單 key（chrome/firefox/terminal/calculator/files/settings/editor）或 null。 */
+    private function appKey(string $name): ?string
     {
         $n = mb_strtolower(trim($name));
-        if ($n === '') {
-            return null;
-        }
-        // 口語名 → GUI 啟動器白名單 key（透過 pai-gui-open 在主節點圖形 session 真的開出視窗）
         $keys = [
             'chrome' => 'chrome', 'google chrome' => 'chrome', 'google' => 'chrome', 'googlechrome' => 'chrome',
             '谷歌' => 'chrome', '瀏覽器' => 'chrome', '浏览器' => 'chrome', 'chromium' => 'chrome', 'safari' => 'chrome', 'edge' => 'chrome',
@@ -180,14 +200,80 @@ class VoiceAgentController extends Controller
             'settings' => 'settings', '設定' => 'settings', '设置' => 'settings', '控制台' => 'settings',
             'gedit' => 'editor', '記事本' => 'editor', '文字編輯' => 'editor', '編輯器' => 'editor',
         ];
-        foreach ($keys as $k => $key) {
+        foreach ($keys as $k => $v) {
             if (str_contains($n, $k)) {
-                // 以 GUI 使用者身份在 Wayland session 啟動（sudoers 已允許 web 使用者）
-                return 'sudo -u '.escapeshellarg($this->guiUser()).' /usr/local/bin/pai-gui-open '.escapeshellarg($key);
+                return $v;
             }
         }
 
-        return null; // 非已知 GUI app → 交回 agentic（可能是別的操作）
+        return null;
+    }
+
+    /** 決定在哪個節點操作：句中指名 > 預設設定 > local。回傳 [target, 顯示名]。 */
+    private function targetGateway(string $t): array
+    {
+        $low = mb_strtolower($t);
+        if (preg_match('/(主節點|主节点|伺服器|服务器|這台|这台|本機|本机|server)/u', $t)) {
+            return ['local', '主節點'];
+        }
+        // 句中提到某個已註冊 MCP 節點名稱 → 用它
+        foreach (\App\Pai\Mcp\McpServer::where('enabled', true)->get() as $s) {
+            if ($s->name !== 'gateway' && str_contains($low, mb_strtolower($s->name))) {
+                return [$s->name, $s->name];
+            }
+        }
+        if (preg_match('/(我的mac|我的電腦|我的电脑|我的筆電|mac\b|macbook)/iu', $t)) {
+            $mac = \App\Pai\Mcp\McpServer::where('enabled', true)->where('name', 'like', '%mac%')->first();
+            if ($mac) {
+                return [$mac->name, $mac->name];
+            }
+        }
+        $def = (string) $this->settings->get('voice.default_gateway', config('pai.voice.default_gateway', 'local'));
+
+        return $def === '' || $def === 'local' ? ['local', '主節點'] : [$def, $def];
+    }
+
+    /** 在指定節點開/關 GUI app。local→pai-gui-open；遠端→該 MCP gateway 的 open_app/exec。 */
+    private function runGui(string $target, string $action, string $key, ?string $arg): string
+    {
+        if ($target === 'local') {
+            $base = 'sudo -u '.escapeshellarg($this->guiUser()).' /usr/local/bin/pai-gui-open ';
+            $cmd = $action === 'close'
+                ? $base.'--close '.escapeshellarg($key)
+                : $base.escapeshellarg($key).($arg ? ' '.escapeshellarg($arg) : '');
+            $skill = app(\App\Pai\Skills\SkillRegistry::class)->get('open-app');
+
+            return $skill ? $skill->run(['command' => $cmd]) : '找不到 open-app 技能';
+        }
+        // 遠端節點：走該 gateway 的 MCP
+        $server = \App\Pai\Mcp\McpServer::where('name', $target)->where('enabled', true)->first();
+        if (! $server) {
+            return "找不到節點「{$target}」";
+        }
+        $client = app(\App\Pai\Mcp\McpClient::class);
+        if ($action === 'close') {
+            $procs = ['chrome' => 'chrom', 'firefox' => 'firefox', 'terminal' => 'erminal', 'calculator' => 'alculator', 'files' => 'inder', 'settings' => 'ettings', 'editor' => 'edit'];
+            $r = $client->callTool($server->url, $server->headers ?? [], 'exec', ['cmd' => 'pkill -if '.escapeshellarg($procs[$key] ?? $key)]);
+        } else {
+            $name = $arg ? $key.' '.$arg : $key; // 遠端 open_app 接受 name；URL 一併帶（gateway 端可用）
+            $r = $client->callTool($server->url, $server->headers ?? [], 'open_app', ['name' => $arg ? $arg : $key]);
+        }
+
+        return ($r['ok'] ?? false) ? (string) ($r['text'] ?? '已執行') : ('遠端執行失敗：'.($r['error'] ?? '未知'));
+    }
+
+    /** 從「搜尋 X / 查一下 X」抽出查詢字串。 */
+    private function extractQuery(string $t): string
+    {
+        if (preg_match('/(?:搜尋|搜索|查一下|查詢|查询|google一下|估狗|search|find)\s*(.+?)\s*(?:的相關|相關|的資料|資料|的新聞)?\s*[。.!！?？]*\s*$/iu', $t, $m)) {
+            $q = trim($m[1]);
+            // 去掉開頭可能殘留的「並/和/然後」
+            $q = preg_replace('/^(並|并|和|然後|然后|再|去)\s*/u', '', $q);
+
+            return trim($q);
+        }
+
+        return '';
     }
 
     /** 由口語句子推出友善的 app 名稱（給朗讀用）。 */

@@ -29,6 +29,7 @@ class Settings
         'voice.fullduplex_path' => ['label' => '全雙工語音 Socket.IO path', 'type' => 'string', 'group' => '語音'],
         'voice.agent_secret' => ['label' => '語音橋接共用密鑰（voice_server → 平台）', 'type' => 'secret', 'group' => '語音'],
         'voice.system_prompt' => ['label' => '語音助理人格 (system prompt)', 'type' => 'string', 'group' => '語音'],
+        'voice.default_gateway' => ['label' => '預設操作節點（local=主節點，或 MCP gateway 名稱如 mac）', 'type' => 'string', 'group' => '語音'],
         'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
         'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
         'notify.telegram.chat_id' => ['label' => 'Telegram Chat ID', 'type' => 'string', 'group' => '通知'],

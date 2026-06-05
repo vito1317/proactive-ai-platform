@@ -99,6 +99,8 @@ return [
         'fullduplex_path' => env('PAI_VOICE_FD_PATH', '/voice-rt/socket.io'),
         // voice_server 在每輪把逐字稿回送本平台 agentic 引擎時用的共用密鑰
         'agent_secret' => env('VOICE_AGENT_SECRET', 'pai-voice-2f9c7a1e'),
+        // 預設在哪個節點操作（開/關程式等）：'local'=主節點本機，或某個已註冊的 MCP gateway 名稱（如 'mac'）
+        'default_gateway' => env('PAI_VOICE_DEFAULT_GATEWAY', 'local'),
         // 語音助理人格（system prompt）—— 不要自稱 PAI（唸起來像「屁」）
         'system_prompt' => env('PAI_VOICE_PROMPT', '你是這個主動式 AI 平台的語音助理。【務必全程使用台灣正體（繁體）中文，嚴禁使用任何簡體字】，語氣口語、簡短。可實際操控系統（讀檔、查 log、跑指令、查設定、開啟程式）。不要自稱「PAI」，也不要提任何公司或第三方名稱；要稱呼自己就說「語音助理」或「智慧助理」。'),
     ],

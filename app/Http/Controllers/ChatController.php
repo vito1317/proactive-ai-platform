@@ -61,8 +61,8 @@ class ChatController extends Controller
             'enabled' => (bool) $s->get('voice.fullduplex_enabled', config('pai.voice.fullduplex_enabled')),
             'url' => (string) $s->get('voice.fullduplex_url', config('pai.voice.fullduplex_url')), // 空=同源
             'path' => (string) $s->get('voice.fullduplex_path', config('pai.voice.fullduplex_path')),
-            // agent：每輪走 PAI 真實 agentic（真資料、不亂編、繁中、可操控系統），model.chat TTS 念回
-            'mode' => 'agent',
+            // hybrid：原生 S2S 即時對話（快），偵測到指令才繞 PAI 執行（open/close/search/系統操作）
+            'mode' => 'hybrid',
             'prompt' => (string) $s->get('voice.system_prompt', config('pai.voice.system_prompt')), // PAI 語音人格
         ];
     }

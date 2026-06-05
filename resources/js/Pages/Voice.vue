@@ -26,7 +26,7 @@ function toggleConnection() {
         agentSteps.value = [];
         
         voice.start(
-            { mode: 'agent' }, // agent：每輪都走 PAI 真實 agentic（真資料、不亂編、繁中），不傳 url/path 用預設 /voice-rt/socket.io
+            { mode: 'hybrid' }, // agent：每輪都走 PAI 真實 agentic（真資料、不亂編、繁中），不傳 url/path 用預設 /voice-rt/socket.io
             {
                 onAiText: (t) => { transcript.value = t; },
                 onTranscript: (t) => { 

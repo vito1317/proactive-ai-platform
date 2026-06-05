@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
-# 在主節點圖形（Wayland）session 啟動白名單內的 app。預期以該 GUI 使用者身份執行（sudo -u）。
+# 在主節點圖形（Wayland）session 開/關白名單 app。以 GUI 使用者身份執行（sudo -u）。
 export XDG_RUNTIME_DIR=/run/user/1000
 export WAYLAND_DISPLAY=wayland-0
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+
+# 關閉模式：pai-gui-open --close <app>
+if [ "$1" = "--close" ] || [ "$1" = "close" ]; then
+  case "$2" in
+    chrome|chromium|browser) pkill -f chromium ;;
+    firefox) pkill -f firefox ;;
+    terminal) pkill -f gnome-terminal ;;
+    calculator) pkill -f gnome-calculator ;;
+    files|nautilus) pkill -f nautilus ;;
+    settings) pkill -f gnome-control-center ;;
+    editor|gedit) pkill -f gedit ;;
+    *) echo "close: app not allowed: $2" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
+
 app="$1"; shift || true
 case "$app" in
   chrome|chromium|browser) exec setsid chromium-browser --ozone-platform=wayland --no-first-run "$@" ;;
