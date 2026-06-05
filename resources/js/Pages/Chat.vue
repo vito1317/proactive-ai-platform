@@ -26,7 +26,7 @@ const voiceReply = ref('');
 function toggleVoice() {
     if (voice.active.value) { voice.stop(); return; }
     voice.start(
-        { url: props.voice.url || undefined, path: props.voice.path, mode: props.voice.mode || 'hybrid', conversationId: props.conversation.id },
+        { url: props.voice.url || undefined, path: props.voice.path, mode: props.voice.mode || 'hybrid', prompt: props.voice.prompt, conversationId: props.conversation.id },
         {
             onTranscript: (t) => { voiceTranscript.value = t; },
             onAiText: (t) => { voiceReply.value = t; },
