@@ -61,13 +61,56 @@ class RouteCommandJob implements ShouldQueue
                 'intent' => 'console:'.($r['meta']['category'] ?? 'reply'),
                 'note' => mb_substr($r['reply'], 0, 250),
             ]);
+            // 重型結果：存成檔案（方便外出看 / 下載），把連結附在回覆與通知
+            $fileLink = $this->saveResultFile($event->id, $msg, $r['reply']);
+            $replyWithLink = $fileLink ? $r['reply']."\n\n📄 完整內容：".$fileLink : $r['reply'];
+
             // 把真正的回覆寫回對話（SSE 端對 action 類只串了暫態、未存訊息）；前端輪詢帶出。
             // 若是 task，respond 內已建立帶 domain 的事件並 dispatch 協調者，最終結果由 RunCoordinatorJob 再回貼。
-            $conv->addMessage('assistant', $r['reply'], $r['meta']);
-            $this->notice($r['reply']);
+            $conv->addMessage('assistant', $replyWithLink, $r['meta']);
+            $this->notice($replyWithLink);
+            // 來源是語音 → 若該 /voice 仍連線中，把結果念回去
+            if (($event->source ?? '') === 'voice') {
+                $this->pushVoice((int) ($event->payload['conversation_id'] ?? 0), $r['reply']);
+            }
         } catch (Throwable $e) {
             $event->update(['status' => EventStatus::Failed, 'note' => '處理失敗：'.$e->getMessage()]);
             $this->notice('指令處理失敗：'.$e->getMessage(), 'error');
+        }
+    }
+
+    /** 把任務結果存成可下載檔案，回傳公開連結（失敗回空字串）。 */
+    private function saveResultFile(int $eventId, string $title, string $reply): string
+    {
+        try {
+            $dir = storage_path('app/public/results');
+            if (! is_dir($dir)) {
+                @mkdir($dir, 0775, true);
+            }
+            $name = 'result-'.$eventId.'.md';
+            file_put_contents("{$dir}/{$name}", "# {$title}\n\n".$reply."\n");
+
+            return rtrim((string) config('app.url'), '/').'/storage/results/'.$name;
+        } catch (Throwable) {
+            return '';
+        }
+    }
+
+    /** 把結果念回正在連線中的 /voice（透過 voice_server 的 /voice/push）。 */
+    private function pushVoice(int $conversationId, string $text): void
+    {
+        if ($conversationId <= 0) {
+            return;
+        }
+        try {
+            $url = (string) config('pai.voice.push_url', 'http://127.0.0.1:8891/voice/push');
+            \Illuminate\Support\Facades\Http::timeout(60)->post($url, [
+                'conversation_id' => $conversationId,
+                'text' => $text,
+                'secret' => (string) (app(\App\Pai\Settings\Settings::class)->get('voice.agent_secret', config('services.voice.agent_secret'))),
+            ]);
+        } catch (Throwable) {
+            // /voice 沒連線或推送失敗 → 略過（結果已在對話 + 通知）
         }
     }
 

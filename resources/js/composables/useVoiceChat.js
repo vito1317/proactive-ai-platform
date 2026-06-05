@@ -116,7 +116,7 @@ export function useVoiceChat() {
         };
 
         status.value = '請說話';
-        socket.emit('prompt_text', { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '' });
+        socket.emit('prompt_text', { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '' });
         socket.emit('recording-started');
     }
 

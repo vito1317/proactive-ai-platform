@@ -101,6 +101,8 @@ return [
         'agent_secret' => env('VOICE_AGENT_SECRET', 'pai-voice-2f9c7a1e'),
         // 預設在哪個節點操作（開/關程式等）：'local'=主節點本機，或某個已註冊的 MCP gateway 名稱（如 'mac'）
         'default_gateway' => env('PAI_VOICE_DEFAULT_GATEWAY', 'local'),
+        // 背景任務完成後把結果念回 /voice 的端點（voice_server 的 /voice/push）
+        'push_url' => env('PAI_VOICE_PUSH_URL', 'http://127.0.0.1:8891/voice/push'),
         // 語音助理人格（system prompt）—— 不要自稱 PAI（唸起來像「屁」）
         'system_prompt' => env('PAI_VOICE_PROMPT', '你是一個智慧語音助理，名字就叫「智慧助理」。請全程使用台灣正體（繁體）中文，語氣口語、親切、簡短。你能協助查資料、執行系統操作、開關應用程式。需要查系統狀態或執行指令時，平台會實際幫你完成，請依實際結果回答，不要編造。'),
     ],
