@@ -179,8 +179,18 @@ class ChatResponder
     {
         $r = $this->classifier->classify($message);
         if ($r['domain'] === null) {
-            return ['reply' => '我不太確定該交給哪個領域處理，能再具體一點嗎？（目前領域：'
-                .implode('、', $this->domainKeys()).'）', 'meta' => ['category' => 'task']];
+            // 沒有領域包能接（如旅遊行程、生活請求）→ 退回一般對話腦直接完成，
+            // 不要回「我不太確定該交給哪個領域」這種死路。
+            if ($conv !== null) {
+                $messages = $this->chatMessages($conv);
+            } else {
+                $messages = [
+                    ['role' => 'system', 'content' => '你是「主動式 AI 平台」的助理，用台灣正體（繁體）中文，完整、實用地完成使用者的請求。'],
+                    ['role' => 'user', 'content' => $message],
+                ];
+            }
+
+            return ['reply' => trim($this->llm->chat($messages)), 'meta' => ['category' => 'chat', 'fallback' => 'no_domain']];
         }
 
         $event = PaiEvent::create([
