@@ -77,7 +77,7 @@ class VoiceAgentController extends Controller
                 'status' => \App\Pai\Perception\EventStatus::Received,
             ]);
             \App\Pai\Cognition\RouteCommandJob::dispatch($event->id);
-            $ack = '好的，這需要連續查資料、整理，我在背景幫你處理，完成後會通知你並出現在對話裡。';
+            $ack = '好的，這個我需要大約一分鐘查資料、整理，請先別關掉，弄好我直接念給你。';
             $conv->addMessage('assistant', $ack, ['source' => 'voice', 'category' => 'task', 'event_id' => $event->id]);
 
             return response()->json([
@@ -376,7 +376,7 @@ class VoiceAgentController extends Controller
                     'status' => \App\Pai\Perception\EventStatus::Received,
                 ]);
                 \App\Pai\Cognition\RouteCommandJob::dispatch($event->id);
-                $ack = '好的，這需要連續查資料、整理，我在背景幫你處理，完成後會通知你並出現在對話裡。';
+                $ack = '好的，這個我需要大約一分鐘查資料、整理，請先別關掉，弄好我直接念給你。';
                 $conv->addMessage('assistant', $ack, ['source' => 'voice', 'category' => 'task', 'event_id' => $event->id]);
                 $emit('step', ['text' => '🧠 背景連續操作中…']);
                 $emit('done', ['reply' => $ack, 'speech' => $ack, 'meta' => ['category' => 'task', 'background' => true], 'conversation_id' => $conv->id]);

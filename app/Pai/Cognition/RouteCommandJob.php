@@ -54,8 +54,17 @@ class RouteCommandJob implements ShouldQueue
             $conv->addMessage('user', $msg);
         }
 
+        $voiceConv = ($event->source ?? '') === 'voice' ? (int) ($event->payload['conversation_id'] ?? 0) : 0;
+        if ($voiceConv > 0) {
+            $this->pushVoice($voiceConv, '🔎 開始查資料、整理中…', progress: true);
+        }
         try {
-            $r = $this->respondFinal($responder, $conv, $msg);
+            $r = $this->respondFinal($responder, $conv, $msg, function (string $step) use ($voiceConv) {
+                // 過程步驟即時推到語音畫面（只顯示不念），讓使用者看到在動
+                if ($voiceConv > 0) {
+                    $this->pushVoice($voiceConv, $step, progress: true);
+                }
+            });
             $event->update([
                 'status' => EventStatus::Normalized,
                 'intent' => 'console:'.($r['meta']['category'] ?? 'reply'),
@@ -85,7 +94,7 @@ class RouteCommandJob implements ShouldQueue
      *
      * @return array{reply: string, meta: array<string, mixed>}
      */
-    private function respondFinal(ChatResponder $responder, Conversation $conv, string $msg): array
+    private function respondFinal(ChatResponder $responder, Conversation $conv, string $msg, ?callable $onStep = null): array
     {
         // 1) 先讓多輪技能代理實際執行（ReAct：可連續上網查證、跑指令，再彙整）——
         //    重型任務丟背景的意義就是這個，不是叫 LLM 單發腦補。
@@ -93,6 +102,7 @@ class RouteCommandJob implements ShouldQueue
             $skill = $responder->skills()->handle(
                 $conv,
                 $msg."\n（系統：這是背景任務，需要查證的事實請實際用工具查（如上網）。即使部分查詢失敗，也要用已知常識補齊並註明「建議出發前確認」，最後一定要給出完整可用的結果，絕對不要回覆『無法提供』。）",
+                $onStep,
             );
             if (empty($skill['meta']['no_skill']) && trim((string) ($skill['reply'] ?? '')) !== '') {
                 return ['reply' => $skill['reply'], 'meta' => $skill['meta'] ?? []];
@@ -134,16 +144,17 @@ class RouteCommandJob implements ShouldQueue
     }
 
     /** 把結果念回正在連線中的 /voice（透過 voice_server 的 /voice/push）。 */
-    private function pushVoice(int $conversationId, string $text): void
+    private function pushVoice(int $conversationId, string $text, bool $progress = false): void
     {
         if ($conversationId <= 0) {
             return;
         }
         try {
             $url = (string) config('pai.voice.push_url', 'http://127.0.0.1:8891/voice/push');
-            \Illuminate\Support\Facades\Http::timeout(60)->post($url, [
+            \Illuminate\Support\Facades\Http::timeout($progress ? 8 : 60)->post($url, [
                 'conversation_id' => $conversationId,
                 'text' => $text,
+                'progress' => $progress,
                 'secret' => (string) (app(\App\Pai\Settings\Settings::class)->get('voice.agent_secret', config('services.voice.agent_secret'))),
             ]);
         } catch (Throwable) {
