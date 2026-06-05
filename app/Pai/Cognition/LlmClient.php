@@ -49,6 +49,15 @@ class LlmClient
     }
 
     /**
+     * 模板思考關閉時，模型仍會生成頻道標記（<|channel>thought / <channel|>）混進 content
+     * → 統一剝除，避免顯示/朗讀出標記。
+     */
+    public static function stripChannelMarkers(string $s): string
+    {
+        return (string) preg_replace('/<\|?channel\|?>[a-z]*\n?/i', '', $s);
+    }
+
+    /**
      * 串流對話：以 SSE 逐 token 取得回覆。每個 content 片段呼叫 $onDelta。
      * 思考型模型的 reasoning_content 不傳給 $onDelta（僅累積），首個 content 片段前
      * 呼叫 $onReasoning(true) 一次以利前端顯示「思考中」。
@@ -90,6 +99,7 @@ class LlmClient
         $reasoning = '';
         $sawReasoning = false;
         $buffer = '';
+        $fbuf = '';  // 頻道標記過濾緩衝
 
         try {
             while (! $body->eof()) {
@@ -123,8 +133,18 @@ class LlmClient
                         }
                     }
                     if (isset($delta['content']) && $delta['content'] !== '') {
-                        $content .= $delta['content'];
-                        $onDelta($delta['content']);
+                        // 頻道標記過濾：標記可能跨 delta → 先進緩衝，末端疑似未完標記就扣住
+                        $fbuf .= $delta['content'];
+                        $fbuf = self::stripChannelMarkers($fbuf);
+                        $holdAt = strrpos($fbuf, '<');
+                        $emitNow = $holdAt !== false && strlen($fbuf) - $holdAt <= 24
+                            ? substr($fbuf, 0, $holdAt)
+                            : $fbuf;
+                        if ($emitNow !== '') {
+                            $content .= $emitNow;
+                            $onDelta($emitNow);
+                            $fbuf = substr($fbuf, strlen($emitNow));
+                        }
                     }
                 }
             }
@@ -135,6 +155,13 @@ class LlmClient
                 throw new StopStreaming;
             }
             throw $e;
+        }
+
+        // 沖出過濾緩衝的殘尾（剝完標記後若還有真內容就補發）
+        $tail = self::stripChannelMarkers($fbuf);
+        if ($tail !== '') {
+            $content .= $tail;
+            $onDelta($tail);
         }
 
         return ['content' => $content, 'reasoning' => $reasoning];
@@ -188,7 +215,7 @@ class LlmClient
         }
 
         return [
-            'content' => $content,
+            'content' => self::stripChannelMarkers($content),
             'reasoning' => is_string($reasoning) ? $reasoning : '',
             'finish_reason' => $finish,
             'usage' => $response->json('usage') ?? [],

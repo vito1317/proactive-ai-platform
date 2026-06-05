@@ -55,7 +55,7 @@ class RouteCommandJob implements ShouldQueue
         }
 
         try {
-            $r = $responder->respond($conv, $msg);
+            $r = $this->respondFinal($responder, $conv, $msg);
             $event->update([
                 'status' => EventStatus::Normalized,
                 'intent' => 'console:'.($r['meta']['category'] ?? 'reply'),
@@ -77,6 +77,29 @@ class RouteCommandJob implements ShouldQueue
             $event->update(['status' => EventStatus::Failed, 'note' => '處理失敗：'.$e->getMessage()]);
             $this->notice('指令處理失敗：'.$e->getMessage(), 'error');
         }
+    }
+
+    /**
+     * 背景一次性任務版的 respond：閒聊/生成類加一道「現在就給完整最終結果」指令，
+     * 杜絕「我會幫你規劃…請稍等」這種沒有下文的空頭支票（背景任務不會有下一輪）。
+     *
+     * @return array{reply: string, meta: array<string, mixed>}
+     */
+    private function respondFinal(ChatResponder $responder, Conversation $conv, string $msg): array
+    {
+        $r = $responder->route($conv, $msg);
+        if (! $r['stream']) {
+            return ['reply' => $r['reply'], 'meta' => $r['meta'] ?? []];
+        }
+        $messages = $r['messages'];
+        $messages[] = ['role' => 'system', 'content' => '提醒：這是一次性的背景任務，使用者不會再追問細節。'
+            .'請「現在」直接產出完整、可直接使用的最終結果——例如完整行程表（每天分時段：地點、交通方式、用餐安排與理由）。'
+            .'絕對不要說「請稍等」「我會再提供」「正在規劃」，也不要只回確認句或反問。缺少的偏好就自行做合理假設並註明。'];
+
+        return [
+            'reply' => trim(app(\App\Pai\Cognition\LlmClient::class)->chat($messages, ['max_tokens' => 4096])),
+            'meta' => ['category' => 'chat'],
+        ];
     }
 
     /** 把任務結果存成可下載檔案，回傳公開連結（失敗回空字串）。 */
