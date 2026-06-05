@@ -131,8 +131,12 @@ class SkillRunner
         $step = $onStep ?? fn (string $t) => null;
         $picked = false;
         $forcedTool = false; // 是否已因「空談承諾」逼它選過一次工具（避免無限迴圈）
+        $seen = [];           // 已執行過的 (工具+參數) 簽章，偵測重複呼叫
 
-        for ($round = count($obs); $round < self::MAX_ROUNDS; $round++) {
+        // 連續操作步數上限：讀後台 react.max_steps（使用者可調），而非寫死
+        $maxRounds = max(1, min(20, (int) $this->settings->get('react.max_steps', self::MAX_ROUNDS)));
+
+        for ($round = count($obs); $round < $maxRounds; $round++) {
             $d = $this->decide($conv, $message, $obs, $forcedTool, $onThought);
             $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
 
@@ -173,6 +177,13 @@ class SkillRunner
             $args = is_array($d['args'] ?? null) ? $d['args'] : [];
             $picked = true;
 
+            // 重複呼叫同一工具同參數 → 已有資料，直接彙整作答（避免空轉到步數上限）
+            $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
+            if (isset($seen[$sig])) {
+                break;
+            }
+            $seen[$sig] = true;
+
             // 高風險未允許 → 暫存（含已累積 obs）、請求對話確認；確認後由 resolvePending 接續迴圈
             if ($skill->isHighRisk() && ! $this->writesAllowed($conv)) {
                 $conv->update(['pending_skill' => ['skill' => $skill->name(), 'args' => $args, 'message' => $message, 'obs' => $obs]]);
@@ -207,8 +218,8 @@ class SkillRunner
             $obs[] = ['action' => $skill->name(), 'args' => $args, 'result' => mb_substr((string) $result, 0, 3000)];
         }
 
-        // 達步數上限 → 用目前結果做總結
-        return ['reply' => $this->summarize($message, $obs, $onDelta, $onThought)."\n\n（已達連續操作步數上限 ".self::MAX_ROUNDS.' 步）', 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => $onDelta !== null]];
+        // 達步數上限（或偵測到重複呼叫而提前結束）→ 用目前結果做總結（不顯示內部步數限制字樣）
+        return ['reply' => $this->summarize($message, $obs, $onDelta, $onThought), 'meta' => ['category' => 'skill', 'rounds' => count($obs), 'streamed' => $onDelta !== null]];
     }
 
     /** 較重（LLM 生成型）的技能：改背景執行，避免同步阻塞數分鐘。 */
