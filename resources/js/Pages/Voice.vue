@@ -131,8 +131,10 @@ onUnmounted(() => {
         <!-- 底部控制列 -->
         <footer class="absolute bottom-10 left-0 right-0 flex justify-center z-50">
             <div class="glass px-6 py-4 rounded-full flex items-center gap-6">
-                <button class="w-12 h-12 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-slate-300 transition-colors border border-white/10">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                <button @click="voice.toggleMute()" class="w-12 h-12 rounded-full flex items-center justify-center transition-colors border border-white/10"
+                        :class="voice.isMuted.value ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-300'">
+                    <svg v-if="!voice.isMuted.value" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                    <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
                 </button>
                 
                 <button @click="toggleConnection" class="w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all transform hover:scale-105" :class="!voice.active.value ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/30' : 'bg-red-500 hover:bg-red-400 shadow-red-500/30'">
@@ -140,7 +142,7 @@ onUnmounted(() => {
                     <svg v-else class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <button class="w-12 h-12 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-slate-300 transition-colors border border-white/10">
+                <button @click="router.visit('/settings')" class="w-12 h-12 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-slate-300 transition-colors border border-white/10">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                 </button>
             </div>

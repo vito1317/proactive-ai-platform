@@ -14,11 +14,22 @@ export function useVoiceChat() {
     const connected = ref(false);
     const speaking = ref(false);
     const status = ref('');
+    const volume = ref(0); // 0.0 to ~1.0
+    const isMuted = ref(false);
 
     let socket = null;
     let micStream = null, audioCtx = null, scriptNode = null, gainNode = null;
     let audioQueue = [], isPlayingAudio = false;
     let handlers = {}, cfg = {};
+    let micMuteUntil = 0; // AI 說話期間（+尾音緩衝）暫停送麥克風，避免回授把 AI 自己的聲音當成輸入
+
+    function toggleMute() { isMuted.value = !isMuted.value; }
+
+    function toggleMute() {
+        if (!micStream) return;
+        isMuted.value = !isMuted.value;
+        micStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value);
+    }
 
     function playNext() {
         if (isPlayingAudio || audioQueue.length === 0) return;
@@ -57,7 +68,14 @@ export function useVoiceChat() {
         const nativeSR = audioCtx.sampleRate;
 
         scriptNode.onaudioprocess = (e) => {
+            const out0 = e.outputBuffer.getChannelData(0);
+            for (let i = 0; i < out0.length; i++) out0[i] = 0; // 永遠輸出靜音
             if (!socket || !socket.connected) return;
+            // AI 說話中 / 剛說完 / 手動靜音 → 不送麥克風（防回授把 AI 聲音當輸入）
+            if (isMuted.value || speaking.value || performance.now() < micMuteUntil) {
+                volume.value = 0;
+                return;
+            }
             const input = e.inputBuffer.getChannelData(0);
             let pcmFloat;
             if (nativeSR !== 16000) {
@@ -68,11 +86,15 @@ export function useVoiceChat() {
             } else {
                 pcmFloat = new Float32Array(input);
             }
+            let sum = 0;
             const pcm16 = new Int16Array(pcmFloat.length);
             for (let i = 0; i < pcmFloat.length; i++) {
+                sum += pcmFloat[i] * pcmFloat[i];
                 const s = Math.max(-1, Math.min(1, pcmFloat[i]));
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
+            volume.value = Math.sqrt(sum / pcmFloat.length);
+
             socket.emit('audio', JSON.stringify({ audio: Array.from(new Uint8Array(pcm16.buffer)), sample_rate: 16000 }));
             // 輸出靜音，避免回授
             const out = e.outputBuffer.getChannelData(0);
@@ -115,6 +137,8 @@ export function useVoiceChat() {
             if (!pcm.length) return;
             audioQueue.push(pcm);
             speaking.value = true;
+            // 這段音訊播放時間 + 800ms 尾音緩衝，期間麥克風不送（防回授）
+            micMuteUntil = performance.now() + (pcm.length / 24000) * 1000 + 800;
             playNext();
         });
         socket.on('stop_tts', () => { audioQueue = []; speaking.value = false; });
@@ -128,6 +152,8 @@ export function useVoiceChat() {
         connected.value = false;
         speaking.value = false;
         status.value = '';
+        volume.value = 0;
+        isMuted.value = false;
         try { socket && socket.connected && socket.emit('recording-stopped'); } catch (e) { /* noop */ }
         try { scriptNode && (scriptNode.onaudioprocess = null, scriptNode.disconnect()); } catch (e) { /* noop */ }
         try { gainNode && gainNode.disconnect(); } catch (e) { /* noop */ }
@@ -138,5 +164,5 @@ export function useVoiceChat() {
         socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
-    return { active, connected, speaking, status, start, stop };
+    return { active, connected, speaking, status, volume, isMuted, toggleMute, start, stop };
 }

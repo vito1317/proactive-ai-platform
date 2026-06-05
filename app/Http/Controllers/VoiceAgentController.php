@@ -93,7 +93,7 @@ class VoiceAgentController extends Controller
         ]);
     }
 
-    /** 把回覆清成「適合朗讀」的乾淨口語：去除程式碼/路徑/網址/emoji/技術符號。 */
+    /** 把回覆清成「適合朗讀」的乾淨口語：去除程式碼/路徑/網址/emoji/markdown，並精簡長度。 */
     private function speechClean(string $text): string
     {
         $t = $text;
@@ -101,10 +101,28 @@ class VoiceAgentController extends Controller
         $t = preg_replace('/`[^`]*`/u', '', $t);                    // 行內 code
         $t = preg_replace('#https?://\S+#u', '網址', $t);            // 網址
         $t = preg_replace('#(?:sudo |/)[\w./@\-]+#u', '', $t);       // 指令/絕對路徑
-        $t = preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-\x{21FF}\x{2B00}-\x{2BFF}]/u', '', $t); // emoji/符號
-        $t = preg_replace('/[（(][^）)]*detached[^）)]*[）)]/iu', '', $t); // (detached) 之類
+        $t = preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-\x{21FF}\x{2B00}-\x{2BFF}\x{FE0F}]/u', '', $t); // emoji
+        // 去 markdown：標題#、粗體**、項目符號、引用、表格線
+        $t = preg_replace('/^[ \t]*[#>\-*•・|]+[ \t]*/mu', '', $t);
+        $t = str_replace(['**', '*', '＿', '`', '|'], '', $t);
+        $t = preg_replace('/[（(][^）)]*detached[^）)]*[）)]/iu', '', $t);
+        $t = preg_replace('/[ \t]*\R+[ \t]*/u', '，', $t);          // 換行→停頓
         $t = preg_replace('/\s+/u', ' ', $t);
+        $t = preg_replace('/，{2,}/u', '，', $t);
         $t = trim($t, " 。.·、,，\t\n");
+
+        // 過長 → 只念前幾句，其餘請看畫面（避免長文 TTS 變怪、太久）
+        if (mb_strlen($t) > 160) {
+            $parts = preg_split('/(?<=[。！？!?])/u', $t, -1, PREG_SPLIT_NO_EMPTY);
+            $acc = '';
+            foreach ($parts as $p) {
+                if (mb_strlen($acc.$p) > 150) {
+                    break;
+                }
+                $acc .= $p;
+            }
+            $t = trim($acc) !== '' ? trim($acc).' 詳細內容已顯示在畫面上。' : mb_substr($t, 0, 150).'…';
+        }
 
         return $t !== '' ? $t : $text;
     }
