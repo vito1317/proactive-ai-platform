@@ -154,7 +154,7 @@ class VoiceAgentController extends Controller
         if ($key === null) {
             return null;
         }
-        $label = $this->appLabel($t);
+        $label = ['chrome' => '瀏覽器', 'firefox' => 'Firefox', 'terminal' => '終端機', 'calculator' => '計算機', 'files' => '檔案', 'settings' => '設定', 'editor' => '編輯器'][$key] ?? '程式';
         [$target, $targetLabel] = $this->targetGateway($t);
 
         if ($hasClose) {
