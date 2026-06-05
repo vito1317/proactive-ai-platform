@@ -48,6 +48,13 @@ class VoiceAgentController extends Controller
         $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
         $conv->addMessage('user', $transcript, ['source' => 'voice']);
 
+        // 直達指令：明確的「打開/開啟 X」直接跑 open-app，不繞 LLM（快又不會被反問）
+        if ($direct = $this->directCommand($transcript)) {
+            $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
+
+            return response()->json(['reply' => $direct['reply'], 'steps' => [$direct['step'] ?? '⚡ 直接執行'], 'meta' => $direct['meta'], 'conversation_id' => $conv->id]);
+        }
+
         // 用與 SSE / TG / LINE 相同的路由 → 可閒聊也可實際跑技能操控系統
         $steps = [];
         $onStep = function (string $t) use (&$steps) {
@@ -77,6 +84,71 @@ class VoiceAgentController extends Controller
             'meta' => $meta,
             'conversation_id' => $conv->id,
         ]);
+    }
+
+    /**
+     * 直達指令：不經 LLM，直接把明確的語音命令對應到技能執行。
+     * 目前支援「打開/開啟/啟動 <程式>」→ open-app。回 null 表示非直達指令、走一般 agentic。
+     *
+     * @return array{reply:string,meta:array,step?:string}|null
+     */
+    private function directCommand(string $transcript): ?array
+    {
+        $t = trim($transcript);
+        // 開啟程式：打開/開啟/啟動/打开/开启/启动/開一下/幫我開 + 目標
+        if (preg_match('/^\s*(?:幫我|帮我|請|请)?\s*(?:打開|打开|開啟|开启|啟動|启动|開一下|开一下|開|开|執行|执行|run|open|launch|start)\s*[一個個了]*\s*(.+?)\s*[。.!！?？]*\s*$/iu', $t, $m)) {
+            $target = trim($m[1]);
+            // 去掉常見贅詞
+            $target = preg_replace('/(這個|這|那個|程式|程序|應用程式|应用|app|軟體|软件|瀏覽器|浏览器)$/u', '', trim($target));
+            $cmd = $this->resolveAppCommand($target !== '' ? $target : $m[1]);
+            if ($cmd === null) {
+                return null;
+            }
+            $skill = app(\App\Pai\Skills\SkillRegistry::class)->get('open-app');
+            if (! $skill) {
+                return null;
+            }
+            $result = $skill->run(['command' => $cmd]);
+
+            return [
+                'reply' => "好，已幫你開啟「{$target}」。{$result}",
+                'meta' => ['category' => 'skill', 'skill' => 'open-app', 'direct' => true, 'command' => $cmd],
+                'step' => "🚀 直接啟動：{$cmd}",
+            ];
+        }
+
+        return null;
+    }
+
+    /** 把口語的程式名對應成可執行指令；對不到常見清單就用清理後的名字本身。 */
+    private function resolveAppCommand(string $name): ?string
+    {
+        $n = mb_strtolower(trim($name));
+        if ($n === '') {
+            return null;
+        }
+        $map = [
+            'chrome' => 'google-chrome', 'google chrome' => 'google-chrome', 'google' => 'google-chrome',
+            'googlechrome' => 'google-chrome', '谷歌' => 'google-chrome', '瀏覽器' => 'google-chrome', '浏览器' => 'google-chrome',
+            'firefox' => 'firefox', '火狐' => 'firefox',
+            'edge' => 'microsoft-edge', 'safari' => 'google-chrome',
+            'terminal' => 'gnome-terminal', '終端' => 'gnome-terminal', '終端機' => 'gnome-terminal', '终端' => 'gnome-terminal',
+            'vscode' => 'code', 'vs code' => 'code', 'code' => 'code', '編輯器' => 'code',
+            'calculator' => 'gnome-calculator', '計算機' => 'gnome-calculator', '计算器' => 'gnome-calculator',
+            'files' => 'nautilus', '檔案' => 'nautilus', '文件管理' => 'nautilus', '檔案總管' => 'nautilus',
+            'settings' => 'gnome-control-center', '設定' => 'gnome-control-center', '设置' => 'gnome-control-center',
+            'gedit' => 'gedit', '記事本' => 'gedit', '文字編輯' => 'gedit',
+        ];
+        foreach ($map as $k => $v) {
+            if (str_contains($n, $k)) {
+                return $v;
+            }
+        }
+        // 對不到 → 用清理後的名字當指令（去除空白、只留安全字元）
+        $clean = preg_replace('/[^a-z0-9_.\- ]/i', '', $name);
+        $clean = trim(preg_replace('/\s+/', '-', trim($clean)));
+
+        return $clean !== '' ? $clean : null;
     }
 
     /** 用 conversation_id 找既有對話；找不到（如電話來電）則用 session 綁定，最後退回為第一個使用者開新對話。 */
