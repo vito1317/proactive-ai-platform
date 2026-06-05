@@ -138,14 +138,17 @@ class VoiceAgentController extends Controller
         $t = trim($transcript);
         $hasOpen = (bool) preg_match('/(打開|打开|開啟|开启|啟動|启动|幫.{0,2}開|帮.{0,2}开|開一下|开一下|\bopen\b|\blaunch\b|\bstart\b)/iu', $t);
         $hasClose = (bool) preg_match('/(關閉|關掉|關起來|关闭|关掉|結束|结束|退出|\bclose\b|\bquit\b)/iu', $t);
-        $hasSearch = (bool) preg_match('/(搜尋|搜索|查一下|查詢|查询|google一下|估狗|\bsearch\b|\bfind\b)/iu', $t);
+        // 搜尋（含簡體：STT 常輸出簡體）
+        $hasSearch = (bool) preg_match('/(搜尋|搜寻|搜索|查一下|查詢|查询|尋找|寻找|找一下|google一下|估狗|\bsearch\b|\bfind\b)/iu', $t);
+        // 「打開視窗/窗口/網頁 + 搜尋」也視為要開瀏覽器
+        $isWindow = (bool) preg_match('/(視窗|窗口|網頁|网页|window|分頁|分页)/iu', $t);
         if (! $hasOpen && ! $hasClose) {
             return null;
         }
 
         $key = $this->appKey($t);
-        // 要搜尋但沒指明程式 → 用瀏覽器
-        if ($key === null && $hasSearch && $hasOpen) {
+        // 要搜尋/開視窗但沒指明程式 → 用瀏覽器
+        if ($key === null && $hasOpen && ($hasSearch || $isWindow)) {
             $key = 'chrome';
         }
         if ($key === null) {
@@ -266,7 +269,7 @@ class VoiceAgentController extends Controller
     private function extractQuery(string $t): string
     {
         // 取搜尋動詞之後的全部當查詢（保留「的新聞」「資料」等，因為它們常是查詢的一部分）
-        if (preg_match('/(?:搜尋|搜索|查一下|查詢|查询|google一下|估狗|search|find)\s*(.+)$/iu', $t, $m)) {
+        if (preg_match('/(?:搜尋|搜寻|搜索|查一下|查詢|查询|尋找|寻找|找一下|google一下|估狗|search|find)\s*(.+)$/iu', $t, $m)) {
             $q = trim($m[1]);
             $q = preg_replace('/^(一下|並|并|和|然後|然后|再|去|的)\s*/u', '', $q);
             $q = rtrim($q, " 。.!！?？、,，");
