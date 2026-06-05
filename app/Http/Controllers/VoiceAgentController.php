@@ -121,6 +121,46 @@ class VoiceAgentController extends Controller
         ]);
     }
 
+    /** 地名 → 座標（Nominatim/OSM，臺灣優先；快取一天）。失敗回 null。 */
+    private function geocodePlace(string $q): ?array
+    {
+        $key = 'geo:fwd:'.md5($q);
+        $hit = \Illuminate\Support\Facades\Cache::remember($key, 86400, function () use ($q) {
+            try {
+                $r = \Illuminate\Support\Facades\Http::timeout(6)
+                    ->withHeaders(['User-Agent' => 'pai-voice/1.0'])
+                    ->get('https://nominatim.openstreetmap.org/search', [
+                        'q' => $q, 'format' => 'json', 'limit' => 1, 'countrycodes' => 'tw', 'accept-language' => 'zh-TW',
+                    ])->json();
+
+                return isset($r[0]['lat']) ? ['lat' => (float) $r[0]['lat'], 'lng' => (float) $r[0]['lon']] : ['miss' => true];
+            } catch (\Throwable) {
+                return ['miss' => true];
+            }
+        });
+
+        return isset($hit['miss']) ? null : $hit;
+    }
+
+    /** OSRM 公共路由：兩點開車距離/時間。回 [公里, 分鐘] 或 null。 */
+    private function routeEstimate(array $from, array $to): ?array
+    {
+        try {
+            $r = \Illuminate\Support\Facades\Http::timeout(6)
+                ->withHeaders(['User-Agent' => 'pai-voice/1.0'])
+                ->get("https://router.project-osrm.org/route/v1/driving/{$from['lng']},{$from['lat']};{$to['lng']},{$to['lat']}", ['overview' => 'false'])
+                ->json();
+            $route = $r['routes'][0] ?? null;
+            if ($route === null) {
+                return null;
+            }
+
+            return [round($route['distance'] / 1000, 1), (int) ceil($route['duration'] / 60)];
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     /** 反查地名（Nominatim/OSM，免金鑰；快取一天）。失敗回空字串。 */
     private function reverseGeocode(float $lat, float $lng): string
     {
@@ -361,10 +401,23 @@ class VoiceAgentController extends Controller
             ];
         }
 
-        // 導航/路程：「導航到X」「開車去X要多久」「去X怎麼走」→ 開 Google Maps 路線（起點=目前定位）
+        // 導航/路程：「導航到X」「開車去X要多久」「從A到B要多久」→ OSRM 實算距離/時間 + 開 Google Maps 路線
         $navDest = null;
+        $navFrom = null;   // null = 用目前定位
         $navMode = 'driving';
-        if (preg_match('/(導航|导航)\s*(到|去)?\s*(.{1,30}?)[。!！?？]?$/u', $t, $m)) {
+        if (preg_match('/(從|从)\s*(.{1,20}?)\s*(開車|开车|騎車|骑车|走路|步行)?\s*(去|到|過去|过去)\s*(.{0,30}?)(要|需要|大概)?\s*(多久|多長時間|多长时间|多遠|多远|怎麼走|怎么走)/u', $t, $m)) {
+            $navFrom = trim($m[2]);
+            $navDest = trim($m[5]);
+            $navMode = (str_contains($m[3], '走') || str_contains($m[3], '步')) ? 'walking' : 'driving';
+            if ($navDest === '') {
+                return [
+                    'reply' => '要從「'.$navFrom.'」去哪裡呢？跟我說「從'.$navFrom.'到某地要多久」我就能直接算給你。',
+                    'speech' => '要去哪裡呢？跟我說從'.$navFrom.'到哪裡，我就能直接算給你。',
+                    'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'navigate', 'need_dest' => true],
+                    'step' => '🧭 缺目的地',
+                ];
+            }
+        } elseif (preg_match('/(導航|导航)\s*(到|去)?\s*(.{1,30}?)[。!！?？]?$/u', $t, $m)) {
             $navDest = trim($m[3]);
         } elseif (preg_match('/(開車|开车|騎車|骑车|走路|步行)(去|到)(.{1,30}?)(要|需要|大概)?\s*(多久|多長時間|多长时间|多遠|多远)/u', $t, $m)) {
             $navDest = trim($m[3]);
@@ -374,19 +427,36 @@ class VoiceAgentController extends Controller
         }
         if ($navDest !== null && $navDest !== '' && ! preg_match('/^(那|這|这|哪|過去|过去)/u', $navDest)) {
             [$target, $targetLabel] = $this->targetGateway($t);
+            // 實算距離/時間（OSRM）：起點 = 指名地點（地名轉座標）或目前定位
+            $fromCoord = $navFrom !== null && $navFrom !== ''
+                ? $this->geocodePlace($navFrom)
+                : ($geo !== null ? ['lat' => $geo['lat'], 'lng' => $geo['lng']] : null);
+            $toCoord = $this->geocodePlace($navDest);
+            $est = ($fromCoord !== null && $toCoord !== null) ? $this->routeEstimate($fromCoord, $toCoord) : null;
+            $fromLabel = $navFrom !== null && $navFrom !== '' ? $navFrom : '你的位置';
+
             $params = ['api' => '1', 'destination' => $navDest, 'travelmode' => $navMode];
-            if ($geo !== null) {
+            if ($navFrom !== null && $navFrom !== '') {
+                $params['origin'] = $navFrom;
+            } elseif ($geo !== null) {
                 $params['origin'] = $geo['lat'].','.$geo['lng'];
             }
             $url = 'https://www.google.com/maps/dir/?'.http_build_query($params);
             $res = $this->runGui($target, 'open', 'chrome', $url);
             $fail = $this->guiFailed($res);
 
+            $estText = $est !== null ? "開車約 {$est[0]} 公里、大概 {$est[1]} 分鐘" : '';
+            $speech = $fail
+                ? $this->guiFailSpeech($targetLabel)
+                : ($estText !== ''
+                    ? "從{$fromLabel}到{$navDest}{$estText}，路線也幫你打開了。"
+                    : "好的，到{$navDest}的路線已經打開了，預估時間看地圖上的標示。");
+
             return [
-                'reply' => "好，已在{$targetLabel}打開到「{$navDest}」的路線（{$res}）",
-                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，到{$navDest}的路線已經打開了，預估時間看地圖上的標示。",
+                'reply' => "好，已打開「{$fromLabel} → {$navDest}」的路線".($estText !== '' ? "（{$estText}）" : '')."（{$res}）",
+                'speech' => $speech,
                 'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'navigate', 'target' => $target],
-                'step' => "🧭 導航：{$navDest}@{$targetLabel}",
+                'step' => "🧭 導航：{$fromLabel}→{$navDest}".($estText !== '' ? "（{$est[0]}km/{$est[1]}分）" : ''),
             ];
         }
 

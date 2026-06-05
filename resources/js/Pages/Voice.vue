@@ -43,6 +43,8 @@ function toggleConnection() {
                 },
                 onStep: (s) => {
                     const txt = typeof s === 'string' ? s : (s.thought || s.action || '處理中...');
+                    // 去重：同一句提示（如 💤 待機中）重複來就不疊加
+                    if (agentSteps.value[agentSteps.value.length - 1] === '>> ' + txt) return;
                     agentSteps.value.push('>> ' + txt);
                     if (agentSteps.value.length > 4) agentSteps.value.shift();
                 },
