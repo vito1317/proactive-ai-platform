@@ -87,6 +87,20 @@ class RouteCommandJob implements ShouldQueue
      */
     private function respondFinal(ChatResponder $responder, Conversation $conv, string $msg): array
     {
+        // 1) 先讓多輪技能代理實際執行（ReAct：可連續上網查證、跑指令，再彙整）——
+        //    重型任務丟背景的意義就是這個，不是叫 LLM 單發腦補。
+        try {
+            $skill = $responder->skills()->handle(
+                $conv,
+                $msg."\n（系統：這是背景任務，需要查證的事實請實際用工具查（如上網），最後直接給出完整可用的結果。）",
+            );
+            if (empty($skill['meta']['no_skill']) && trim((string) ($skill['reply'] ?? '')) !== '') {
+                return ['reply' => $skill['reply'], 'meta' => $skill['meta'] ?? []];
+            }
+        } catch (Throwable) {
+            // 技能代理失敗 → 跌回單發完成
+        }
+
         $r = $responder->route($conv, $msg);
         if (! $r['stream']) {
             return ['reply' => $r['reply'], 'meta' => $r['meta'] ?? []];

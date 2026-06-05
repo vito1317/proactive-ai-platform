@@ -139,6 +139,11 @@ class ChatResponder
             .'若使用者是要實際操作或查真實資料，系統已會自動把那種訊息導去實際執行——所以你只要正常回答即可，不要替它空講要做什麼。'
             .'其餘一般問題就依下方已提供的資訊（領域包摘要、對話脈絡）誠實作答。';
 
+        // 現在時間（讓 AI 能回答今天幾號/星期幾/現在幾點，行程也能對日期）
+        $now = now('Asia/Taipei');
+        $w = ['日', '一', '二', '三', '四', '五', '六'][$now->dayOfWeek];
+        $content .= "\n\n[現在時間] ".$now->format('Y-m-d H:i')."（週{$w}，台灣時間）";
+
         // 語音帶來的瀏覽器定位 → 回答附近/路程/交通問題時有出發點
         $lastUser = $conv->messages()->where('role', 'user')->latest('id')->first();
         $g = $lastUser->meta['geo'] ?? null;
@@ -189,8 +194,12 @@ class ChatResponder
                     ['role' => 'user', 'content' => $message],
                 ];
             }
+            // 這條路不會有「下一輪」接手 → 必須當下產出完整結果，嚴禁「請稍等/我會再…」式空頭支票
+            $messages[] = ['role' => 'system', 'content' => '提醒：不會有後續流程接手這個請求，請「現在」直接產出完整、可直接使用的最終結果'
+                .'（例如完整行程表：每天分時段列地點、交通、用餐）。絕對不要說「請稍等」「我會再提供」「完成後告訴你」，也不要只回確認句。'
+                .'缺少的偏好自行做合理假設並註明。'];
 
-            return ['reply' => trim($this->llm->chat($messages)), 'meta' => ['category' => 'chat', 'fallback' => 'no_domain']];
+            return ['reply' => trim($this->llm->chat($messages, ['max_tokens' => 4096])), 'meta' => ['category' => 'chat', 'fallback' => 'no_domain']];
         }
 
         $event = PaiEvent::create([
