@@ -845,12 +845,13 @@ class VoiceAgentController extends Controller
     {
         $q = $t;
         $q = preg_replace('/(請問|请问|幫我|帮我|麻煩|麻烦|找一下|找找|查一下|搜尋|搜寻|搜索)/u', '', $q);
+        $q = preg_replace('/(我們|我们|我家|咱們|咱们|我)(這|这)?/u', '', $q);  // 「我附近…」的代名詞
         $q = preg_replace('/(這附近|这附近|附近的|附近|周邊|周边)/u', '', $q);
         $q = preg_replace('/(有什麼|有什么|有沒有|有没有|哪裡有|哪里有|哪邊有|哪边有|推薦|推荐|好喝的|好吃的|好玩的|不錯的|不错的)/u', '', $q);
         $q = trim(preg_replace('/[，。！？,.!?\s]+/u', ' ', $q));
         $q = preg_replace('/^(有沒有|有没有|有)/u', '', $q);
         $q = preg_replace('/[吧啊喔哦嘛呀啦囉咯呢了的嗎吗]+$/u', '', $q);
-        if (mb_strlen($q) < 1) {
+        if (mb_strlen($q) < 2) {  // 單字殘渣（我/吃）不當搜尋詞，改用語氣預設
             // 抽不出關鍵詞 → 依語氣給合理預設
             return preg_match('/(好玩|景點|景点|逛)/u', $t) ? '景點'
                 : (preg_match('/(好喝|飲料|饮料|咖啡)/u', $t) ? '飲料店' : '餐廳');
