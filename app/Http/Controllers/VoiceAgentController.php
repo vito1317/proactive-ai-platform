@@ -306,7 +306,16 @@ class VoiceAgentController extends Controller
         // 音量 / 顯示器亮度（直接在目標節點調整；Mac 用 osascript，Linux 用 pactl/brightnessctl）
         if (preg_match('/(音量|聲音|声音|靜音|静音|\bvolume\b|\bmute\b|亮度|螢幕亮|屏幕亮|\bbrightness\b)/iu', $t)) {
             $isBright = (bool) preg_match('/(亮度|螢幕亮|屏幕亮|brightness)/iu', $t);
-            $pct = preg_match('/(\d{1,3})\s*(%|％|趴)/u', $t, $m) ? max(0, min(100, (int) $m[1])) : null;
+            // 阿拉伯數字% / 百分之N / 調到N（N 可為中文數字，STT 常輸出「百分之五十」）
+            $pct = null;
+            if (preg_match('/(\d{1,3})\s*(%|％|趴)/u', $t, $m)) {
+                $pct = (int) $m[1];
+            } elseif (preg_match('/百分之\s*([0-9一二兩三四五六七八九十百]+)/u', $t, $m)) {
+                $pct = $this->zhNum($m[1]);
+            } elseif (preg_match('/(調到|调到|調整到|调整到|設成|设成|設到|设到)\s*([0-9一二兩三四五六七八九十百]+)/u', $t, $m)) {
+                $pct = $this->zhNum($m[2]);
+            }
+            $pct = $pct !== null ? max(0, min(100, $pct)) : null;
             $up = (bool) preg_match('/(調高|调高|大聲|大声|提高|增加|調大|调大|大一點|大一点|高一點|高一点|調亮|调亮|亮一點|亮一点)/u', $t);
             $down = (bool) preg_match('/(調低|调低|小聲|小声|降低|減少|調小|调小|小一點|小一点|低一點|低一点|調暗|调暗|暗一點|暗一点)/u', $t);
             $unmute = (bool) preg_match('/(取消靜音|取消静音|解除靜音|解除静音|\bunmute\b)/iu', $t);
@@ -525,6 +534,23 @@ class VoiceAgentController extends Controller
         }
 
         return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，需要明細可以再跟我說。";
+    }
+
+    /** 中文數字 → 整數（支援 0-100：五十、八十五、一百…）；解析不了回 null。 */
+    private function zhNum(string $s): ?int
+    {
+        if (ctype_digit($s)) {
+            return (int) $s;
+        }
+        $d = ['零' => 0, '一' => 1, '二' => 2, '兩' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '七' => 7, '八' => 8, '九' => 9];
+        if ($s === '百' || $s === '一百') {
+            return 100;
+        }
+        if (preg_match('/^([一二兩三四五六七八九])?十([一二三四五六七八九])?$/u', $s, $m)) {
+            return ($m[1] !== '' ? $d[$m[1]] : 1) * 10 + (($m[2] ?? '') !== '' ? $d[$m[2]] : 0);
+        }
+
+        return $d[$s] ?? null;
     }
 
     /** 組音量/亮度調整指令（跨平台：osascript ↘ pactl/brightnessctl）。回 [cmd, 口語描述]。 */
