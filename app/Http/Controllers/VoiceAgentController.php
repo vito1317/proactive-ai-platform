@@ -177,6 +177,26 @@ class VoiceAgentController extends Controller
             ];
         }
 
+        // 停止/暫停播放（音樂/影片）→ 關掉目標節點瀏覽器目前分頁（必須在音樂分支之前判斷）
+        $isStop = preg_match('/^(暫停|暂停|停止|停)[。!！]?$/u', $t)
+            || preg_match('/(停止|暫停|暂停|停掉|關掉|关掉|不要|別|别)\s*(再)?\s*(播放|播|放)/u', $t)
+            || preg_match('/(停止|暫停|暂停|停掉|關掉|关掉)\s*(音樂|音乐|歌|影片|视频|視頻|youtube)/iu', $t)
+            || preg_match('/(音樂|音乐|歌|影片|视频|視頻)\s*(停|暫停|暂停|關|关)/u', $t);
+        if ($isStop) {
+            [$target, $targetLabel] = $this->targetGateway($t);
+            $cmd = "osascript -e 'tell application \"Google Chrome\" to close active tab of front window' 2>/dev/null"
+                ." || playerctl -a pause 2>/dev/null || echo no-media";
+            $out = trim($this->runExec($target, $cmd));
+            $fail = str_contains($out, '未連線') || str_contains($out, '執行失敗');
+
+            return [
+                'reply' => $fail ? "（{$targetLabel} 沒連上線，停不了播放）" : "好，已在{$targetLabel}停止播放。",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : '好的，已經停止播放了。',
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'media_stop', 'target' => $target],
+                'step' => "⏹ 停止播放@{$targetLabel}",
+            ];
+        }
+
         // 播放/搜尋音樂：有指定歌/歌手 → 瀏覽器開 YouTube 搜尋；沒指定 → 開 YouTube Music
         $mq = null;
         if (preg_match('/(播放|播|聽|听|放|搜尋|搜寻|搜索|找|\bplay\b).{0,12}(音樂|音乐|歌|\bmusic\b)/iu', $t)
