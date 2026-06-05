@@ -162,12 +162,38 @@ class VoiceAgentController extends Controller
             [$target, $targetLabel] = $this->targetGateway($t);
             $out = trim($this->runExec($target, $sys['cmd']));
             $speech = $this->summarizeSys($sys['key'], $out, $targetLabel);
+            // 預設畫面也只顯示摘要；使用者明講要「詳細/完整/原始/明細」才附原始輸出
+            $wantRaw = (bool) preg_match('/(詳細|详细|完整|原始|明細|明细|全部列|列出來|列出来)/u', $t);
+            $reply = "【{$targetLabel}・{$sys['label']}】{$speech}";
+            if ($wantRaw) {
+                $reply .= "\n```\n".($out !== '' ? $out : '（沒有輸出）')."\n```";
+            }
 
             return [
-                'reply' => "【{$targetLabel}・{$sys['label']}】\n".($out !== '' ? $out : '（沒有輸出）'),
+                'reply' => $reply,
                 'speech' => $speech,
                 'meta' => ['category' => 'skill', 'skill' => 'sysinfo', 'direct' => true, 'target' => $target],
                 'step' => "📊 {$sys['label']}@{$targetLabel}",
+            ];
+        }
+
+        // 播放/搜尋音樂：有指定歌/歌手 → 瀏覽器開 YouTube 搜尋；沒指定 → 開 YouTube Music
+        if (preg_match('/(播放|播|聽|听|放|搜尋|搜寻|搜索|找|\bplay\b).{0,12}(音樂|音乐|歌|\bmusic\b)/iu', $t)
+            || preg_match('/(音樂|音乐|歌|\bmusic\b).{0,6}(播放|播|放|\bplay\b)/iu', $t)) {
+            [$target, $targetLabel] = $this->targetGateway($t);
+            $q = $this->extractMusicQuery($t);
+            $url = $q !== ''
+                ? 'https://www.youtube.com/results?search_query='.rawurlencode($q)
+                : 'https://music.youtube.com/';
+            $res = $this->runGui($target, 'open', 'chrome', $url);
+            $fail = $this->guiFailed($res);
+            $what = $q !== '' ? "「{$q}」的音樂" : '音樂';
+
+            return [
+                'reply' => "好，已在{$targetLabel}幫你打開{$what}（{$res}）",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你打開{$what}了。",
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'music', 'target' => $target],
+                'step' => "🎵 播放音樂".($q !== '' ? "：{$q}" : '')."@{$targetLabel}",
             ];
         }
 
@@ -292,18 +318,57 @@ class VoiceAgentController extends Controller
             return "抱歉，{$targetLabel} 目前沒連上線，查不到。";
         }
         if ($key === 'disk') {
-            // 取根目錄（/）那行的使用百分比與可用空間
-            foreach (preg_split('/\R/', $out) as $line) {
-                if (preg_match('#(\d+)%\s+/$#', $line, $m) || (str_contains($line, ' /') && preg_match('/(\d+)%/', $line, $m))) {
-                    $avail = preg_match('/([\d.]+\s*[KMGT]i?)\s+\d+%/', $line, $a) ? $a[1] : '';
-                    return "{$targetLabel} 的磁碟使用了 {$m[1]}%".($avail ? "，還有 {$avail} 可用" : '')."。";
+            // 優先 macOS 的資料卷（/ 是 sealed 系統卷、永遠 ~3%），再退回根目錄 /
+            // 注意只取「第一個」百分比 = 容量使用率（macOS 行尾還有 iused% 會誤抓成 0%）
+            $lines = preg_split('/\R/', $out);
+            foreach (['#\s/System/Volumes/Data$#', '#\s/$#'] as $mountPat) {
+                foreach ($lines as $line) {
+                    $line = rtrim($line);
+                    if (preg_match($mountPat, $line) && preg_match('/(\d+)%/', $line, $m)) {
+                        $avail = preg_match('/([\d.]+\s*[KMGT]i?)\s+\d+%/', $line, $a) ? $a[1] : '';
+
+                        return "{$targetLabel} 的磁碟使用了 {$m[1]}%".($avail ? "，還有 {$avail} 可用" : '')."。";
+                    }
                 }
             }
 
-            return "已查到 {$targetLabel} 的磁碟用量，詳細列在畫面上。";
+            return "已查到 {$targetLabel} 的磁碟用量，需要明細可以再跟我說。";
+        }
+        if ($key === 'mem') {
+            foreach (preg_split('/\R/', $out) as $line) {
+                // Linux free -h：Mem: 總量 已用 可用…
+                if (preg_match('/^Mem:\s+(\S+)\s+(\S+)/', trim($line), $m)) {
+                    return "{$targetLabel} 的記憶體共 {$m[1]}，用了 {$m[2]}。";
+                }
+                // macOS top：PhysMem: 15G used (…), 1G unused
+                if (stripos($line, 'PhysMem') !== false && preg_match('/(\S+)\s+used.*?(\S+)\s+unused/i', $line, $m)) {
+                    return "{$targetLabel} 的記憶體用了 {$m[1]}，剩 {$m[2]} 可用。";
+                }
+            }
+        }
+        if ($key === 'cpu' && trim($out) !== '' && ! str_contains($out, '（')) {
+            $line = trim(preg_split('/\R/', trim($out))[0]);
+            if (preg_match('/load averages?:\s*([\d.]+)/i', $line, $m)) {
+                $up = preg_match('/up\s+([^,]+)/i', $line, $u) ? '，已開機 '.trim($u[1]) : '';
+
+                return "{$targetLabel} 的 CPU 負載 {$m[1]}{$up}。";
+            }
         }
 
-        return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，詳細列在畫面上。";
+        return "已查到 {$targetLabel} 的".($key === 'mem' ? '記憶體' : ($key === 'cpu' ? 'CPU 負載' : '系統'))."狀態，需要明細可以再跟我說。";
+    }
+
+    /** 從「播放周杰倫的歌」抽出歌名/歌手；抽不出（如「放點音樂」）回空字串。 */
+    private function extractMusicQuery(string $t): string
+    {
+        $q = $t;
+        $q = preg_replace('/(請|请|麻煩|麻烦|幫我|帮我|幫忙|帮忙|可以|可不可以|能不能|然後|然后|接著|接着)/u', '', $q);
+        $q = preg_replace('/在.{1,10}(上面|上|那邊|那边)/u', '', $q);
+        $q = preg_replace('/(播放|聽一下|听一下|聽|听|播|放點|放点|放一首|放些|放|搜尋|搜寻|搜索|找一下|找)/u', '', $q);
+        $q = preg_replace('/(的歌曲|的歌|歌曲|的音樂|的音乐|音樂|音乐|\bmusic\b|\bplay\b|一首|一些|一下)/iu', '', $q);
+        $q = trim(preg_replace('/[，。！？,.!?\s]+/u', ' ', $q));
+
+        return mb_strlen($q) >= 2 ? $q : '';
     }
 
     /** 口語句子 → GUI 白名單 key（chrome/firefox/terminal/calculator/files/settings/editor）或 null。 */
