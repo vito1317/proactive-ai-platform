@@ -127,11 +127,15 @@ class VoiceAgentController extends Controller
         if ($n === '') {
             return null;
         }
+        // 瀏覽器一律用本機實際裝的（server 有 chromium-browser，沒有 google-chrome）；
+        // 用 sh 候選串：有 google-chrome 就用，否則退 chromium-browser/chromium
+        $browser = "sh -c 'command -v google-chrome >/dev/null && exec google-chrome || command -v chromium-browser >/dev/null && exec chromium-browser || exec chromium'";
         $map = [
-            'chrome' => 'google-chrome', 'google chrome' => 'google-chrome', 'google' => 'google-chrome',
-            'googlechrome' => 'google-chrome', '谷歌' => 'google-chrome', '瀏覽器' => 'google-chrome', '浏览器' => 'google-chrome',
+            'chrome' => $browser, 'google chrome' => $browser, 'google' => $browser,
+            'googlechrome' => $browser, '谷歌' => $browser, '瀏覽器' => $browser, '浏览器' => $browser,
+            'chromium' => 'chromium-browser',
             'firefox' => 'firefox', '火狐' => 'firefox',
-            'edge' => 'microsoft-edge', 'safari' => 'google-chrome',
+            'edge' => 'microsoft-edge', 'safari' => $browser,
             'terminal' => 'gnome-terminal', '終端' => 'gnome-terminal', '終端機' => 'gnome-terminal', '终端' => 'gnome-terminal',
             'vscode' => 'code', 'vs code' => 'code', 'code' => 'code', '編輯器' => 'code',
             'calculator' => 'gnome-calculator', '計算機' => 'gnome-calculator', '计算器' => 'gnome-calculator',
