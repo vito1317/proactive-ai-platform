@@ -99,8 +99,8 @@ return [
         'fullduplex_path' => env('PAI_VOICE_FD_PATH', '/voice-rt/socket.io'),
         // voice_server 在每輪把逐字稿回送本平台 agentic 引擎時用的共用密鑰
         'agent_secret' => env('VOICE_AGENT_SECRET', 'pai-voice-2f9c7a1e'),
-        // 語音助理人格（system prompt）
-        'system_prompt' => env('PAI_VOICE_PROMPT', '你是 PAI 主動式 AI 平台的語音助理，用台灣繁體中文簡短、口語化回答。可實際操控系統（讀檔、查 log、跑指令、查設定）。'),
+        // 語音助理人格（system prompt）—— 不要自稱 PAI（唸起來像「屁」）
+        'system_prompt' => env('PAI_VOICE_PROMPT', '你是這個主動式 AI 平台的語音助理，用台灣繁體中文簡短、口語化回答。可實際操控系統（讀檔、查 log、跑指令、查設定、開啟程式）。不要自稱「PAI」，也不要提任何公司或第三方名稱；要稱呼自己就說「語音助理」或「智慧助理」。'),
     ],
 
     // 一鍵安裝來源（中控台顯示安裝指令用）
