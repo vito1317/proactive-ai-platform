@@ -22,14 +22,24 @@ const props = defineProps({
 /* ---------- 全雙工語音 ---------- */
 const voice = useVoiceChat();
 const voiceTranscript = ref('');
-const voiceReply = ref('');
+const voiceMsgs = ref([]);   // 語音回合即時轉文字（輸入逐字稿 + AI 回覆）顯示成聊天泡泡
+let voiceSeq = 0;
 function toggleVoice() {
     if (voice.active.value) { voice.stop(); return; }
     voice.start(
-        { url: props.voice.url || undefined, path: props.voice.path, mode: props.voice.mode || 'hybrid', prompt: props.voice.prompt, conversationId: props.conversation.id },
+        { url: props.voice.url || undefined, path: props.voice.path, mode: props.voice.mode || 'agent', prompt: props.voice.prompt, conversationId: props.conversation.id },
         {
-            onTranscript: (t) => { voiceTranscript.value = t; },
-            onAiText: (t) => { voiceReply.value = t; },
+            onTranscript: (t) => {
+                if (!t) return;
+                voiceTranscript.value = t;
+                voiceMsgs.value.push({ id: 'v-u-' + (++voiceSeq), role: 'user', content: t, meta: { source: 'voice' } });
+                scrollDown();
+            },
+            onAiText: (t) => {
+                if (!t) return;
+                voiceMsgs.value.push({ id: 'v-a-' + (++voiceSeq), role: 'assistant', content: t, meta: { source: 'voice' } });
+                scrollDown();
+            },
             onStep: (s) => { steps.value.push(s); },
             onError: () => {},
         },
@@ -76,7 +86,7 @@ async function trackEvent(id) {
 }
 
 const view = computed(() => {
-    const list = [...props.messages];
+    const list = [...props.messages, ...voiceMsgs.value];
     if (sending.value) {
         list.push({ id: 'pending-u', role: 'user', content: lastSent.value });
         list.push({ id: 'pending-a', role: 'assistant', content: streamed.value, streaming: true });
