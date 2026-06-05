@@ -52,7 +52,13 @@ class VoiceAgentController extends Controller
         if ($direct = $this->directCommand($transcript)) {
             $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
 
-            return response()->json(['reply' => $direct['reply'], 'steps' => [$direct['step'] ?? '⚡ 直接執行'], 'meta' => $direct['meta'], 'conversation_id' => $conv->id]);
+            return response()->json([
+                'reply' => $direct['reply'],          // 顯示用（含技術細節）
+                'speech' => $direct['speech'] ?? $direct['reply'], // 朗讀用（乾淨口語）
+                'steps' => [$direct['step'] ?? '⚡ 直接執行'],
+                'meta' => $direct['meta'],
+                'conversation_id' => $conv->id,
+            ]);
         }
 
         // 用與 SSE / TG / LINE 相同的路由 → 可閒聊也可實際跑技能操控系統
@@ -80,10 +86,27 @@ class VoiceAgentController extends Controller
 
         return response()->json([
             'reply' => $reply,
+            'speech' => $this->speechClean($reply), // 朗讀用：去掉指令/路徑/網址/emoji，避免 TTS 念出怪聲
             'steps' => $steps,
             'meta' => $meta,
             'conversation_id' => $conv->id,
         ]);
+    }
+
+    /** 把回覆清成「適合朗讀」的乾淨口語：去除程式碼/路徑/網址/emoji/技術符號。 */
+    private function speechClean(string $text): string
+    {
+        $t = $text;
+        $t = preg_replace('/```.*?```/su', '', $t);                 // 程式碼區塊
+        $t = preg_replace('/`[^`]*`/u', '', $t);                    // 行內 code
+        $t = preg_replace('#https?://\S+#u', '網址', $t);            // 網址
+        $t = preg_replace('#(?:sudo |/)[\w./@\-]+#u', '', $t);       // 指令/絕對路徑
+        $t = preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-\x{21FF}\x{2B00}-\x{2BFF}]/u', '', $t); // emoji/符號
+        $t = preg_replace('/[（(][^）)]*detached[^）)]*[）)]/iu', '', $t); // (detached) 之類
+        $t = preg_replace('/\s+/u', ' ', $t);
+        $t = trim($t, " 。.·、,，\t\n");
+
+        return $t !== '' ? $t : $text;
     }
 
     /**
@@ -108,9 +131,11 @@ class VoiceAgentController extends Controller
                 return null;
             }
             $result = $skill->run(['command' => $cmd]);
+            $label = $this->appLabel($t);
 
             return [
-                'reply' => "好，已在主節點幫你開啟了。{$result}",
+                'reply' => "好，已在主節點幫你開啟「{$label}」🚀（{$result}）",  // 顯示含細節
+                'speech' => "好的，已經幫你打開{$label}了。",                      // 朗讀乾淨口語
                 'meta' => ['category' => 'skill', 'skill' => 'open-app', 'direct' => true, 'command' => $cmd],
                 'step' => "🚀 直接啟動：{$cmd}",
             ];
@@ -145,6 +170,27 @@ class VoiceAgentController extends Controller
         }
 
         return null; // 非已知 GUI app → 交回 agentic（可能是別的操作）
+    }
+
+    /** 由口語句子推出友善的 app 名稱（給朗讀用）。 */
+    private function appLabel(string $transcript): string
+    {
+        $n = mb_strtolower($transcript);
+        $labels = [
+            'chrome' => 'Chrome', '谷歌' => 'Chrome', '瀏覽器' => '瀏覽器', '浏览器' => '瀏覽器', 'chromium' => 'Chrome',
+            'safari' => 'Chrome', 'edge' => 'Chrome', 'firefox' => 'Firefox', '火狐' => 'Firefox',
+            '終端' => '終端機', '终端' => '終端機', 'terminal' => '終端機',
+            '計算機' => '計算機', '计算器' => '計算機', 'calculator' => '計算機',
+            '檔案' => '檔案', 'files' => '檔案', '設定' => '設定', 'settings' => '設定',
+            '記事本' => '記事本', '編輯器' => '編輯器',
+        ];
+        foreach ($labels as $k => $v) {
+            if (str_contains($n, $k)) {
+                return $v;
+            }
+        }
+
+        return '程式';
     }
 
     /** 主節點圖形 session 的使用者（可由 config 覆寫）。 */
