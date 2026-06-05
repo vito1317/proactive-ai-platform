@@ -49,10 +49,14 @@ class VoiceAgentController extends Controller
         }
 
         $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
-        $conv->addMessage('user', $transcript, ['source' => 'voice']);
+        $geo = $data['geo'] ?? null;
+        $geoPlace = $geo ? $this->reverseGeocode((float) $geo['lat'], (float) $geo['lng']) : '';
+        $conv->addMessage('user', $transcript, array_filter([
+            'source' => 'voice', 'geo' => $geo, 'geo_place' => $geoPlace !== '' ? $geoPlace : null,
+        ]));
 
         // 直達指令：明確的「打開/開啟 X」直接跑 open-app，不繞 LLM（快又不會被反問）
-        if ($direct = $this->directCommand($transcript, $data['geo'] ?? null, $conv)) {
+        if ($direct = $this->directCommand($transcript, $geo, $conv)) {
             $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
 
             return response()->json([
@@ -117,6 +121,26 @@ class VoiceAgentController extends Controller
         ]);
     }
 
+    /** 反查地名（Nominatim/OSM，免金鑰；快取一天）。失敗回空字串。 */
+    private function reverseGeocode(float $lat, float $lng): string
+    {
+        $key = 'geo:rev:'.round($lat, 3).','.round($lng, 3);
+
+        return (string) \Illuminate\Support\Facades\Cache::remember($key, 86400, function () use ($lat, $lng) {
+            try {
+                $r = \Illuminate\Support\Facades\Http::timeout(5)
+                    ->withHeaders(['User-Agent' => 'pai-voice/1.0'])
+                    ->get('https://nominatim.openstreetmap.org/reverse', [
+                        'lat' => $lat, 'lon' => $lng, 'format' => 'json', 'accept-language' => 'zh-TW', 'zoom' => 16,
+                    ]);
+
+                return (string) ($r->json('display_name') ?? '');
+            } catch (\Throwable) {
+                return '';
+            }
+        });
+    }
+
     /** 清掉無效 UTF-8（LLM 截斷的多位元組字會讓 json_encode 直接炸 500）。 */
     private function utf8(string $s): string
     {
@@ -157,10 +181,14 @@ class VoiceAgentController extends Controller
                 return;
             }
             $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
-            $conv->addMessage('user', $transcript, ['source' => 'voice']);
+            $geo = $data['geo'] ?? null;
+            $geoPlace = $geo ? $this->reverseGeocode((float) $geo['lat'], (float) $geo['lng']) : '';
+            $conv->addMessage('user', $transcript, array_filter([
+                'source' => 'voice', 'geo' => $geo, 'geo_place' => $geoPlace !== '' ? $geoPlace : null,
+            ]));
 
             // 直達指令／重型背景任務：結果立即一次回（本來就快）
-            if ($direct = $this->directCommand($transcript, $data['geo'] ?? null, $conv)) {
+            if ($direct = $this->directCommand($transcript, $geo, $conv)) {
                 $conv->addMessage('assistant', $direct['reply'], array_merge($direct['meta'], ['source' => 'voice']));
                 $emit('step', ['text' => $direct['step'] ?? '⚡ 直接執行']);
                 $emit('done', [
@@ -330,6 +358,35 @@ class VoiceAgentController extends Controller
                 'speech' => $fail ? $this->guiFailSpeech($targetLabel) : '好的，已經停止播放了。',
                 'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'media_stop', 'target' => $target],
                 'step' => "⏹ 停止播放@{$targetLabel}",
+            ];
+        }
+
+        // 導航/路程：「導航到X」「開車去X要多久」「去X怎麼走」→ 開 Google Maps 路線（起點=目前定位）
+        $navDest = null;
+        $navMode = 'driving';
+        if (preg_match('/(導航|导航)\s*(到|去)?\s*(.{1,30}?)[。!！?？]?$/u', $t, $m)) {
+            $navDest = trim($m[3]);
+        } elseif (preg_match('/(開車|开车|騎車|骑车|走路|步行)(去|到)(.{1,30}?)(要|需要|大概)?\s*(多久|多長時間|多长时间|多遠|多远)/u', $t, $m)) {
+            $navDest = trim($m[3]);
+            $navMode = str_contains($m[1], '走') || str_contains($m[1], '步') ? 'walking' : 'driving';
+        } elseif (preg_match('/(去|到)\s*(.{1,30}?)\s*(怎麼走|怎么走|怎麼去|怎么去)/u', $t, $m)) {
+            $navDest = trim($m[2]);
+        }
+        if ($navDest !== null && $navDest !== '' && ! preg_match('/^(那|這|这|哪|過去|过去)/u', $navDest)) {
+            [$target, $targetLabel] = $this->targetGateway($t);
+            $params = ['api' => '1', 'destination' => $navDest, 'travelmode' => $navMode];
+            if ($geo !== null) {
+                $params['origin'] = $geo['lat'].','.$geo['lng'];
+            }
+            $url = 'https://www.google.com/maps/dir/?'.http_build_query($params);
+            $res = $this->runGui($target, 'open', 'chrome', $url);
+            $fail = $this->guiFailed($res);
+
+            return [
+                'reply' => "好，已在{$targetLabel}打開到「{$navDest}」的路線（{$res}）",
+                'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，到{$navDest}的路線已經打開了，預估時間看地圖上的標示。",
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'navigate', 'target' => $target],
+                'step' => "🧭 導航：{$navDest}@{$targetLabel}",
             ];
         }
 

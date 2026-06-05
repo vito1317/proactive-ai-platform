@@ -139,6 +139,16 @@ class ChatResponder
             .'若使用者是要實際操作或查真實資料，系統已會自動把那種訊息導去實際執行——所以你只要正常回答即可，不要替它空講要做什麼。'
             .'其餘一般問題就依下方已提供的資訊（領域包摘要、對話脈絡）誠實作答。';
 
+        // 語音帶來的瀏覽器定位 → 回答附近/路程/交通問題時有出發點
+        $lastUser = $conv->messages()->where('role', 'user')->latest('id')->first();
+        $g = $lastUser->meta['geo'] ?? null;
+        if (is_array($g) && isset($g['lat'], $g['lng'])) {
+            $place = (string) ($lastUser->meta['geo_place'] ?? '');
+            $content .= "\n\n[使用者目前位置（瀏覽器定位）] "
+                .($place !== '' ? $place.'；' : '')."座標 {$g['lat']},{$g['lng']}。"
+                .'回答附近、路程、交通時間等問題時，以這裡為出發點（用地名描述，不要唸座標）。';
+        }
+
         // 注入目前已載入的領域包摘要，讓 AI 能回答「有哪些領域 / 各做什麼」
         $packs = array_values(app(DomainRegistry::class)->all());
         if ($packs !== []) {
