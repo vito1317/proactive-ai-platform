@@ -9,6 +9,7 @@ use App\Http\Controllers\NotifyController;
 use App\Http\Controllers\PacksController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\TelegramWebhookController;
+use App\Http\Controllers\GatewayController;
 use App\Http\Controllers\VoiceAgentController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
@@ -32,6 +33,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/chat/queue', [ChatController::class, 'queue'])->name('chat.queue'); // SSE 失敗時的非串流後備
     Route::post('/stream/chat', [ChatStreamController::class, 'stream'])->name('chat.stream'); // SSE 串流
     Route::get('/chat/events/{event}', [ChatController::class, 'eventStatus'])->name('chat.event_status');
+
+    Route::get('/voice', fn () => \Inertia\Inertia::render('Voice'))->name('voice');
+    Route::get('/mcp/health', [ConsoleController::class, 'mcpHealth'])->name('mcp.health'); // 節點連線狀態
 
     Route::post('/console/ask', [ConsoleController::class, 'ask'])->name('console.ask');
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');
@@ -72,6 +76,8 @@ Route::post('/webhooks/line', [LineWebhookController::class, 'handle'])->name('w
 
 // 全雙工語音橋接：voice_server 把每輪逐字稿回送 agentic 引擎（共用密鑰驗證，CSRF 豁免）
 Route::post('/api/voice/agent', [VoiceAgentController::class, 'handle'])->name('voice.agent');
+
+Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
 
 // L1 感知層事件入口（外部系統推送，公開、CSRF 豁免，見 bootstrap/app.php）
 Route::post('/webhooks/{source}', [WebhookController::class, 'store']);

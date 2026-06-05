@@ -23,7 +23,7 @@ function copyInstall() {
 
 const copiedGw = ref(false);
 function copyGateway() {
-    navigator.clipboard?.writeText(`curl -fsSL ${props.gatewayInstallCommand} | bash`);
+    navigator.clipboard?.writeText(props.gatewayInstallCommand);
     copiedGw.value = true;
     setTimeout(() => { copiedGw.value = false; }, 1500);
 }
@@ -308,14 +308,14 @@ const actionStatusClass = (x) => ({
                             </button>
                         </div>
 
-                        <p class="mt-4 text-xs text-slate-400">🛰️ 在其他節點 / Mac 安裝 Gateway（讓本平台能在該節點跑指令、開程式）：</p>
+                        <p class="mt-4 text-xs text-slate-400">🛰️ 在其他節點 / Mac 自動接線（裝 gateway + cloudflared 通道 + 自動註冊，一行搞定）：</p>
                         <div class="mt-2 flex items-center gap-2">
-                            <code class="flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-sky-300">curl -fsSL {{ gatewayInstallCommand }} | bash</code>
+                            <code class="flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[11px] text-sky-300">{{ gatewayInstallCommand }}</code>
                             <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs text-slate-300 hover:text-white" @click="copyGateway">
                                 {{ copiedGw ? '✓ 已複製' : '複製' }}
                             </button>
                         </div>
-                        <p class="mt-1 text-[10px] text-slate-500">裝好後會印出該節點的密鑰；到「設定／MCP」用它的網址＋密鑰註冊即可。macOS 用 open -a 開 app、Linux 進圖形 session。</p>
+                        <p class="mt-1 text-[10px] text-slate-500">在目標機器（Mac/Linux）貼上執行：自動裝好、開 cloudflared 公網通道、註冊成本平台節點。之後說「在 &lt;主機名&gt; 上打開 chrome」即可。管理：<code class="text-slate-400">./gw status|stop|port N</code></p>
                     </div>
                 </section>
 

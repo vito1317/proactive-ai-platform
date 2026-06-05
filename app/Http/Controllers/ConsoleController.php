@@ -44,9 +44,41 @@ class ConsoleController extends Controller
 
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),
-            // Node Gateway 一鍵安裝（在別的節點/Mac 上跑，讓本平台能操控該節點）
-            'gatewayInstallCommand' => rtrim((string) config('app.url'), '/').'/gateway/install.sh',
+            // Node Gateway 自動接線一鍵指令（裝 gateway + cloudflared 通道 + 自動註冊到 PAI）
+            'gatewayInstallCommand' => $this->gatewayConnectCommand(),
         ]);
+    }
+
+    /** 即時回報各 MCP / Gateway 節點的連線狀態（給主控台節點卡片用）。 */
+    public function mcpHealth(): \Illuminate\Http\JsonResponse
+    {
+        $manager = app(\App\Pai\Mcp\McpManager::class);
+        $nodes = $manager->all()->map(function ($s) use ($manager) {
+            $t0 = microtime(true);
+            $res = $manager->test($s->name);
+            return [
+                'name' => $s->name,
+                'url' => $s->url,
+                'ok' => (bool) ($res['ok'] ?? false),
+                'ms' => (int) round((microtime(true) - $t0) * 1000),
+                'tools' => collect($s->fresh()->tools ?? [])->pluck('name')->all(),
+                'error' => ($res['ok'] ?? false) ? null : ($res['message'] ?? '未知'),
+            ];
+        })->values();
+
+        return response()->json(['nodes' => $nodes]);
+    }
+
+    /** Gateway 自動接線一鍵指令（含註冊 token）。 */
+    private function gatewayConnectCommand(): string
+    {
+        $base = rtrim((string) config('app.url'), '/');
+        $token = \App\Http\Controllers\GatewayController::registerSecret();
+
+        return sprintf(
+            'curl -fsSL %s/gateway/connect.sh | REGISTER_TOKEN=%s PAI_BASE=%s bash',
+            $base, $token, $base,
+        );
     }
 
     private function installCommand(): string
