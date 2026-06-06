@@ -16,6 +16,22 @@ class GatewayController extends Controller
 {
     public function __construct(private readonly McpManager $manager, private readonly Settings $settings) {}
 
+    /**
+     * 配對碼：給 Android/其他節點「一鍵配對」用。回 base64({pai, token}) + QR 圖網址。
+     * 需登入（中控台）才能取得——內含註冊 Token，不可公開。
+     */
+    public function pairCode(Request $request): JsonResponse
+    {
+        $payload = [
+            "pai" => rtrim((string) config("app.url"), "/"),
+            "token" => self::registerSecret(),
+        ];
+        $code = base64_encode(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+        $qr = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=".urlencode($code);
+
+        return response()->json(["code" => $code, "qr" => $qr, "pai" => $payload["pai"]]);
+    }
+
     /** 取得（或產生）註冊密鑰。 */
     public static function registerSecret(): string
     {
