@@ -134,7 +134,9 @@ class SkillRunner
         $seen = [];           // 已執行過的 (工具+參數) 簽章，偵測重複呼叫
 
         // 連續操作步數上限：讀後台 react.max_steps（使用者可調），而非寫死
-        $maxRounds = max(1, min(20, (int) $this->settings->get('react.max_steps', self::MAX_ROUNDS)));
+        // 連續操作步數上限：讀後台 react.max_steps（瀏覽器訂票/排行程等多步任務需要較高）。
+        // 硬上限 60（防失控），預設見 config。
+        $maxRounds = max(1, min(60, (int) $this->settings->get('react.max_steps', self::MAX_ROUNDS)));
 
         for ($round = count($obs); $round < $maxRounds; $round++) {
             $d = $this->decide($conv, $message, $obs, $forcedTool, $onThought);

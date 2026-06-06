@@ -42,7 +42,7 @@ return [
 
     // ReAct 迴圈上限（含反思）
     'react' => [
-        'max_steps' => (int) env('PAI_REACT_MAX_STEPS', 6),
+        'max_steps' => (int) env('PAI_REACT_MAX_STEPS', 30),
         'reflect' => (bool) env('PAI_REACT_REFLECT', true),
     ],
 
