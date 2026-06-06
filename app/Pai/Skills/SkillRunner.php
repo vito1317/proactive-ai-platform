@@ -138,8 +138,21 @@ class SkillRunner
         // 硬上限 60（防失控），預設見 config。
         $maxRounds = max(1, min(60, (int) $this->settings->get('react.max_steps', self::MAX_ROUNDS)));
 
+        $plan = [];        // 代理的待辦清單（尚未完成的步驟）
+        $planGuard = 0;    // 「待辦未完成卻想 finish」被擋的次數（防死循環）
+        $planNote = '';    // 下一輪要注入的提醒（待辦未完成時用）
+
         for ($round = count($obs); $round < $maxRounds; $round++) {
-            $d = $this->decide($conv, $message, $obs, $forcedTool, $onThought);
+            $d = $this->decide($conv, $message, $obs, $forcedTool, $onThought, $planNote);
+            $planNote = '';
+            // 更新待辦清單（代理每輪回報剩餘步驟）→ 即時顯示進度
+            if (is_array($d['plan'] ?? null)) {
+                $newPlan = array_values(array_filter(array_map(fn ($x) => trim((string) $x), $d['plan'])));
+                if ($newPlan !== $plan && $newPlan !== []) {
+                    $step('📋 待辦：'.implode('｜', array_slice($newPlan, 0, 6)));
+                }
+                $plan = $newPlan;
+            }
             $action = is_array($d) ? (string) ($d['action'] ?? 'finish') : 'finish';
 
             // 完成 / 沒有合適工具
@@ -151,6 +164,17 @@ class SkillRunner
                 if (! $picked && ! $forcedTool && $this->isEmptyPromise($final)) {
                     $forcedTool = true;
                     $round--; // 不耗用步數
+
+                    continue;
+                }
+
+                // 待辦清單還沒做完卻想結束 → 擋下，逼它完成剩餘項目（最多擋 3 次防死循環）
+                if ($plan !== [] && $obs !== [] && $planGuard < 3) {
+                    $planGuard++;
+                    $planNote = '你的待辦清單還沒完成，剩下：'.implode('、', $plan)
+                        .'。這一輪【絕對不可以 finish】，請直接選對應工具完成下一項待辦。';
+                    $forcedTool = true;
+                    $round--;
 
                     continue;
                 }
@@ -246,7 +270,7 @@ class SkillRunner
     }
 
     /** 讓 AI 依目前觀察決定下一步工具（帶最近對話脈絡，避免上下文丟失）。 */
-    private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false, ?callable $onThought = null): ?array
+    private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false, ?callable $onThought = null, string $planNote = ''): ?array
     {
         $catalog = $this->registry->catalog();
         $obsText = '';
@@ -266,6 +290,9 @@ class SkillRunner
             ? "⚠️ 上一輪你只是說要做某事卻沒有選工具（空談承諾）。這一輪 action【絕對不可以是 finish】，"
                 ."必須直接選出能達成使用者目標的工具去執行。\n"
             : '';
+        if ($planNote !== '') {
+            $forceNote .= '⚠️ '.$planNote."\n";
+        }
 
         $nowTw = now('Asia/Taipei');
         $nowLine = $nowTw->format('Y-m-d H:i').'（週'.['日', '一', '二', '三', '四', '五', '六'][$nowTw->dayOfWeek].'，台灣時間）';
@@ -294,8 +321,11 @@ class SkillRunner
         {$obsText}
 
         決定下一步，只輸出 JSON：
-        {"thought":"簡述","action":"工具名 或 finish","args":{...},"final":"當 action=finish 時，依對話脈絡用繁體中文直接回答使用者；有工具結果就據實解讀、沒有就正常對答，不要編造"}
+        {"thought":"簡述","plan":["待辦步驟1","待辦步驟2"],"action":"工具名 或 finish","args":{...},"final":"當 action=finish 時，依對話脈絡用繁體中文直接回答使用者；有工具結果就據實解讀、沒有就正常對答，不要編造"}
         重要規則：
+        - **plan = 待辦清單**：把「達成使用者目標還沒做完的步驟」逐條列出（如訂機票：填出發地、填目的地、填日期、按搜尋、讀結果）。
+          每完成一步就把它從 plan 移除，只保留還沒做的。**plan 還有項目時，action 絕對不可以是 finish**——要繼續選工具完成下一項。
+          純閒聊或一步就能完成的事，plan 可給 []。
         - **只有在「需要真實系統資料」或「需要實際執行操作」時才用工具**。單純問答、聊天、釐清、或你不確定該用哪個工具 → 一律 action=finish，並在 final 直接回答使用者的問題（根據對話脈絡），不要硬湊工具。
         - 嚴禁為了用工具而用工具：不要用 list-domains / describe-domain 去回答與領域包無關的問題。
         - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
