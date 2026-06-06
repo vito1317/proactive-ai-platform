@@ -6,9 +6,24 @@ import DOMPurify from 'dompurify';
 import { useVoiceChat } from '@/composables/useVoiceChat';
 
 marked.setOptions({ gfm: true, breaks: true });
+// LLM 偶爾輸出 LaTeX（如 $\rightarrow$、$\times$）→ 轉成 unicode；保留貨幣 $（後接數字的不動）
+function delatex(s) {
+    return String(s)
+        .replace(/\\(?:long)?(?:right)?arrow\b/g, '→')
+        .replace(/\\to\b/g, '→')
+        .replace(/\\(?:long)?leftarrow\b/g, '←').replace(/\\gets\b/g, '←')
+        .replace(/\\leftrightarrow\b/g, '↔')
+        .replace(/\\times\b/g, '×').replace(/\\div\b/g, '÷').replace(/\\pm\b/g, '±')
+        .replace(/\\leq?\b/g, '≤').replace(/\\geq?\b/g, '≥').replace(/\\neq\b/g, '≠')
+        .replace(/\\approx\b/g, '≈').replace(/\\cdot\b/g, '·')
+        .replace(/\\text\{([^}]*)\}/g, '$1')
+        .replace(/\\\\/g, ' ')
+        .replace(/\\[a-zA-Z]+\b/g, '')      // 其餘未知 LaTeX 指令移除
+        .replace(/\$(?!\s*\d)/g, '');        // 去掉非貨幣的 $（後面不接數字，如 math 分隔符）
+}
 // 回覆常含 markdown（行程表/清單/粗體）→ 渲染後顯示（與 /chat 同一套，已消毒）
 function md(text) {
-    try { return DOMPurify.sanitize(marked.parse(String(text))); } catch { return String(text); }
+    try { return DOMPurify.sanitize(marked.parse(delatex(text))); } catch { return String(text); }
 }
 
 const voice = useVoiceChat();
