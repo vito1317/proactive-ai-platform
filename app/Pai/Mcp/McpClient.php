@@ -115,8 +115,10 @@ class McpClient
             $headers['Mcp-Session-Id'] = $sid;
         }
 
-        // connectTimeout 短（隧道死掉/換網址時快速失敗，不要卡滿 timeout）；總 timeout 留給實際指令
+        // connectTimeout 短（隧道死掉/換網址時快速失敗，不要卡滿 timeout）；總 timeout 留給實際指令。
+        // 強制 IPv4：本機對 trycloudflare 只解析到 IPv6 且 IPv6 對外不通 → 不強制會 6ms 立即失敗（cURL 7）。
         $resp = $this->egress->client()->withHeaders($headers)
+            ->withOptions(['curl' => [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]])
             ->connectTimeout(5)->timeout(20)->post($url, $payload);
         $newSid = $resp->header('Mcp-Session-Id') ?: $sid;
 
