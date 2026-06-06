@@ -23,7 +23,7 @@ export function useVoiceChat() {
     let micMuteUntil = 0; // AI 播放期間暫停麥克風（純時間判斷，自動過期）
     let playCtx = null, playHead = 0, speakingTimer = null;
     let bargeIn = true;        // 允許在 AI 念回覆時插話打斷
-    const BARGE_RMS = 0.08;    // 打斷門檻：麥克風音量超過此值才視為真人插話（過濾回授）
+    const BARGE_RMS = 0.06;    // 打斷門檻：麥克風音量超過此值才視為真人插話（過濾回授）
 
     function toggleMute() {
         isMuted.value = !isMuted.value;
