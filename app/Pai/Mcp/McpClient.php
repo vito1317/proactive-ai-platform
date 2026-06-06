@@ -115,7 +115,9 @@ class McpClient
             $headers['Mcp-Session-Id'] = $sid;
         }
 
-        $resp = $this->egress->client()->withHeaders($headers)->timeout(25)->post($url, $payload);
+        // connectTimeout 短（隧道死掉/換網址時快速失敗，不要卡滿 timeout）；總 timeout 留給實際指令
+        $resp = $this->egress->client()->withHeaders($headers)
+            ->connectTimeout(5)->timeout(20)->post($url, $payload);
         $newSid = $resp->header('Mcp-Session-Id') ?: $sid;
 
         return [$resp, $this->decode($resp->body()), $newSid];
