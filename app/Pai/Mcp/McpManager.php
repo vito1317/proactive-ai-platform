@@ -59,9 +59,11 @@ class McpManager
             return ['ok' => false, 'message' => "找不到 MCP server「{$name}」。"];
         }
         $res = $this->client->listTools($server->url, $server->headers ?? []);
+        // 成功 → 啟用並刷新工具；失敗 → 只記錯誤，不自動停用
+        // （隧道漂移的短暫空窗常觸發這裡，停用會讓節點「斷一下就永久消失」，恢復後也回不來）
         $server->update($res['ok']
             ? ['enabled' => true, 'tools' => $res['tools'], 'last_error' => null]
-            : ['enabled' => false, 'last_error' => $res['error'] ?? '連線失敗']);
+            : ['last_error' => $res['error'] ?? '連線失敗']);
 
         return $res['ok']
             ? ['ok' => true, 'message' => "「{$name}」正常，".count($res['tools']).' 個工具已更新。']

@@ -267,11 +267,20 @@ class SkillRunner
 
         $nowTw = now('Asia/Taipei');
         $nowLine = $nowTw->format('Y-m-d H:i').'（週'.['日', '一', '二', '三', '四', '五', '六'][$nowTw->dayOfWeek].'，台灣時間）';
+        // 預設操作節點（使用者桌面）：瀏覽器/開關程式等「要讓使用者看得到」的操作優先走這台
+        $defGw = (string) app(\App\Pai\Settings\Settings::class)->get('voice.default_gateway', 'local');
+        $gwHint = '';
+        if ($defGw !== '' && $defGw !== 'local') {
+            $gwHint = "\n        【重要】使用者的桌面節點是「{$defGw}」。需要「使用者看得到」的操作"
+                ."（用瀏覽器查資料/操作網頁 browser_*、開關程式 open_app、播放音樂）"
+                ."【一律優先選用 mcp__{$defGw}__ 開頭的工具】，不要用主節點(gateway)那套——"
+                ."主節點是無頭伺服器，使用者看不到，瀏覽器還會被網站擋人機驗證。";
+        }
         $prompt = <<<PROMPT
         你是「主動式 AI 平台」（指揮 AI）的操作代理，可「連續」使用工具達成使用者目標（例如：看磁碟滿了→再執行清理→再確認）。
         現在時間：{$nowLine}
         這個平台是個人 AI 指揮中心：語音/文字下指令，就能跨節點開關程式、執行指令、查系統狀態、播放音樂、上網查資料、跑背景任務並推播結果（Telegram/LINE/語音念回）。
-        被問「你是什麼/能做什麼」時據此誠實介紹，不要說你只能做監控或資安。
+        被問「你是什麼/能做什麼」時據此誠實介紹，不要說你只能做監控或資安。{$gwHint}
         可用工具：
         {$catalog}
 
