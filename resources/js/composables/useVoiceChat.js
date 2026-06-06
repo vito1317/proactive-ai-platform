@@ -22,6 +22,8 @@ export function useVoiceChat() {
     let handlers = {}, cfg = {};
     let micMuteUntil = 0; // AI 播放期間暫停麥克風（純時間判斷，自動過期）
     let playCtx = null, playHead = 0, speakingTimer = null;
+    let bargeIn = true;        // 允許在 AI 念回覆時插話打斷
+    const BARGE_RMS = 0.08;    // 打斷門檻：麥克風音量超過此值才視為真人插話（過濾回授）
 
     function toggleMute() {
         isMuted.value = !isMuted.value;
@@ -85,11 +87,8 @@ export function useVoiceChat() {
             const out0 = e.outputBuffer.getChannelData(0);
             for (let i = 0; i < out0.length; i++) out0[i] = 0; // 永遠輸出靜音
             if (!socket || !socket.connected) return;
-            // AI 播放期間（+尾音緩衝，純時間判斷會自動過期）/ 手動靜音 → 不送麥克風（防回授）
-            if (isMuted.value || performance.now() < micMuteUntil) {
-                volume.value = 0;
-                return;
-            }
+            if (isMuted.value) { volume.value = 0; return; }
+
             const input = e.inputBuffer.getChannelData(0);
             let pcmFloat;
             if (nativeSR !== 16000) {
@@ -107,12 +106,17 @@ export function useVoiceChat() {
                 const s = Math.max(-1, Math.min(1, pcmFloat[i]));
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
             }
-            volume.value = Math.sqrt(sum / pcmFloat.length);
+            const rms = Math.sqrt(sum / pcmFloat.length);
+            volume.value = rms;
+
+            // AI 播放期間：預設可打斷（barge-in）——只有「明顯人聲」（音量高於自播回授）才送出，
+            // 觸發後端中斷正在念的回覆；低音量回授丟棄，避免 AI 自我打斷。關閉打斷則完全靜音。
+            const inPlayback = performance.now() < micMuteUntil;
+            if (inPlayback) {
+                if (!bargeIn || rms < BARGE_RMS) return;
+            }
 
             socket.emit('audio', JSON.stringify({ audio: Array.from(new Uint8Array(pcm16.buffer)), sample_rate: 16000 }));
-            // 輸出靜音，避免回授
-            const out = e.outputBuffer.getChannelData(0);
-            for (let i = 0; i < out.length; i++) out[i] = 0;
         };
 
         status.value = '請說話';
@@ -144,9 +148,12 @@ export function useVoiceChat() {
         if (socket && socket.connected) socket.emit('prompt_text', promptPayload());
     }
 
+    function setBargeIn(enabled) { bargeIn = !!enabled; }
+
     async function start(c = {}, cbs = {}) {
         if (active.value) return;
         cfg = c; handlers = cbs;
+        if (c.bargeIn !== undefined) bargeIn = !!c.bargeIn;
         active.value = true;
         status.value = '連線中…';
 
@@ -197,5 +204,5 @@ export function useVoiceChat() {
         socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
-    return { active, connected, speaking, status, volume, isMuted, toggleMute, setWake, start, stop };
+    return { active, connected, speaking, status, volume, isMuted, toggleMute, setWake, setBargeIn, start, stop };
 }
