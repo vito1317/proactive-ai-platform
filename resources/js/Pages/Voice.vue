@@ -38,6 +38,14 @@ function toggleWake() {
     voice.setWake(wakeEnabled.value);
 }
 
+// 打斷（barge-in）：AI 念回覆時可開口插話打斷。外放回授嚴重時可關。預設開。
+const bargeEnabled = ref(localStorage.getItem('voice.barge') !== '0');
+function toggleBarge() {
+    bargeEnabled.value = !bargeEnabled.value;
+    localStorage.setItem('voice.barge', bargeEnabled.value ? '1' : '0');
+    voice.setBargeIn(bargeEnabled.value);
+}
+
 // 將 useVoiceChat 的狀態映射為能量球的四種視覺狀態
 const visualStatus = computed(() => {
     if (!voice.active.value || !voice.connected.value) return 'idle';
@@ -57,7 +65,7 @@ function toggleConnection() {
         agentSteps.value = [];
         
         voice.start(
-            { mode: 'hybrid', wake: wakeEnabled.value, session: 'voice-' + (window.crypto?.randomUUID?.() || Date.now()) }, // 穩定 session id：多輪+背景任務共用同對話、結果可念回
+            { mode: 'hybrid', wake: wakeEnabled.value, bargeIn: bargeEnabled.value, session: 'voice-' + (window.crypto?.randomUUID?.() || Date.now()) }, // 穩定 session id：多輪+背景任務共用同對話、結果可念回
             {
                 onAiText: (t) => { transcript.value = t; agentSteps.value = []; }, // 回覆到了→清步驟，不再卡 thinking
                 onTranscript: (t) => { 
@@ -184,6 +192,12 @@ onUnmounted(() => {
                         class="w-12 h-12 rounded-full flex items-center justify-center transition-colors border border-white/10"
                         :class="wakeEnabled ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-300'">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                </button>
+
+                <button @click="toggleBarge" :title="bargeEnabled ? '可打斷：開（AI 念到一半可開口插話）' : '可打斷：關（外放回授嚴重時用）'"
+                        class="w-12 h-12 rounded-full flex items-center justify-center transition-colors border border-white/10"
+                        :class="bargeEnabled ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-slate-300'">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z"></path></svg>
                 </button>
 
                 <button @click="router.visit('/settings')" class="w-12 h-12 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-slate-300 transition-colors border border-white/10">
