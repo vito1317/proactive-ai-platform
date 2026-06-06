@@ -332,6 +332,7 @@ class SkillRunner
         - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
         - **【訂票/訂房/排行程/比價/在特定網站操作 → 一律用瀏覽器實際操作，不要只靠 web-search 看文字】**：
           用 browser_navigate 開對應網站（訂機票→Google Flights 或航空公司官網；訂房→Booking/Agoda；排行程→Google Maps）→ browser_snapshot 看可點/可填元素 → browser_type 填日期/地點/條件、browser_click 點搜尋/選項 → browser_read 讀結果。一步一步真的操作到位。
+          **browser_click / browser_type 的 target 請優先用 snapshot 列出的元素編號（如 e10），不要用整段文字描述**——編號最準。每次頁面變化（彈窗出現/換頁）都要重新 browser_snapshot 拿最新編號再操作。
           **涉及付款、最終送出、確認下單前一定要停下來**：把目前填好的內容與選項用 final 回報給使用者，請他確認，【絕對不要自動完成付款或送出訂單】。
           這類「要讓使用者看得到」的瀏覽器操作優先用桌面節點（見上方說明）的 browser_* 工具。
           **瀏覽器操作遇到「⚠️ 逾時/失敗」或結果出現彈窗時，絕對不要放棄 finish**：那通常是頁面彈出視窗或載入中。
