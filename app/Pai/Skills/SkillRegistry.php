@@ -21,6 +21,7 @@ use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
 use App\Pai\Skills\Builtin\RestartWorkersSkill;
 use App\Pai\Skills\Builtin\ExecuteCodeSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
+use App\Pai\Skills\Builtin\SendEmailSkill;
 use App\Pai\Skills\Builtin\StopTaskSkill;
 use App\Pai\Skills\Builtin\TailLogsSkill;
 use App\Pai\Skills\Builtin\ToggleDomainSkill;
@@ -55,6 +56,7 @@ class SkillRegistry
         AnswerFromWebSkill::class,
         WebSearchSkill::class,
         WebFetchSkill::class,
+        SendEmailSkill::class,
         // MCP 工具伺服器管理
         AddMcpServerSkill::class,
         ListMcpServersSkill::class,

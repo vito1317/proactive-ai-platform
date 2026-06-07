@@ -37,3 +37,44 @@ Schedule::call(function () {
         $task->fire();
     }
 })->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
+
+// 晨間主動簡報：每天 briefing.time（預設 08:00）推天氣+行程+未讀信
+Schedule::call(function () {
+    $settings = app(\App\Pai\Settings\Settings::class);
+    if (! (bool) $settings->get('briefing.enabled', true)) {
+        return;
+    }
+    $time = (string) ($settings->get('briefing.time') ?: '08:00');
+    if (now('Asia/Taipei')->format('H:i') !== $time) {
+        return;
+    }
+    $key = 'pai:briefing:'.now('Asia/Taipei')->format('Y-m-d');
+    if (\Illuminate\Support\Facades\Cache::add($key, 1, 86400)) {
+        \App\Pai\Schedule\BriefingJob::dispatch();
+    }
+})->everyMinute()->name('pai:morning-briefing')->withoutOverlapping();
+
+// 主動提醒：行事曆事件快開始（lead 分鐘內）→ 自動提醒一次
+Schedule::call(function () {
+    $cal = app(\App\Pai\Integrations\Calendar::class);
+    if (! $cal->configured()) {
+        return;
+    }
+    $lead = (int) (app(\App\Pai\Settings\Settings::class)->get('reminder.lead_min') ?: 15);
+    $now = now('Asia/Taipei');
+    foreach ($cal->upcoming(2) as $e) {
+        if ($e['all_day']) {
+            continue;
+        }
+        $mins = $now->diffInMinutes($e['start'], false);
+        if ($mins < 0 || $mins > $lead) {
+            continue;
+        }
+        $key = 'pai:evt-remind:'.md5($e['summary'].$e['start']->toIso8601String());
+        if (\Illuminate\Support\Facades\Cache::add($key, 1, 7200)) {
+            $when = $e['start']->format('H:i');
+            $loc = $e['location'] !== '' ? "（{$e['location']}）" : '';
+            app(\App\Pai\Notify\Notifier::class)->dispatch("⏰ 提醒：{$when} 有「{$e['summary']}」{$loc}，剩 {$mins} 分鐘。");
+        }
+    }
+})->everyMinute()->name('pai:calendar-reminders')->withoutOverlapping();

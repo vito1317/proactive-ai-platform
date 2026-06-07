@@ -531,6 +531,51 @@ class VoiceAgentController extends Controller
             ];
         }
 
+        // ── 晨間簡報 / 行事曆 / Gmail ───────────────────────────────────────────
+        // 報今天概況 / 晨報
+        if (preg_match('/(今天概況|今日概況|早報|晨報|晨間簡報|報一下今天|今天的簡報|today.{0,4}briefing)/iu', $t)) {
+            $text = \App\Pai\Schedule\BriefingJob::build(
+                app(\App\Pai\Settings\Settings::class), app(\App\Pai\Integrations\Calendar::class), app(\App\Pai\Integrations\Mailer::class));
+
+            return ['reply' => $text, 'speech' => $this->speechClean($text),
+                'meta' => ['category' => 'skill', 'skill' => 'briefing', 'direct' => true], 'step' => '☀️ 產生今日簡報'];
+        }
+        // 行事曆查詢：「今天/明天有什麼行程」「我的行程」
+        if (preg_match('/(行程|行事曆|行事历|日程|今天.{0,3}(做什麼|有什麼事)|有什麼會|有什麼安排)/u', $t) && ! preg_match('/(排程|定時)/u', $t)) {
+            $cal = app(\App\Pai\Integrations\Calendar::class);
+            if (! $cal->configured()) {
+                return ['reply' => '還沒設定行事曆。到中控台設定 calendar.ics_url（Google 行事曆的「秘密 iCal 網址」）就能看行程了。',
+                    'speech' => '還沒設定行事曆，請先到中控台貼上 Google 行事曆的私人 iCal 網址。',
+                    'meta' => ['category' => 'skill', 'skill' => 'calendar', 'direct' => true], 'step' => '📅 行事曆未設定'];
+            }
+            $tomorrow = (bool) preg_match('/(明天|明日|tomorrow)/iu', $t);
+            $events = $tomorrow
+                ? $cal->events(now('Asia/Taipei')->addDay()->startOfDay(), now('Asia/Taipei')->addDay()->endOfDay())
+                : $cal->today();
+            $day = $tomorrow ? '明天' : '今天';
+            $list = collect($events)->map(fn ($e) => '・'.\App\Pai\Integrations\Calendar::line($e))->implode("\n");
+
+            return ['reply' => $events ? "📅 {$day}的行程：\n{$list}" : "{$day}沒有行程。",
+                'speech' => $events ? "{$day}有 ".count($events)." 個行程：".collect($events)->take(6)->map(fn ($e) => \App\Pai\Integrations\Calendar::line($e))->implode('；') : "{$day}沒有行程。",
+                'meta' => ['category' => 'skill', 'skill' => 'calendar', 'direct' => true], 'step' => "📅 查{$day}行程"];
+        }
+        // 未讀信：「有幾封新信」「唸一下未讀信」
+        if (preg_match('/(未讀.{0,2}信|新.{0,1}郵件|未讀郵件|有.{0,2}新信|幾封信|收信|gmail|電子郵件)/iu', $t) && ! preg_match('/(寄|傳|發|送)/u', $t)) {
+            $mail = app(\App\Pai\Integrations\Mailer::class);
+            $u = $mail->unread(8);
+            if (! ($u['ok'] ?? false)) {
+                return ['reply' => '讀信失敗或還沒設定 Gmail：'.($u['error'] ?? '未知').'（到中控台設 mail.address + mail.app_password）',
+                    'speech' => '還沒設定 Gmail，請到中控台填入信箱與應用程式密碼。',
+                    'meta' => ['category' => 'skill', 'skill' => 'mail', 'direct' => true], 'step' => '📧 讀信失敗'];
+            }
+            $cnt = $u['count'] ?? 0;
+            $list = collect($u['items'])->map(fn ($it) => "・{$it['from']}：{$it['subject']}")->implode("\n");
+
+            return ['reply' => $cnt > 0 ? "📧 未讀信 {$cnt} 封：\n{$list}" : '沒有未讀信。',
+                'speech' => $cnt > 0 ? "有 {$cnt} 封未讀信，包括：".collect($u['items'])->take(5)->map(fn ($it) => "{$it['from']}寄來的{$it['subject']}")->implode('；') : '沒有未讀信。',
+                'meta' => ['category' => 'skill', 'skill' => 'mail', 'direct' => true], 'step' => '📧 讀未讀信'];
+        }
+
         // 學會的技能查詢：「你學會了什麼」「你會做哪些事」
         if (preg_match('/(你?學會了什麼|你?学会了什么|學會哪些|学会哪些|你會做哪些|你会做哪些|有哪些技能|你的技能)/u', $t)) {
             $skills = \App\Pai\Skills\LearnedSkill::orderByDesc('uses')->limit(15)->get();

@@ -36,6 +36,14 @@ class Settings
         'notify.line.secret' => ['label' => 'LINE Channel Secret（雙向接收驗證用）', 'type' => 'secret', 'group' => '通知'],
         'notify.line.token' => ['label' => 'LINE Channel Access Token', 'type' => 'secret', 'group' => '通知'],
         'notify.line.to' => ['label' => 'LINE 推播對象 (userId/groupId)', 'type' => 'string', 'group' => '通知'],
+        // 行事曆 / Gmail / 晨間簡報
+        'calendar.ics_url' => ['label' => 'Google 行事曆「私人 iCal 網址」(secret address in iCal format)', 'type' => 'string', 'group' => '行事曆/郵件'],
+        'mail.address' => ['label' => 'Gmail 信箱', 'type' => 'string', 'group' => '行事曆/郵件'],
+        'mail.app_password' => ['label' => 'Gmail 應用程式密碼（Google 帳號→安全性→應用程式密碼）', 'type' => 'secret', 'group' => '行事曆/郵件'],
+        'briefing.enabled' => ['label' => '啟用每日晨間簡報', 'type' => 'bool', 'group' => '行事曆/郵件'],
+        'briefing.time' => ['label' => '晨間簡報時間 (HH:MM)', 'type' => 'string', 'group' => '行事曆/郵件'],
+        'briefing.place' => ['label' => '簡報天氣地點（預設台北）', 'type' => 'string', 'group' => '行事曆/郵件'],
+        'reminder.lead_min' => ['label' => '行事曆事件提前提醒分鐘數', 'type' => 'int', 'group' => '行事曆/郵件', 'min' => 1, 'max' => 120],
     ];
 
     public function get(string $key, mixed $default = null): mixed
