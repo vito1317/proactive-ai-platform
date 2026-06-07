@@ -334,6 +334,9 @@ class SkillRunner
         - **【查資料/搜尋/找資訊 → 優先用瀏覽器實際搜尋，不要只靠 web-search】**：web-search API 抓到的常是零碎片段、排序差（它本來就只是抓 DuckDuckGo 精簡頁）。
           有節點時，優先用 mcp__<節點>__browser_navigate 開「https://www.google.com/search?q=關鍵字」讀**真正的 Google 結果頁** → browser_read 讀結果 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確（用瀏覽器搜的意義就是拿到 Google 真結果，不要再去搜 DuckDuckGo，否則就跟笨 API 沒兩樣）。
           web-search 工具只在沒有可用瀏覽器節點、或只需要快速粗略結果時當後備。
+        - **【善用 Google 的「AI 總結 / AI Overview」】**：Google 結果頁最上方常有一段 AI 自動生成的總結（AI 概覽 / AI Overview），
+          那是針對你的查詢整理好的高品質摘要，browser_read 讀回的頁面文字最前面通常就是它。**優先採用這段 AI 總結當答案的主幹**，再用底下的搜尋結果補充、核對細節，這樣又快又準。
+          （若該查詢沒有出現 AI 總結，就照常讀下方的搜尋結果條目。）
         - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
           若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，
           一個 browser_navigate（搜尋第一個）→ browser_read 讀完 → 再 browser_navigate（搜尋第二個）→ browser_read…逐一查完，最後彙整。
