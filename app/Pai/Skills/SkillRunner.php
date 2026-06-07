@@ -22,9 +22,37 @@ class SkillRunner
         private readonly Settings $settings,
     ) {}
 
+    /** MCP 工具（mcp__<node>__<tool>）的簡短友善標籤——不要把給 AI 看的整段工具描述顯示給使用者。 */
+    private function mcpStepLabel(string $name): ?string
+    {
+        if (! str_starts_with($name, 'mcp__')) {
+            return null;
+        }
+        $tool = (string) (explode('__', $name)[2] ?? $name);
+        $map = [
+            'browser_navigate' => '🌐 開啟網頁…', 'browser_read' => '📄 讀取網頁內容…',
+            'browser_snapshot' => '🔍 分析網頁元素…', 'browser_click' => '🖱️ 點擊網頁…',
+            'browser_type' => '⌨️ 輸入文字…', 'browser_back' => '↩️ 返回上一頁…',
+            'browser_reload' => '🔄 重新載入網頁…', 'browser_current_url' => '🌐 取得目前網址…',
+            'maps_route' => '🗺️ 開啟地圖路線…', 'open_url' => '🌐 開啟連結…', 'open_app' => '🚀 開啟 App…',
+            'show_document' => '📋 在手機顯示文件…', 'device_location' => '📍 取得手機定位…',
+            'phone_notify' => '🔔 發送手機通知…', 'phone_speak' => '🔊 手機念出…',
+            'set_volume' => '🔊 調整音量…', 'set_brightness' => '☀️ 調整亮度…',
+            'flashlight' => '🔦 手電筒…', 'battery_status' => '🔋 查電量…',
+            'clipboard_set' => '📋 複製到剪貼簿…', 'clipboard_get' => '📋 讀取剪貼簿…',
+            'share_text' => '↗️ 分享…', 'play_music' => '🎵 播放音樂…',
+        ];
+
+        return $map[$tool] ?? ('🔧 '.$tool.'…');
+    }
+
     /** 把技能對應成一句「正在做什麼」的步驟說明（給前端活動軌跡）。 */
     private function stepLabel(Skill $skill): string
     {
+        if ($mcp = $this->mcpStepLabel($skill->name())) {
+            return $mcp;
+        }
+
         return [
             'web-search' => '🔍 上網搜尋…',
             'answer-from-web' => '🔍 上網搜尋並閱讀資料…',
