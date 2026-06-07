@@ -546,10 +546,15 @@ class VoiceAgentController extends Controller
             || preg_match('/(音樂|音乐|歌|影片|视频|視頻)\s*(停|暫停|暂停|關|关)/u', $t);
         if ($isStop) {
             [$target, $targetLabel] = $this->targetGateway($t);
-            $cmd = "osascript -e 'tell application \"Google Chrome\" to close active tab of front window' 2>/dev/null"
-                ." || playerctl -a pause 2>/dev/null || echo no-media";
-            $out = trim($this->runExec($target, $cmd));
-            $fail = str_contains($out, '未連線') || str_contains($out, '執行失敗');
+            // 手機節點 → 送系統媒體鍵暫停（對任何在播的音樂 App 都有效）
+            if ($rv = $this->reverseCall($target, 'media_control', ['action' => 'pause'])) {
+                [$out, $fail] = $rv;
+            } else {
+                $cmd = "osascript -e 'tell application \"Google Chrome\" to close active tab of front window' 2>/dev/null"
+                    ." || playerctl -a pause 2>/dev/null || echo no-media";
+                $out = trim($this->runExec($target, $cmd));
+                $fail = str_contains($out, '未連線') || str_contains($out, '執行失敗');
+            }
 
             return [
                 'reply' => $fail ? "（{$targetLabel} 沒連上線，停不了播放）" : "好，已在{$targetLabel}停止播放。",
@@ -676,6 +681,20 @@ class VoiceAgentController extends Controller
         if ($mq !== null) {
             [$target, $targetLabel] = $this->targetGateway($t);
             $q = $mq;
+            // 手機節點 → 叫起原生音樂 App 直接播（不開 WebView 網頁）
+            $rv = $this->reverseCall($target, $q !== '' ? 'play_music' : 'open_url',
+                $q !== '' ? ['query' => $q] : ['url' => 'https://music.youtube.com/']);
+            if ($rv !== null) {
+                [$res, $fail] = $rv;
+                $what = $q !== '' ? "「{$q}」" : '音樂';
+
+                return [
+                    'reply' => "好，已在{$targetLabel}播放{$what}（{$res}）",
+                    'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你播放{$what}了。",
+                    'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'music', 'target' => $target],
+                    'step' => "🎵 播放音樂".($q !== '' ? "：{$q}" : '')."@{$targetLabel}",
+                ];
+            }
             $playing = false;
             $url = 'https://music.youtube.com/';
             if ($q !== '') {
@@ -1022,6 +1041,21 @@ class VoiceAgentController extends Controller
     }
 
     /** 在指定節點開/關 GUI app。local→pai-gui-open；遠端→該 MCP gateway 的 open_app/exec。 */
+    /** 目標若是反向（手機）節點 → 直接呼叫其工具，回 [結果文字, 是否失敗]；非反向節點回 null（走原本路徑）。 */
+    private function reverseCall(string $target, string $tool, array $args): ?array
+    {
+        $server = \App\Pai\Mcp\McpServer::where('name', $target)->where('enabled', true)->first();
+        if (! $server || ! str_starts_with((string) $server->url, 'reverse://')) {
+            return null;
+        }
+        $r = app(\App\Pai\Mcp\McpClient::class)->callTool($server->url, $server->headers ?? [], $tool, $args);
+
+        return [
+            ($r['ok'] ?? false) ? (string) ($r['text'] ?? '已執行') : ('遠端執行失敗：'.($r['error'] ?? '未知')),
+            ! ($r['ok'] ?? false),
+        ];
+    }
+
     private function runGui(string $target, string $action, string $key, ?string $arg): string
     {
         if ($target === 'local') {
