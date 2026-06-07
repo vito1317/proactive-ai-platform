@@ -25,7 +25,7 @@ class SelfHealJob implements ShouldQueue
     /** @var array<string,array{url:string,supervisor:string}> */
     private const SERVICES = [
         '本地 LLM (llama-server)' => ['url' => 'http://127.0.0.1:10003/health', 'supervisor' => ''],
-        '語音 (MiniCPM-o)' => ['url' => 'http://127.0.0.1:8891/healthz', 'supervisor' => 'minicpm-o-voice'],
+        '語音 (MiniCPM-o)' => ['url' => 'http://127.0.0.1:8891/socket.io/?EIO=4&transport=polling', 'supervisor' => 'minicpm-o-voice'],
     ];
 
     public function handle(Notifier $notifier): void
@@ -48,15 +48,14 @@ class SelfHealJob implements ShouldQueue
 
     private function ping(string $url): bool
     {
+        // 只要連得上、收到「任何」HTTP 回應就算活著（很多服務沒有 health route，404/400 也代表它在聽）。
+        // 只有連線被拒 / 逾時（拋例外）才算掛掉。
         try {
-            return Http::timeout(6)->get($url)->successful();
+            Http::timeout(6)->get($url);
+
+            return true;
         } catch (Throwable) {
-            // 部分服務沒有 health route → 連得上(任何回應)也算活著
-            try {
-                return Http::timeout(6)->get(preg_replace('#/[^/]*$#', '/', $url))->status() > 0;
-            } catch (Throwable) {
-                return false;
-            }
+            return false;
         }
     }
 
