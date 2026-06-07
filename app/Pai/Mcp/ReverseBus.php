@@ -21,7 +21,7 @@ class ReverseBus
     private const SEEN = 'gwrev:seen:';         // 節點最後上線時間
 
     /** PAI 端：發一個工具呼叫給反向節點，等結果（預設最多 60 秒）。 */
-    public static function call(string $node, string $tool, array $args, int $timeoutSec = 60): array
+    public static function call(string $node, string $tool, array $args, int $timeoutSec = 90): array
     {
         $id = (string) Str::uuid();
         $queue = Cache::get(self::PENDING.$node, []);
