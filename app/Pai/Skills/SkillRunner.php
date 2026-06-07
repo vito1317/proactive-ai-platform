@@ -385,6 +385,10 @@ class SkillRunner
         - **【操作手機 App（LINE / 任何 App）→ 用 screen_* 工具（輔助使用）】**：手機節點可以直接操作整支手機：
           mcp__<手機>__open_app 開 App → screen_snapshot 讀畫面元素（[sN] 編號＋文字）→ screen_click 點擊、screen_type 輸入、screen_swipe 滑動、screen_back 返回——每步操作後都會回最新畫面，照著繼續下一步（和瀏覽器操作同套路）。
           **回覆 LINE / 訊息的最快路徑**：notifications_list 看最近通知 → notification_reply(target=對方名字或 LINE, message=內容) 直接回覆，完全不用打開 App。
+          **【在 LINE 裡傳訊息給特定的人 / 連續傳給不同人】**：每傳完一個人，要先回到「聊天列表」再找下一個人，不要以為還停在原本的聊天室：
+          ① open_app LINE →（若不在聊天列表）連續 screen_back 退回主列表 → ② screen_snapshot 看聊天列表/找到對方名字；找不到就點上方「搜尋」用 screen_type 打名字 →
+          ③ screen_click 點開那個人的聊天室 → ④ screen_click 點訊息輸入框 → screen_type 打字 → screen_click 點「送出/傳送」→ ⑤ screen_snapshot 確認已送出。
+          **換下一個人時：務必先 screen_back 回到聊天列表、重新 screen_snapshot 找新對象**，每換一頁都重新 snapshot 拿最新編號，不要沿用舊畫面的編號。讀不懂畫面就 screen_shot 看圖。
           打電話：phone_call(to=號碼或聯絡人名稱)。播放音樂：play_music(query=歌名/歌手)。暫停/下一首：media_control。
           （這些工具需要使用者開過「通知存取」「協助工具」權限；工具回覆若說未開啟，把那段話轉告使用者請他開啟。）
           **【你看得懂圖片】**：screen_snapshot 元素讀不懂、畫面是圖片/地圖/影片、或不確定畫面長怎樣時，呼叫 screen_shot——
