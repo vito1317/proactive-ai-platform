@@ -161,6 +161,11 @@ class ChatResponder
             $content .= "\n\n[目前已載入的領域包]\n".implode("\n", $lines)
                 ."\n（使用者問起時可據此說明；要看某領域的觸發條件/工具/劇本細節，可用 describe-domain 技能或到「領域包」頁。）";
         }
+        // 跨對話長期記憶（使用者個人事實/偏好）→ 注入，讓 AI 永遠記得你住哪、口味、習慣
+        $mem = app(\App\Pai\Memory\UserMemoryStore::class)->recall($conv->user_id);
+        if ($mem !== '') {
+            $content .= "\n\n[關於使用者的長期記憶（跨對話記住的個人資訊，回答時自然運用，不要每次複誦）]\n".$mem;
+        }
         if ($conv->summary) {
             $content .= "\n\n[先前對話摘要（自動壓縮）]\n".$conv->summary;
         }

@@ -326,7 +326,9 @@ class SkillRunner
         // 最近對話脈絡（讓代理理解多輪上下文，例如「剛剛那個」「再幫我…」）
         $history = $conv->activeMessages()->latest('id')->limit(6)->get()->reverse()
             ->map(fn ($m) => "{$m->role}: ".mb_substr((string) $m->content, 0, 300))->implode("\n");
-        $ctx = ($conv->summary ? "（先前摘要）{$conv->summary}\n" : '').($history !== '' ? $history : '（無）');
+        $mem = app(\App\Pai\Memory\UserMemoryStore::class)->recall($conv->user_id);
+        $ctx = ($mem !== '' ? "（關於使用者的長期記憶，自然運用）\n{$mem}\n" : '')
+            .($conv->summary ? "（先前摘要）{$conv->summary}\n" : '').($history !== '' ? $history : '（無）');
 
         // 上一輪只「空談要做某事」卻沒選工具 → 這一輪硬性要求選出工具
         $forceNote = $forceTool

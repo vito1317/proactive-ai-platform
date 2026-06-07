@@ -112,6 +112,7 @@ class VoiceAgentController extends Controller
         $reply = $this->utf8($reply); // LLM/工具輸出可能夾壞 UTF-8 → json_encode 會 500
         $conv->addMessage('assistant', $reply, array_merge($meta, ['source' => 'voice', 'trace' => $steps]));
         $this->maybeShowDoc($transcript, $reply);
+        \App\Pai\Memory\ExtractMemoryJob::dispatch($transcript, $reply, $conv->user_id); // 背景抽取長期記憶
 
         return response()->json([
             'reply' => $reply,
@@ -527,6 +528,46 @@ class VoiceAgentController extends Controller
                 'speech' => '好的，已排定'.($recur === 'daily' ? '每天' : '').$runAt->format('n月j日 H點i分').'，到時我會自動幫你'.$task.'。',
                 'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'create'],
                 'step' => "⏰ 排定 {$when}：{$task}",
+            ];
+        }
+
+        // ── 長期記憶（明確指令）────────────────────────────────────────────────
+        $uid = $conv?->user_id;
+        $memStore = app(\App\Pai\Memory\UserMemoryStore::class);
+        // 記住：「記住我住汐止」「記得我喜歡吃魯肉飯」「幫我記一下…」
+        if (preg_match('/^(請|请)?\s*(記住|记住|記得|记得|幫我記|帮我记|記一下|记一下|幫我記住|帮我记住)\s*(.{2,200})$/u', $t, $m)) {
+            $fact = trim($m[3]);
+            $ok = $memStore->remember($uid, $fact);
+
+            return [
+                'reply' => $ok ? "好，我記住了：「{$fact}」" : "這件事我已經記得了。",
+                'speech' => $ok ? "好的，我記住了。" : "這個我已經記得了。",
+                'meta' => ['category' => 'skill', 'skill' => 'memory', 'direct' => true, 'action' => 'remember'],
+                'step' => "🧠 記住：{$fact}",
+            ];
+        }
+        // 忘記：「忘記我住汐止」「不要記得…」
+        if (preg_match('/^(請|请)?\s*(忘記|忘记|別記|别记|不要記|不要记|刪除記憶|删除记忆)\s*(.{2,100})$/u', $t, $m)) {
+            $n = $memStore->forget($uid, trim($m[3]));
+
+            return [
+                'reply' => $n > 0 ? "好，已經忘記關於「".trim($m[3])."」的 {$n} 筆記憶。" : "我本來就沒有記這件事。",
+                'speech' => $n > 0 ? "好的，我已經忘記了。" : "我本來就沒記這件事。",
+                'meta' => ['category' => 'skill', 'skill' => 'memory', 'direct' => true, 'action' => 'forget'],
+                'step' => '🧠 忘記記憶',
+            ];
+        }
+        // 查看：「你記得我哪些事」「我有哪些記憶」
+        if (preg_match('/(你記得|你记得|記得我|记得我|我的記憶|我的记忆|有哪些記憶|有哪些记忆|知道我哪些|關於我)/u', $t)) {
+            $all = $memStore->all($uid);
+
+            return [
+                'reply' => $all->isEmpty() ? '我還沒記住關於你的長期資訊。你可以說「記住我住汐止」。'
+                    : "🧠 我記得關於你的事：\n".$all->map(fn ($m) => '・'.$m->content)->implode("\n"),
+                'speech' => $all->isEmpty() ? '我還沒記住關於你的事，你可以說記住我住哪裡之類的。'
+                    : '我記得：'.$all->take(8)->map(fn ($m) => $m->content)->implode('；'),
+                'meta' => ['category' => 'skill', 'skill' => 'memory', 'direct' => true, 'action' => 'list'],
+                'step' => '🧠 查看長期記憶',
             ];
         }
 
