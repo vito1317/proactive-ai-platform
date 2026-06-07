@@ -559,12 +559,29 @@ class VoiceAgentController extends Controller
                 'step' => '⏰ 取消定時任務',
             ];
         }
+        // 改時間：「把(剛剛的)提醒改成早上七點半」「那個定時任務改到明天九點」「提醒時間改成…」
+        if (preg_match('/(改成|改到|改為|改为|改時間|改时间|重新排|重排|改一下時間)/u', $t)
+            && preg_match('/(提醒|定時|定时|排程|那個|那个|剛剛|刚刚|任務|任务|時間|时间)/u', $t)) {
+            $last = \App\Pai\Schedule\ScheduledTask::where('status', 'pending')->latest('id')->first();
+            if ($last && ($sched = $this->parseSchedule($t.' 提醒'))) {
+                [$runAt, $recur] = $sched;
+                $last->update(['run_at' => $runAt->copy()->utc(), 'recur' => $recur ?? $last->recur]);
+
+                return [
+                    'reply' => "⏰ 已把「{$last->command}」改到 ".$runAt->format('n月j日 H:i').($recur === 'daily' ? '（每天）' : ''),
+                    'speech' => '好的，已經改到'.$runAt->format('n月j日 H點i分').'了。',
+                    'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'reschedule'],
+                    'step' => "⏰ 改時間 → {$runAt->format('n/j H:i')}",
+                ];
+            }
+        }
+
         // 建立：「明天早上8:30幫我開導航到台中」「10分鐘後提醒我關火」「每天早上8點報天氣」
         // （提到「行事曆/日曆」→ 那是要建行事曆事件，不是定時自動執行任務，讓給下方的行事曆分支）
         if (! preg_match('/(行事曆|行事历|日曆|日历|行程表)/u', $t) && ($sched = $this->parseSchedule($t))) {
             [$runAt, $recur, $task] = $sched;
             \App\Pai\Schedule\ScheduledTask::create([
-                'command' => $task, 'run_at' => $runAt, 'recur' => $recur,
+                'command' => $task, 'run_at' => $runAt->copy()->utc(), 'recur' => $recur,
                 'conversation_id' => $conv?->id, 'status' => 'pending',
             ]);
             $when = ($recur === 'daily' ? '每天 ' : '').$runAt->format('n月j日 H:i');
