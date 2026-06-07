@@ -868,17 +868,19 @@ class VoiceAgentController extends Controller
     private function extractNearbyQuery(string $t): string
     {
         $q = $t;
-        $q = preg_replace('/(請問|请问|幫我|帮我|麻煩|麻烦|找一下|找找|查一下|搜尋|搜寻|搜索)/u', '', $q);
+        $q = preg_replace('/(請問|请问|幫我|帮我|麻煩|麻烦|找一下|找找|查一下|搜尋|搜寻|搜索|看一下|看一看|看看|瞧瞧|逛逛|介紹|介绍|想要|想吃|想喝|想找|帶我|带我|去)/u', '', $q);
         $q = preg_replace('/(我們|我们|我家|咱們|咱们|我)(這|这)?/u', '', $q);  // 「我附近…」的代名詞
         $q = preg_replace('/(這附近|这附近|附近的|附近|周邊|周边)/u', '', $q);
         $q = preg_replace('/(有什麼|有什么|有沒有|有没有|哪裡有|哪里有|哪邊有|哪边有|推薦|推荐|好喝的|好吃的|好玩的|不錯的|不错的)/u', '', $q);
         $q = trim(preg_replace('/[，。！？,.!?\s]+/u', ' ', $q));
         $q = preg_replace('/^(有沒有|有没有|有)/u', '', $q);
         $q = preg_replace('/[吧啊喔哦嘛呀啦囉咯呢了的嗎吗]+$/u', '', $q);
-        if (mb_strlen($q) < 2) {  // 單字殘渣（我/吃）不當搜尋詞，改用語氣預設
-            // 抽不出關鍵詞 → 依語氣給合理預設
-            return preg_match('/(好玩|景點|景点|逛)/u', $t) ? '景點'
-                : (preg_match('/(好喝|飲料|饮料|咖啡)/u', $t) ? '飲料店' : '餐廳');
+        // 殘渣是純語助/單動詞（看/看看/吃/喝/玩/逛…）不當搜尋詞，改用語意預設
+        $filler = ['看', '看看', '吃', '喝', '玩', '逛', '有', '要', '想', '的'];
+        if (mb_strlen($q) < 2 || in_array($q, $filler, true)) {
+            return preg_match('/(好玩|景點|景点|逛|景色|風景|风景)/u', $t) ? '景點'
+                : (preg_match('/(好喝|飲料|饮料|咖啡|手搖|手摇)/u', $t) ? '飲料店'
+                : (preg_match('/(好吃|美食|吃|餐|飯|饭|麵|面|食|宵夜)/u', $t) ? '美食' : '餐廳'));
         }
 
         return $q;
@@ -1041,7 +1043,12 @@ class VoiceAgentController extends Controller
         // 手機節點開「瀏覽器」→ 用內建受控瀏覽器 browser_navigate（手機常沒裝 Chrome app）
         if ($action !== 'close' && $isReverse && $key === 'chrome') {
             $url = $arg ?: 'https://www.google.com';
-            $r = $client->callTool($server->url, $server->headers ?? [], 'browser_navigate', ['url' => $url]);
+            // 地圖網址用原生 Google 地圖 App 開（WebView 渲染不出地圖）；其他網址走內建瀏覽器
+            if (preg_match('#//(www\.)?google\.[^/]+/maps|//maps\.google\.|//maps\.app\.goo\.gl#i', $url)) {
+                $r = $client->callTool($server->url, $server->headers ?? [], 'open_url', ['url' => $url]);
+            } else {
+                $r = $client->callTool($server->url, $server->headers ?? [], 'browser_navigate', ['url' => $url]);
+            }
         } elseif ($action === 'close') {
             $procs = ['chrome' => 'chrom', 'firefox' => 'firefox', 'terminal' => 'erminal', 'calculator' => 'alculator', 'files' => 'inder', 'settings' => 'ettings', 'editor' => 'edit'];
             $r = $isReverse
