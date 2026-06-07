@@ -1013,9 +1013,16 @@ class VoiceAgentController extends Controller
             return "找不到節點「{$target}」";
         }
         $client = app(\App\Pai\Mcp\McpClient::class);
-        if ($action === 'close') {
+        $isReverse = str_starts_with((string) $server->url, 'reverse://'); // 手機（Android）節點
+        // 手機節點開「瀏覽器」→ 用內建受控瀏覽器 browser_navigate（手機常沒裝 Chrome app）
+        if ($action !== 'close' && $isReverse && $key === 'chrome') {
+            $url = $arg ?: 'https://www.google.com';
+            $r = $client->callTool($server->url, $server->headers ?? [], 'browser_navigate', ['url' => $url]);
+        } elseif ($action === 'close') {
             $procs = ['chrome' => 'chrom', 'firefox' => 'firefox', 'terminal' => 'erminal', 'calculator' => 'alculator', 'files' => 'inder', 'settings' => 'ettings', 'editor' => 'edit'];
-            $r = $client->callTool($server->url, $server->headers ?? [], 'exec', ['cmd' => 'pkill -if '.escapeshellarg($procs[$key] ?? $key)]);
+            $r = $isReverse
+                ? $client->callTool($server->url, $server->headers ?? [], 'browser_close', [])
+                : $client->callTool($server->url, $server->headers ?? [], 'exec', ['cmd' => 'pkill -if '.escapeshellarg($procs[$key] ?? $key)]);
         } else {
             $a = ['name' => $key];
             if ($arg) {
