@@ -331,6 +331,9 @@ class SkillRunner
         - 嚴禁為了用工具而用工具：不要用 list-domains / describe-domain 去回答與領域包無關的問題。
         - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
         - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
+        - **【查資料/搜尋/找資訊 → 優先用瀏覽器實際搜尋，不要只靠 web-search】**：web-search API 抓到的常是零碎片段、排序差。
+          有桌面節點時，優先用 mcp__<桌面>__browser_navigate 開「https://www.google.com/search?q=關鍵字」→ browser_read 讀真實結果頁 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確。
+          web-search 工具只在沒有可用瀏覽器節點、或只需要快速粗略結果時當後備。
         - **【訂票/訂房/排行程/比價/在特定網站操作 → 一律用瀏覽器實際操作，不要只靠 web-search 看文字】**：
           用 browser_navigate 開對應網站（訂機票→Google Flights 或航空公司官網；訂房→Booking/Agoda；排行程→Google Maps）→ browser_snapshot 看可點/可填元素 → browser_type 填日期/地點/條件、browser_click 點搜尋/選項 → browser_read 讀結果。一步一步真的操作到位。
           **browser_click / browser_type 的 target 請優先用 snapshot 列出的元素編號（如 e10），不要用整段文字描述**——編號最準。每次頁面變化（彈窗出現/換頁）都要重新 browser_snapshot 拿最新編號再操作。
