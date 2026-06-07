@@ -49,7 +49,7 @@ class Notifier
                 return ['configured' => false, 'ok' => false, 'error' => '無在線手機節點'];
             }
             foreach ($nodes as $n) {
-                ReverseBus::fire($n, 'phone_notify', ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 500)]);
+                ReverseBus::fire($n, 'phone_notify', ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 3000)]);
             }
 
             return ['configured' => true, 'ok' => true, 'error' => null];
