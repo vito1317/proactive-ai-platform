@@ -36,7 +36,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/voice', fn () => \Inertia\Inertia::render('Voice'))->name('voice');
     Route::get('/mcp/health', [ConsoleController::class, 'mcpHealth'])->name('mcp.health'); // 節點連線狀態
-    Route::get('/gateway/pair-code', [\App\Http\Controllers\GatewayController::class, 'pairCode'])->name('gateway.paircode'); // Android 一鍵配對碼
+    Route::get('/api/gateway/pair-code', [\App\Http\Controllers\GatewayController::class, 'pairCode'])->name('gateway.paircode'); // Android 一鍵配對碼（/gateway/ 被反代，改用 /api/）
 
     Route::post('/console/ask', [ConsoleController::class, 'ask'])->name('console.ask');
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');
