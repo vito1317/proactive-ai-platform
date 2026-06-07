@@ -43,27 +43,40 @@ class ConsoleController extends Controller
             'stats' => $this->stats(),
 
             // 自我改進：AI 從成功任務學會的做法（playbook）
-            'learnedSkills' => \App\Pai\Skills\LearnedSkill::orderByDesc('uses')->orderByDesc('updated_at')->limit(50)
-                ->get(['id', 'name', 'when_to_use', 'steps', 'uses'])->toArray(),
+            'learnedSkills' => self::cleanUtf8(\App\Pai\Skills\LearnedSkill::orderByDesc('uses')->orderByDesc('updated_at')->limit(50)
+                ->get(['id', 'name', 'when_to_use', 'steps', 'uses'])->toArray()),
             // 長期記憶：關於使用者的個人事實/偏好
-            'userMemories' => \App\Pai\Memory\UserMemory::orderByDesc('updated_at')->limit(50)
-                ->get(['id', 'category', 'content'])->toArray(),
+            'userMemories' => self::cleanUtf8(\App\Pai\Memory\UserMemory::orderByDesc('updated_at')->limit(50)
+                ->get(['id', 'category', 'content'])->toArray()),
             // #9 LLM 用量觀測（今日/本週 calls、tokens、平均延遲）
             'llmUsage' => \App\Pai\Cognition\LlmUsage::summary(),
-            // 排定的定時任務（pending，依時間排序）
-            'scheduledTasks' => \App\Pai\Schedule\ScheduledTask::where('status', 'pending')->orderBy('run_at')->limit(50)
+            // 排定的定時任務（pending，依時間排序）；command 來自 STT 可能含壞 UTF-8 → 清乾淨避免整頁 JSON 失敗
+            'scheduledTasks' => self::cleanUtf8(\App\Pai\Schedule\ScheduledTask::where('status', 'pending')->orderBy('run_at')->limit(50)
                 ->get()->map(fn ($t) => [
                     'id' => $t->id,
                     'command' => $t->command,
                     'run_at' => $t->run_at->timezone('Asia/Taipei')->format('Y-m-d H:i'),
                     'recur' => $t->recur,
-                ])->all(),
+                ])->all()),
 
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),
             // Node Gateway 自動接線一鍵指令（裝 gateway + cloudflared 通道 + 自動註冊到 PAI）
             'gatewayInstallCommand' => $this->gatewayConnectCommand(),
         ]);
+    }
+
+    /** 遞迴把字串清成合法 UTF-8（丟掉壞位元），避免 STT/LLM 來源的壞編碼害整個 Inertia page JSON 失敗。 */
+    private static function cleanUtf8($v)
+    {
+        if (is_string($v)) {
+            return mb_convert_encoding($v, 'UTF-8', 'UTF-8');
+        }
+        if (is_array($v)) {
+            return array_map([self::class, 'cleanUtf8'], $v);
+        }
+
+        return $v;
     }
 
     /** 取消一個定時任務。 */
