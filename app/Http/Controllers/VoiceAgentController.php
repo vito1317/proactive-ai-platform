@@ -488,6 +488,48 @@ class VoiceAgentController extends Controller
     {
         $t = trim($transcript);
 
+        // ── 定時任務（要在所有分支之前：句子帶時間+任務時先排程，不要立刻執行）────────
+        // 查看：「我有哪些定時任務」「看一下排程」
+        if (preg_match('/(定時|排程|預約|预约)/u', $t) && preg_match('/(哪些|列出|查看|清單|清单|列表|看一下|看看)/u', $t)) {
+            $rows = \App\Pai\Schedule\ScheduledTask::where('status', 'pending')->orderBy('run_at')->limit(10)->get();
+            $list = $rows->map(fn ($r) => '・'.$r->run_at->timezone('Asia/Taipei')->format('m/d H:i')
+                .($r->recur === 'daily' ? '（每天）' : '')."：{$r->command}")->implode("\n");
+
+            return [
+                'reply' => $rows->isEmpty() ? '目前沒有排定的定時任務。' : "⏰ 排定中的任務：\n{$list}",
+                'speech' => $rows->isEmpty() ? '目前沒有排定的定時任務。' : '目前排定 '.$rows->count().' 個任務：'.$rows->map(fn ($r) => $r->run_at->timezone('Asia/Taipei')->format('n月j日H點i分').'，'.$r->command)->implode('；'),
+                'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'list'],
+                'step' => '⏰ 查看定時任務',
+            ];
+        }
+        // 取消：「取消定時任務」「取消明天的排程」
+        if (preg_match('/(取消|刪除|删除)/u', $t) && preg_match('/(定時|排程|預約|预约|提醒)/u', $t)) {
+            $n = \App\Pai\Schedule\ScheduledTask::where('status', 'pending')->update(['status' => 'cancelled']);
+
+            return [
+                'reply' => $n > 0 ? "已取消 {$n} 個定時任務。" : '沒有可取消的定時任務。',
+                'speech' => $n > 0 ? "好的，已取消 {$n} 個定時任務。" : '目前沒有排定中的任務。',
+                'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'cancel'],
+                'step' => '⏰ 取消定時任務',
+            ];
+        }
+        // 建立：「明天早上8:30幫我開導航到台中」「10分鐘後提醒我關火」「每天早上8點報天氣」
+        if ($sched = $this->parseSchedule($t)) {
+            [$runAt, $recur, $task] = $sched;
+            \App\Pai\Schedule\ScheduledTask::create([
+                'command' => $task, 'run_at' => $runAt, 'recur' => $recur,
+                'conversation_id' => $conv?->id, 'status' => 'pending',
+            ]);
+            $when = ($recur === 'daily' ? '每天 ' : '').$runAt->format('n月j日 H:i');
+
+            return [
+                'reply' => "⏰ 已排定 {$when} 執行：「{$task}」",
+                'speech' => '好的，已排定'.($recur === 'daily' ? '每天' : '').$runAt->format('n月j日 H點i分').'，到時我會自動幫你'.$task.'。',
+                'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'create'],
+                'step' => "⏰ 排定 {$when}：{$task}",
+            ];
+        }
+
         // 天氣查詢（open-meteo 免金鑰、真實預報）：「下週台中會下雨嗎」→ 直接回答降雨機率/氣溫
         if (preg_match('/(天氣|天气|下雨|降雨|會不會雨|会不会雨|氣溫|气温|溫度|温度)/u', $t)) {
             if ($w = $this->weatherAnswer($t, $geo)) {
@@ -903,6 +945,88 @@ class VoiceAgentController extends Controller
         }
 
         return $q;
+    }
+
+    /**
+     * 解析「定時任務」語句：時間（明天早上8:30 / 10分鐘後 / 每天8點）+ 任務文字。
+     * 回 [Carbon $runAt, ?string $recur, string $task]；不是定時語句回 null。
+     */
+    private function parseSchedule(string $t): ?array
+    {
+        $now = now('Asia/Taipei');
+        $runAt = null;
+        $recur = null;
+        $matched = '';
+
+        // 「N分鐘後 / N小時後 / 半小時後」
+        if (preg_match('/(半|\d{1,3}|[一二兩三四五六七八九十]+)\s*個?\s*(分鐘|分钟|小時|小时)\s*(後|后|之後|之后)/u', $t, $m)) {
+            $n = $m[1] === '半' ? 0.5 : ($this->zhNum($m[1]) ?? (ctype_digit($m[1]) ? (int) $m[1] : null));
+            if ($n !== null) {
+                $mins = str_contains($m[2], '分') ? (int) ceil($n) : (int) round($n * 60);
+                if ($mins >= 1) {
+                    $runAt = $now->copy()->addMinutes($mins);
+                    $matched = $m[0];
+                }
+            }
+        }
+
+        // 「(每天|今天|明天|後天)(早上|下午…)H點M分 / H:MM」
+        if ($runAt === null && preg_match(
+            '/(每天|每日|今天|明天|後天|后天|大後天|大后天)?\s*(早上|上午|中午|下午|晚上|傍晚|凌晨|半夜)?\s*'
+            .'(\d{1,2}|[一二兩三四五六七八九十]+)\s*[點点:：]\s*(半|\d{1,2})?\s*分?/u', $t, $m)) {
+            $day = $m[1] ?? '';
+            $ampm = $m[2] ?? '';
+            // 沒有日期詞也沒有時段詞、且用的是冒號以外寫法不明確時，要求至少有「點」或日期/時段詞，避免誤觸（如「比例16:9」已被數字規則排除大半）
+            $h = ctype_digit($m[3]) ? (int) $m[3] : ($this->zhNum($m[3]) ?? -1);
+            if ($h >= 0 && $h <= 24 && ($day !== '' || $ampm !== '' || str_contains($m[0], '點') || str_contains($m[0], '点'))) {
+                $min = ($m[4] ?? '') === '半' ? 30 : (int) ($m[4] ?? 0);
+                if (in_array($ampm, ['下午', '晚上', '傍晚'], true) && $h < 12) {
+                    $h += 12;
+                }
+                if ($ampm === '中午' && $h <= 2) {
+                    $h += 12;
+                }
+                $runAt = $now->copy()->setTime($h % 24, $min, 0);
+                if ($day === '每天' || $day === '每日') {
+                    $recur = 'daily';
+                    if ($runAt->lte($now)) {
+                        $runAt->addDay();
+                    }
+                } elseif ($day === '明天') {
+                    $runAt->addDay();
+                } elseif ($day === '後天' || $day === '后天') {
+                    $runAt->addDays(2);
+                } elseif ($day === '大後天' || $day === '大后天') {
+                    $runAt->addDays(3);
+                } else { // 今天 / 未指定：已過就推到明天（未指定時）；明確說今天且已過 → 不當排程
+                    if ($runAt->lte($now)) {
+                        if ($day === '今天') {
+                            return null;
+                        }
+                        $runAt->addDay();
+                    }
+                }
+                $matched = $m[0];
+            }
+        }
+
+        if ($runAt === null) {
+            return null;
+        }
+
+        // 任務文字 = 原句去掉時間片段與贅詞；保留「提醒」語意
+        $task = trim(str_replace($matched, '', $t));
+        $task = (string) preg_replace('/^(請|请|麻煩|麻烦|幫我|帮我|記得|记得|到時候|到时候|到時|到时|再|然後|然后)+/u', '', trim($task));
+        $task = (string) preg_replace('/(幫我|帮我)/u', '', $task);
+        $task = trim($task, " ，。,．.、");
+        if (mb_strlen($task) < 2) {
+            return null; // 沒有實際任務（如純報時「明天八點」）不排程
+        }
+        if (preg_match('/提醒/u', $t) && ! str_contains($task, '提醒')) {
+            $task = '提醒我：'.$task;
+        }
+
+        return [$runAt, $recur, $task];
     }
 
     /** 中文數字 → 整數（支援 0-100：五十、八十五、一百…）；解析不了回 null。 */

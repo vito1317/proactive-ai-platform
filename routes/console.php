@@ -30,3 +30,10 @@ Schedule::call(fn () => app(LogScanner::class)->scan())
     ->everyMinute()
     ->name('pai:log-scan')
     ->withoutOverlapping();
+
+// 使用者定時任務：「明天早上8:30開導航到台中」→ 每分鐘檢查到期 → 丟給指揮大腦執行
+Schedule::call(function () {
+    foreach (\App\Pai\Schedule\ScheduledTask::due() as $task) {
+        $task->fire();
+    }
+})->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
