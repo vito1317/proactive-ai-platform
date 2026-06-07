@@ -830,6 +830,27 @@ class VoiceAgentController extends Controller
         if ($key === null && $hasOpen && ($hasSearch || $isWindow)) {
             $key = 'chrome';
         }
+        // 「打開 LINE / 開啟 Instagram / 啟動某 App」→ 直接 open_app（不繞 agentic、不先讀通知）
+        if ($key === null && $hasOpen && ! $hasClose && ! $hasSearch) {
+            $appName = $this->extractAppName($t);
+            if ($appName !== '') {
+                [$target, $targetLabel] = $this->targetGateway($t);
+                $r = $this->reverseCall($target, 'open_app', ['name' => $appName]);
+                if ($r !== null) {
+                    [$res, $fail] = $r;
+                } else {
+                    $res = $this->runGui($target, 'open', 'chrome', null); // 非手機節點退回桌面開法
+                    $fail = $this->guiFailed($res);
+                }
+
+                return [
+                    'reply' => "好，已在{$targetLabel}開啟「{$appName}」（{$res}）",
+                    'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經幫你打開{$appName}了。",
+                    'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'open_app', 'target' => $target],
+                    'step' => "🚀 開啟 App：{$appName}@{$targetLabel}",
+                ];
+            }
+        }
         if ($key === null) {
             return null;
         }
@@ -1159,6 +1180,21 @@ class VoiceAgentController extends Controller
     }
 
     /** 口語句子 → GUI 白名單 key（chrome/firefox/terminal/calculator/files/settings/editor）或 null。 */
+    /** 從「打開/開啟 X」抽出 App 名稱（去掉動詞、節點、語助詞）。回空字串＝抽不出。 */
+    private function extractAppName(string $t): string
+    {
+        $s = $t;
+        // 去掉「在某節點上/裡」（惰性，需方位詞收尾，避免吃掉後面的 App 名）
+        $s = preg_replace('/在[\x{4e00}-\x{9fff}A-Za-z0-9_\-]{1,12}?[上裡裏]\s*的?\s*/u', '', $s);
+        $s = preg_replace('/(請|请|麻煩|麻烦|幫我|帮我|幫|帮|我想|我要|想要|可以|能不能|順便|顺便|然後|然后)/u', '', $s);
+        $s = preg_replace('/(打開|打开|開啟|开启|啟動|启动|叫出|呼叫|開一下|开一下|開|开|使用|\bopen\b|\blaunch\b|\bstart\b|\buse\b)/iu', '', $s);
+        $s = preg_replace('/(這個|这个|那個|那个|app|應用程式|应用程序|應用|应用|程式|程序|軟體|软件|一下|的)/iu', '', $s);
+        $s = trim((string) preg_replace('/[，。！？、,.!?\s]+/u', ' ', $s));
+        $s = trim($s, " 　,.，。、");
+
+        return mb_strlen($s) >= 1 && mb_strlen($s) <= 20 ? $s : '';
+    }
+
     private function appKey(string $name): ?string
     {
         $n = mb_strtolower(trim($name));
