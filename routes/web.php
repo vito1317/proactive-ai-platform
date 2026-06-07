@@ -35,6 +35,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/chat/events/{event}', [ChatController::class, 'eventStatus'])->name('chat.event_status');
 
     Route::get('/voice', fn () => \Inertia\Inertia::render('Voice'))->name('voice');
+    Route::get('/vision', fn () => \Inertia\Inertia::render('Vision'))->name('vision.page');
     Route::get('/mcp/health', [ConsoleController::class, 'mcpHealth'])->name('mcp.health'); // 節點連線狀態
     Route::get('/api/gateway/pair-code', [\App\Http\Controllers\GatewayController::class, 'pairCode'])->name('gateway.paircode'); // Android 一鍵配對碼（/gateway/ 被反代，改用 /api/）
 
@@ -78,6 +79,7 @@ Route::post('/webhooks/line', [LineWebhookController::class, 'handle'])->name('w
 // 全雙工語音橋接：voice_server 把每輪逐字稿回送 agentic 引擎（共用密鑰驗證，CSRF 豁免）
 Route::post('/api/voice/agent', [VoiceAgentController::class, 'handle'])->name('voice.agent');
 Route::post('/api/voice/agent-stream', [VoiceAgentController::class, 'stream'])->name('voice.agent.stream');
+Route::post('/api/vision', [\App\Http\Controllers\VisionController::class, 'analyze'])->name('vision');
 
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
 Route::get("/api/gateway/poll", [GatewayController::class, "poll"])->name("gateway.poll");       // 反向節點 long-poll 取指令
