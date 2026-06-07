@@ -377,10 +377,9 @@ const actionStatusClass = (x) => ({
                             <div class="min-w-0 flex-1 space-y-2">
                                 <a :href="apkUrl" target="_blank" class="block rounded-lg bg-emerald-500/20 px-3 py-2 text-center text-sm text-emerald-300 hover:bg-emerald-500/30">⬇️ 下載 Android App（APK）</a>
                                 <p class="text-[11px] text-slate-400">App 內「節點」分頁 →「📷 掃描 QR 一鍵配對」掃上面的 QR 即可。</p>
-                                <div v-if="pair.code" class="flex min-w-0 items-center gap-2">
-                                    <code class="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[10px] text-sky-300">{{ pair.code }}</code>
-                                    <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs text-slate-300 hover:text-white" @click="copyPair">{{ copiedPair ? '✓' : '複製' }}</button>
-                                </div>
+                                <button v-if="pair.code" class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 hover:text-white" @click="copyPair">
+                                    {{ copiedPair ? '✓ 已複製配對碼' : '📋 複製配對碼（手動貼上用）' }}
+                                </button>
                                 <p class="text-[10px] text-amber-400/80">⚠️ 配對碼含註冊金鑰，請勿外流。</p>
                             </div>
                         </div>
