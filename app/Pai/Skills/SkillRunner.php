@@ -332,8 +332,14 @@ class SkillRunner
         - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
         - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
         - **【查資料/搜尋/找資訊 → 優先用瀏覽器實際搜尋，不要只靠 web-search】**：web-search API 抓到的常是零碎片段、排序差。
-          有桌面節點時，優先用 mcp__<桌面>__browser_navigate 開「https://www.google.com/search?q=關鍵字」→ browser_read 讀真實結果頁 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確。
+          有節點時，優先用 mcp__<節點>__browser_navigate 開搜尋結果頁 → browser_read 讀真實結果頁 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確。
+          **搜尋引擎優先用 DuckDuckGo（對 WebView/自動化友善、不會跳人機驗證）**：開「https://duckduckgo.com/html/?q=關鍵字」或「https://lite.duckduckgo.com/lite/?q=關鍵字」。
+          **不要直接搜 Google**（`google.com/search` 對 WebView / 機房 IP 很容易跳「Google Sorry」反機器人驗證頁，讀不到結果）；Google 只在 DuckDuckGo 真的找不到時才退而求其次。
           web-search 工具只在沒有可用瀏覽器節點、或只需要快速粗略結果時當後備。
+        - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
+          若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，
+          一個 browser_navigate（搜尋第一個）→ browser_read 讀完 → 再 browser_navigate（搜尋第二個）→ browser_read…逐一查完，最後彙整。
+          **絕對不要**用「A+B+C」或「A B C」把多個不相關問題串成一個 q= 查詢（會搜出一堆無關雜訊）。
         - **【訂票/訂房/排行程/比價/在特定網站操作 → 一律用瀏覽器實際操作，不要只靠 web-search 看文字】**：
           用 browser_navigate 開對應網站（訂機票→Google Flights 或航空公司官網；訂房→Booking/Agoda；排行程→Google Maps）→ browser_snapshot 看可點/可填元素 → browser_type 填日期/地點/條件、browser_click 點搜尋/選項 → browser_read 讀結果。一步一步真的操作到位。
           **browser_click / browser_type 的 target 請優先用 snapshot 列出的元素編號（如 e10），不要用整段文字描述**——編號最準。每次頁面變化（彈窗出現/換頁）都要重新 browser_snapshot 拿最新編號再操作。
@@ -341,6 +347,10 @@ class SkillRunner
           這類「要讓使用者看得到」的瀏覽器操作優先用桌面節點（見上方說明）的 browser_* 工具。
           **瀏覽器操作遇到「⚠️ 逾時/失敗」或結果出現彈窗時，絕對不要放棄 finish**：那通常是頁面彈出視窗或載入中。
           請改用回傳的『當前可互動元素』重新選擇目標（例如先關掉彈窗、或在彈窗的輸入框打字），一步步繼續，直到真的完成目標。
+          **【嚴禁捏造頁面內容 — 最重要】**：你對網頁的「所有認知」都只能來自 browser_read / browser_snapshot 工具實際回傳的文字。
+          若工具回傳逾時、空白或錯誤，代表你「沒讀到」——此時**先重試**（再 browser_read 一次、或等一下再讀、或重新 browser_navigate），通常第二次就成功。
+          **絕對不可以**在沒讀到內容時，自己想像、推測、編造頁面上有什麼（例如「出現 Google Sorry 驗證頁」「被反機器人攔截」「顯示 XXX 結果」都是嚴重錯誤，除非工具回傳的文字裡真的有這些字）。
+          重試多次仍讀不到，才如實告訴使用者「這個頁面目前讀取逾時、沒能取得內容」，不要假裝讀到了。
           **【完成條件，未達成前嚴禁 finish】**：
           - 訂機票：必須依序「填出發地 → 填目的地 → 填出發日期（來回票再填回程）→ 按搜尋 → 等班機結果出現 → 讀取結果」全部做完。
             只填了出發地（或只填一半欄位、還沒按搜尋、還沒看到班機）就 finish 是【嚴重錯誤】。

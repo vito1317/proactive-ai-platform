@@ -752,7 +752,8 @@ class VoiceAgentController extends Controller
         if ($hasSearch && $key === 'chrome') {
             $q = $this->extractQuery($t);
             if ($q !== '') {
-                $arg = 'https://www.google.com/search?q='.rawurlencode($q);
+                // DuckDuckGo 對 WebView/自動化友善、不會跳人機驗證（Google Sorry 頁）
+                $arg = 'https://duckduckgo.com/?q='.rawurlencode($q);
             }
         }
         $res = $this->runGui($target, 'open', $key, $arg);
