@@ -28,6 +28,22 @@ function copyGateway() {
     setTimeout(() => { copiedGw.value = false; }, 1500);
 }
 
+/* ---------- Android 節點配對 ---------- */
+const apkUrl = 'https://github.com/vito1317/pai-gateway-android/releases/download/latest/app-debug.apk';
+const pair = ref({ qr: '', code: '' });
+const copiedPair = ref(false);
+async function loadPair() {
+    try {
+        const r = await fetch('/api/gateway/pair-code?format=json', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+        pair.value = await r.json();
+    } catch (e) { /* ignore */ }
+}
+function copyPair() {
+    navigator.clipboard?.writeText(pair.value.code);
+    copiedPair.value = true;
+    setTimeout(() => { copiedPair.value = false; }, 1500);
+}
+
 /* ---------- 節點 / Gateway 連線狀態 ---------- */
 const nodes = ref([]);
 const nodesLoading = ref(false);
@@ -121,6 +137,7 @@ let thinkingTimer = null;
 
 onMounted(() => {
     fetchNodes();
+    loadPair();
     timer = setInterval(refresh, 4000);
     thinkingTimer = setInterval(() => {
         if (activeRun.value) {
@@ -346,6 +363,27 @@ const actionStatusClass = (x) => ({
                             </button>
                         </div>
                         <p class="mt-1 text-[10px] text-slate-500">在目標機器（Mac/Linux）貼上執行：自動裝好、開 cloudflared 公網通道、註冊成本平台節點。之後說「在 &lt;主機名&gt; 上打開 chrome」即可。管理：<code class="text-slate-400">./gw status|stop|port N</code></p>
+                    </div>
+
+                    <!-- Android 節點配對 -->
+                    <div class="glass p-5">
+                        <h2 class="flex items-center gap-2 font-semibold text-white">📱 Android 節點</h2>
+                        <p class="mt-1 text-xs text-slate-400">把手機變成節點：下載 App → 掃描下方 QR → 一鍵配對串接。</p>
+                        <div class="mt-3 flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+                            <img v-if="pair.qr" :src="pair.qr" alt="配對 QR" class="h-40 w-40 shrink-0 rounded-xl bg-white p-2" />
+                            <div v-else class="flex h-40 w-40 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-xs text-slate-500">
+                                <button class="rounded-lg bg-white/10 px-3 py-2 text-slate-200 hover:bg-white/20" @click="loadPair">產生配對 QR</button>
+                            </div>
+                            <div class="flex-1 space-y-2">
+                                <a :href="apkUrl" target="_blank" class="block rounded-lg bg-emerald-500/20 px-3 py-2 text-center text-sm text-emerald-300 hover:bg-emerald-500/30">⬇️ 下載 Android App（APK）</a>
+                                <p class="text-[11px] text-slate-400">App 內「節點」分頁 →「📷 掃描 QR 一鍵配對」掃上面的 QR 即可。</p>
+                                <div v-if="pair.code" class="flex items-center gap-2">
+                                    <code class="flex-1 overflow-x-auto whitespace-nowrap rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[10px] text-sky-300">{{ pair.code }}</code>
+                                    <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs text-slate-300 hover:text-white" @click="copyPair">{{ copiedPair ? '✓' : '複製' }}</button>
+                                </div>
+                                <p class="text-[10px] text-amber-400/80">⚠️ 配對碼含註冊金鑰，請勿外流。</p>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
