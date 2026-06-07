@@ -46,6 +46,7 @@ class WriteFileSkill implements Skill
             return "無法建立目錄：{$dir}";
         }
         try {
+            \App\Pai\Safety\Checkpoint::file($path, "write-file");
             $bytes = file_put_contents($path, $content, $append ? FILE_APPEND : 0);
         } catch (Throwable $e) {
             return "寫入失敗：{$e->getMessage()}";

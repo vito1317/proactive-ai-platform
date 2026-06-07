@@ -48,6 +48,7 @@ class UpdateSettingSkill implements Skill
             'bool' => filter_var($args['value'], FILTER_VALIDATE_BOOLEAN),
             default => (string) $args['value'],
         };
+        \App\Pai\Safety\Checkpoint::setting($key, $this->settings->get($key), 'update-setting'); // #5 可回滾
         $this->settings->set($key, $value);
         $shown = $type === 'secret' ? '••••（已更新）' : $value;
 

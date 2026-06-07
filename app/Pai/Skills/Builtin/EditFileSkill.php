@@ -56,6 +56,7 @@ class EditFileSkill implements Skill
         $updated = $all ? str_replace($old, $new, $content) : preg_replace('/'.preg_quote($old, '/').'/', addcslashes($new, '\\$'), $content, 1);
 
         try {
+            \App\Pai\Safety\Checkpoint::file($path, "edit-file");
             file_put_contents($path, $updated);
         } catch (Throwable $e) {
             return "寫入失敗：{$e->getMessage()}";

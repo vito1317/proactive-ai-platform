@@ -78,3 +78,7 @@ Schedule::call(function () {
         }
     }
 })->everyMinute()->name('pai:calendar-reminders')->withoutOverlapping();
+
+// #8 自我修復：每 2 分鐘檢查關鍵服務，掛掉→嘗試重啟+通知
+Schedule::call(fn () => \App\Pai\Perception\SelfHealJob::dispatch())
+    ->everyTwoMinutes()->name('pai:self-heal')->withoutOverlapping();

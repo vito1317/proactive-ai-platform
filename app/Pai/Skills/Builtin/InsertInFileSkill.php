@@ -44,6 +44,7 @@ class InsertInFileSkill implements Skill
         array_splice($lines, $at, 0, preg_split('/\r?\n/', $text));
 
         try {
+            \App\Pai\Safety\Checkpoint::file($path, "insert-in-file");
             file_put_contents($path, implode("\n", $lines)."\n");
         } catch (Throwable $e) {
             return "寫入失敗：{$e->getMessage()}";

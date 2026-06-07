@@ -53,6 +53,19 @@ class ExecuteCodeSkill implements Skill
         $code = preg_replace('/^<\\?php\s*/i', '', (string) $code);
         $code = (string) preg_replace('/\\?'.'>\s*$/', '', (string) $code);
 
+        // #6 加固：擋掉危險的直接呼叫，逼程式只能透過 $tool 編排（$tool/run-shell 本身已受閘門）。
+        // 需要系統操作就呼叫 $tool('run-shell', [...])，會留紀錄、受控管。
+        $banned = ['system', 'exec', 'shell_exec', 'passthru', 'proc_open', 'popen', 'pcntl_exec',
+            'eval', 'assert', 'unlink', 'rmdir', 'fwrite', 'fopen', 'file_put_contents', 'rename',
+            'putenv', 'symlink', 'mail', 'curl_exec', 'fsockopen', 'extract'];
+        foreach ($banned as $fn) {
+            if (preg_match('/(?<![A-Za-z0-9_>$])'.preg_quote($fn, '/').'\s*\(/i', $code)
+                || preg_match('/`/', $code)) {
+                return "為安全起見，execute-code 不允許直接呼叫系統/檔案函式（如 {$fn}、反引號）。"
+                    ."需要系統操作請在程式內用 \$tool('run-shell', ['command'=>'...']) 或對應工具，會受控管。";
+            }
+        }
+
         $registry = $this->registry;
         $buf = [];
         // 程式內可呼叫的工具 API

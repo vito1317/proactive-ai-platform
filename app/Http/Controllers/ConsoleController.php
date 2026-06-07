@@ -48,6 +48,8 @@ class ConsoleController extends Controller
             // 長期記憶：關於使用者的個人事實/偏好
             'userMemories' => \App\Pai\Memory\UserMemory::orderByDesc('updated_at')->limit(50)
                 ->get(['id', 'category', 'content'])->toArray(),
+            // #9 LLM 用量觀測（今日/本週 calls、tokens、平均延遲）
+            'llmUsage' => \App\Pai\Cognition\LlmUsage::summary(),
 
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),

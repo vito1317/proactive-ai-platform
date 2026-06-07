@@ -14,6 +14,7 @@ const props = defineProps({
     gatewayInstallCommand: { type: String, default: '' },
     learnedSkills: { type: Array, default: () => [] },
     userMemories: { type: Array, default: () => [] },
+    llmUsage: { type: Object, default: () => ({}) },
 });
 
 const copied = ref(false);
@@ -344,6 +345,26 @@ const actionStatusClass = (x) => ({
                                 <span class="text-xs text-slate-400">{{ n.ok ? (n.ms + 'ms · ' + (n.tools?.length || 0) + ' 工具') : (n.error || '離線') }}</span>
                             </li>
                         </ul>
+                    </div>
+
+                    <!-- #9 LLM 用量觀測 -->
+                    <div class="glass p-5">
+                        <h2 class="flex items-center gap-2 font-semibold text-white">📊 AI 用量（今日）</h2>
+                        <div class="mt-3 grid grid-cols-3 gap-3 text-center">
+                            <div class="rounded-lg border border-white/10 bg-black/30 py-3">
+                                <div class="text-xl font-bold text-cyan-300">{{ llmUsage.today_calls ?? 0 }}</div>
+                                <div class="text-[11px] text-slate-400">次呼叫</div>
+                            </div>
+                            <div class="rounded-lg border border-white/10 bg-black/30 py-3">
+                                <div class="text-xl font-bold text-cyan-300">{{ ((llmUsage.today_tokens ?? 0) / 1000).toFixed(1) }}k</div>
+                                <div class="text-[11px] text-slate-400">tokens</div>
+                            </div>
+                            <div class="rounded-lg border border-white/10 bg-black/30 py-3">
+                                <div class="text-xl font-bold text-cyan-300">{{ llmUsage.today_avg_ms ?? 0 }}<span class="text-xs">ms</span></div>
+                                <div class="text-[11px] text-slate-400">平均延遲</div>
+                            </div>
+                        </div>
+                        <p class="mt-2 text-[11px] text-slate-500">本週 {{ llmUsage.week_calls ?? 0 }} 次 · {{ ((llmUsage.week_tokens ?? 0) / 1000).toFixed(0) }}k tokens</p>
                     </div>
 
                     <!-- 自我改進：AI 學會的做法 -->

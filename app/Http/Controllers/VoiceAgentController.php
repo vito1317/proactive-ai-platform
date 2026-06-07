@@ -599,6 +599,17 @@ class VoiceAgentController extends Controller
                 'meta' => ['category' => 'skill', 'skill' => 'mail', 'direct' => true], 'step' => '📧 讀未讀信'];
         }
 
+        // #5 回滾：「還原剛才的修改」「復原上一個變更」
+        if (preg_match('/(還原|还原|復原|复原|回滾|回滚|撤銷|撤销|reset).{0,4}(剛才|刚才|上一|修改|變更|变更|設定|设定|檔案|文件)?/u', $t)
+            && preg_match('/(還原|还原|復原|复原|回滾|回滚|撤銷|撤销)/u', $t)) {
+            $res = app(\App\Pai\Skills\Builtin\RollbackSkill::class)->run([]);
+
+            return [
+                'reply' => $res, 'speech' => mb_strpos($res, '沒有') === 0 ? '沒有可以還原的修改。' : '好的，已經還原剛才的修改。',
+                'meta' => ['category' => 'skill', 'skill' => 'rollback', 'direct' => true], 'step' => '↩️ 還原修改',
+            ];
+        }
+
         // 學會的技能查詢：「你學會了什麼」「你會做哪些事」
         if (preg_match('/(你?學會了什麼|你?学会了什么|學會哪些|学会哪些|你會做哪些|你会做哪些|有哪些技能|你的技能)/u', $t)) {
             $skills = \App\Pai\Skills\LearnedSkill::orderByDesc('uses')->limit(15)->get();

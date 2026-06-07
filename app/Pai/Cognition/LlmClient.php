@@ -180,6 +180,7 @@ class LlmClient
         $model = (string) $this->settings->get('llm.model');
         $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
         $timeout = (int) ($opts['timeout'] ?? $this->settings->get('llm.timeout'));
+        $t0 = microtime(true);
 
         try {
             $response = Http::timeout($timeout)
@@ -214,11 +215,22 @@ class LlmClient
             throw new LlmException('LLM 推理超出 max_tokens 而未產出答案；請提高 PAI_LLM_MAX_TOKENS。');
         }
 
+        $usage = $response->json('usage') ?? [];
+        // #9 用量觀測：記每日 calls / tokens / 累計延遲（失敗不影響主流程）
+        try {
+            \App\Pai\Cognition\LlmUsage::record(
+                (int) ($usage['prompt_tokens'] ?? 0),
+                (int) ($usage['completion_tokens'] ?? 0),
+                (int) round((microtime(true) - $t0) * 1000),
+            );
+        } catch (Throwable) {
+        }
+
         return [
             'content' => self::stripChannelMarkers($content),
             'reasoning' => is_string($reasoning) ? $reasoning : '',
             'finish_reason' => $finish,
-            'usage' => $response->json('usage') ?? [],
+            'usage' => $usage,
         ];
     }
 

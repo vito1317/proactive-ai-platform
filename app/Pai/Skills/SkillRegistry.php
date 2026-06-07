@@ -19,7 +19,9 @@ use App\Pai\Skills\Builtin\ReadFileSkill;
 use App\Pai\Skills\Builtin\RemoveCommandSkill;
 use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
 use App\Pai\Skills\Builtin\RestartWorkersSkill;
+use App\Pai\Skills\Builtin\DelegateSkill;
 use App\Pai\Skills\Builtin\ExecuteCodeSkill;
+use App\Pai\Skills\Builtin\RollbackSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
 use App\Pai\Skills\Builtin\SendEmailSkill;
 use App\Pai\Skills\Builtin\StopTaskSkill;
@@ -47,6 +49,8 @@ class SkillRegistry
         // 通用系統操作
         RunShellSkill::class,
         ExecuteCodeSkill::class,
+        DelegateSkill::class,
+        RollbackSkill::class,
         OpenAppSkill::class,
         ReadFileSkill::class,
         WriteFileSkill::class,
