@@ -111,6 +111,7 @@ class VoiceAgentController extends Controller
 
         $reply = $this->utf8($reply); // LLM/工具輸出可能夾壞 UTF-8 → json_encode 會 500
         $conv->addMessage('assistant', $reply, array_merge($meta, ['source' => 'voice', 'trace' => $steps]));
+        $this->maybeShowDoc($transcript, $reply);
 
         return response()->json([
             'reply' => $reply,
@@ -316,6 +317,24 @@ class VoiceAgentController extends Controller
         return (string) mb_convert_encoding($s, 'UTF-8', 'UTF-8');
     }
 
+    /** 使用者要求「輸出文檔/整理成文件」且回覆夠長 → 自動推到在線手機畫面彈出顯示。 */
+    private function maybeShowDoc(string $transcript, string $reply): void
+    {
+        if (mb_strlen($reply) < 120) {
+            return;
+        }
+        if (! preg_match('/(文檔|文件|報告|报告|整理成|輸出|输出|報表|报表|文案|清單|清单|表格|筆記|笔记|顯示在|显示在)/u', $transcript)) {
+            return;
+        }
+        try {
+            foreach (\App\Pai\Mcp\ReverseBus::onlineNodes() as $n) {
+                \App\Pai\Mcp\ReverseBus::fire($n, 'show_document', ['title' => 'PAI 文件', 'content' => $reply]);
+            }
+        } catch (Throwable) {
+            // 無在線手機 / 推送失敗 → 略過（回覆仍在字幕）
+        }
+    }
+
     /**
      * SSE 串流版：邊生成邊回（voice_server 收到一句念一句，不用等全部跑完）。
      * 事件：step（執行步驟）/ delta（回覆文字片段）/ done（完整結果）。
@@ -412,6 +431,7 @@ class VoiceAgentController extends Controller
                 $reply = '我沒有產生回覆，請再說一次。';
             }
             $conv->addMessage('assistant', $reply, array_merge($meta, ['source' => 'voice', 'trace' => $steps]));
+            $this->maybeShowDoc($transcript, $reply);
             $emit('done', [
                 'reply' => $reply, 'speech' => $this->speechClean($reply),
                 'meta' => $meta, 'conversation_id' => $conv->id,
