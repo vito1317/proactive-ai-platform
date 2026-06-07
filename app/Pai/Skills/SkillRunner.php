@@ -365,6 +365,11 @@ class SkillRunner
         - **【善用 Google 的「AI 總結 / AI Overview」】**：Google 結果頁最上方常有一段 AI 自動生成的總結（AI 概覽 / AI Overview），
           那是針對你的查詢整理好的高品質摘要，browser_read 讀回的頁面文字最前面通常就是它。**優先採用這段 AI 總結當答案的主幹**，再用底下的搜尋結果補充、核對細節，這樣又快又準。
           （若該查詢沒有出現 AI 總結，就照常讀下方的搜尋結果條目。）
+        - **【操作手機 App（LINE / 任何 App）→ 用 screen_* 工具（輔助使用）】**：手機節點可以直接操作整支手機：
+          mcp__<手機>__open_app 開 App → screen_snapshot 讀畫面元素（[sN] 編號＋文字）→ screen_click 點擊、screen_type 輸入、screen_swipe 滑動、screen_back 返回——每步操作後都會回最新畫面，照著繼續下一步（和瀏覽器操作同套路）。
+          **回覆 LINE / 訊息的最快路徑**：notifications_list 看最近通知 → notification_reply(target=對方名字或 LINE, message=內容) 直接回覆，完全不用打開 App。
+          打電話：phone_call(to=號碼或聯絡人名稱)。播放音樂：play_music(query=歌名/歌手)。暫停/下一首：media_control。
+          （這些工具需要使用者開過「通知存取」「協助工具」權限；工具回覆若說未開啟，把那段話轉告使用者請他開啟。）
         - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
           若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，
           一個 browser_navigate（搜尋第一個）→ browser_read 讀完 → 再 browser_navigate（搜尋第二個）→ browser_read…逐一查完，最後彙整。
