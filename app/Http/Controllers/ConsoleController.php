@@ -42,6 +42,13 @@ class ConsoleController extends Controller
             'runs' => $this->recentRuns(),
             'stats' => $this->stats(),
 
+            // 自我改進：AI 從成功任務學會的做法（playbook）
+            'learnedSkills' => \App\Pai\Skills\LearnedSkill::orderByDesc('uses')->orderByDesc('updated_at')->limit(50)
+                ->get(['id', 'name', 'when_to_use', 'steps', 'uses'])->toArray(),
+            // 長期記憶：關於使用者的個人事實/偏好
+            'userMemories' => \App\Pai\Memory\UserMemory::orderByDesc('updated_at')->limit(50)
+                ->get(['id', 'category', 'content'])->toArray(),
+
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),
             // Node Gateway 自動接線一鍵指令（裝 gateway + cloudflared 通道 + 自動註冊到 PAI）

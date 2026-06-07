@@ -12,6 +12,8 @@ const props = defineProps({
     stats: { type: Object, default: () => ({}) },
     installCommand: { type: String, default: '' },
     gatewayInstallCommand: { type: String, default: '' },
+    learnedSkills: { type: Array, default: () => [] },
+    userMemories: { type: Array, default: () => [] },
 });
 
 const copied = ref(false);
@@ -342,6 +344,29 @@ const actionStatusClass = (x) => ({
                                 <span class="text-xs text-slate-400">{{ n.ok ? (n.ms + 'ms · ' + (n.tools?.length || 0) + ' 工具') : (n.error || '離線') }}</span>
                             </li>
                         </ul>
+                    </div>
+
+                    <!-- 自我改進：AI 學會的做法 -->
+                    <div class="glass p-5">
+                        <h2 class="flex items-center gap-2 font-semibold text-white">🧠 AI 學會的技能（自我改進）</h2>
+                        <p class="mt-1 text-xs text-slate-400">完成多步任務後，AI 會把成功的做法學起來，下次同類需求自動套用、更快更穩。</p>
+                        <ul v-if="learnedSkills.length" class="mt-3 space-y-2">
+                            <li v-for="s in learnedSkills" :key="s.id" class="rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-sm font-medium text-cyan-300">▶ {{ s.name }}</span>
+                                    <span class="shrink-0 text-[11px] text-slate-500">用過 {{ s.uses }} 次</span>
+                                </div>
+                                <p class="mt-0.5 text-[11px] text-slate-400">{{ s.when_to_use }}</p>
+                                <p class="mt-1 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap">{{ s.steps }}</p>
+                            </li>
+                        </ul>
+                        <p v-else class="mt-3 text-xs text-slate-500">尚未學會任何做法——叫 AI 完成幾個多步驟任務（排行程、傳訊息給多人…）就會開始累積。</p>
+
+                        <h3 class="mt-5 flex items-center gap-2 text-sm font-semibold text-white">📌 關於你的長期記憶</h3>
+                        <ul v-if="userMemories.length" class="mt-2 flex flex-wrap gap-2">
+                            <li v-for="m in userMemories" :key="m.id" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-slate-300">{{ m.content }}</li>
+                        </ul>
+                        <p v-else class="mt-2 text-xs text-slate-500">還沒記住關於你的事。對 AI 說「記住我住汐止」之類就會記起來。</p>
                     </div>
 
                     <!-- 一鍵安裝 -->

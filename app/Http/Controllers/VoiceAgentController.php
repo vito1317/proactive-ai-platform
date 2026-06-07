@@ -531,6 +531,22 @@ class VoiceAgentController extends Controller
             ];
         }
 
+        // 學會的技能查詢：「你學會了什麼」「你會做哪些事」
+        if (preg_match('/(你?學會了什麼|你?学会了什么|學會哪些|学会哪些|你會做哪些|你会做哪些|有哪些技能|你的技能)/u', $t)) {
+            $skills = \App\Pai\Skills\LearnedSkill::orderByDesc('uses')->limit(15)->get();
+
+            return [
+                'reply' => $skills->isEmpty()
+                    ? '我還沒從任務中學會特別的做法——等你叫我完成幾個多步驟任務（像排行程、傳訊息給多人），我就會把成功的做法學起來，下次更快。'
+                    : "🧠 我已經學會這些做法：\n".$skills->map(fn ($s) => "▶ {$s->name}（用過 {$s->uses} 次）：{$s->when_to_use}")->implode("\n"),
+                'speech' => $skills->isEmpty()
+                    ? '我還沒學會特別的做法，等你叫我完成幾個多步驟任務後，我就會把成功的方式記起來。'
+                    : '我學會了 '.$skills->count().' 種做法，包括：'.$skills->take(6)->map(fn ($s) => $s->name)->implode('、'),
+                'meta' => ['category' => 'skill', 'skill' => 'learned', 'direct' => true, 'action' => 'list_learned'],
+                'step' => '🧠 查看學會的技能',
+            ];
+        }
+
         // ── 長期記憶（明確指令）────────────────────────────────────────────────
         $uid = $conv?->user_id;
         $memStore = app(\App\Pai\Memory\UserMemoryStore::class);
