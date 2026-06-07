@@ -485,9 +485,53 @@ class VoiceAgentController extends Controller
      *
      * @return array{reply:string,meta:array,step?:string}|null
      */
+    /** 帶圖回答（Gemma 4 看圖）：附近期對話脈絡 + 這張圖。 */
+    private function visionReply(Conversation $conv, string $question, string $image): string
+    {
+        $q = trim($question) !== '' ? $question : '請看這張圖片，用台灣正體中文說明重點。';
+        $history = $conv->messages()->latest('id')->limit(6)->get()->reverse()
+            ->map(fn ($m) => ['role' => $m->role, 'content' => mb_substr((string) $m->content, 0, 500)])->values()->all();
+        $messages = [
+            ['role' => 'system', 'content' => '你是「由 Vito 開發的助理」，看得懂圖片。用台灣正體（繁體）中文回答，禁簡體。依對話脈絡針對這張圖回答或追問。'],
+            ...$history,
+            ['role' => 'user', 'content' => [
+                ['type' => 'text', 'text' => $q],
+                ['type' => 'image_url', 'image_url' => ['url' => $image]],
+            ]],
+        ];
+        try {
+            $r = trim($this->llm->chat($messages, ['max_tokens' => 1024]));
+
+            return $r !== '' ? $this->utf8($r) : '我看不太出來，換個角度或更清楚的照片再試。';
+        } catch (Throwable $e) {
+            return '看圖失敗：'.$e->getMessage();
+        }
+    }
+
     private function directCommand(string $transcript, ?array $geo = null, ?Conversation $conv = null): ?array
     {
         $t = trim($transcript);
+
+        // ── 圖片對話：語音對話已掛了照片 → 這一輪帶圖回答（可多輪追問同一張）────────
+        $sid = $conv?->voice_sid;
+        if ($sid) {
+            $pkey = 'vision:pending:'.$sid;
+            if (preg_match('/(清除圖片|不看圖|不看了|看完了|移除圖片|忘掉.{0,3}圖)/u', $t)) {
+                \Illuminate\Support\Facades\Cache::forget($pkey);
+
+                return ['reply' => '好，已經放下那張圖片。', 'speech' => '好的，不看圖了。',
+                    'meta' => ['category' => 'skill', 'skill' => 'vision', 'direct' => true], 'step' => '🖼 清除圖片'];
+            }
+            $img = \Illuminate\Support\Facades\Cache::get($pkey);
+            if (is_string($img) && $img !== '') {
+                $reply = $this->visionReply($conv, $t, $img);
+                \Illuminate\Support\Facades\Cache::put($pkey, $img, 900); // 保留供追問
+                $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'vision']);
+
+                return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+                    'meta' => ['category' => 'skill', 'skill' => 'vision', 'direct' => true], 'step' => '👁 看圖回答（說「不看了」可放下圖片）'];
+            }
+        }
 
         // ── 定時任務（要在所有分支之前：句子帶時間+任務時先排程，不要立刻執行）────────
         // 查看：「我有哪些定時任務」「看一下排程」

@@ -30,27 +30,44 @@ class VisionController extends Controller
         }
 
         $data = $request->validate([
-            'image' => ['required', 'string'],          // data URI 或 base64
+            'image' => ['nullable', 'string'],          // data URI 或 base64（追問時可省略，沿用上一張）
             'prompt' => ['nullable', 'string', 'max:1000'],
             'conversation_id' => ['nullable', 'integer'],
             'session' => ['nullable', 'string', 'max:128'],
             'live' => ['nullable', 'boolean'],          // 即時畫面模式 → 回答更簡短
         ]);
 
-        $image = $this->normalizeImage($data['image']);
-        if ($image === '') {
-            return response()->json(['error' => '圖片格式不正確'], 422);
+        $conv = $this->resolveConv($data['conversation_id'] ?? null, $data['session'] ?? null);
+        $cacheKey = $conv ? "vision:img:{$conv->id}" : null;
+
+        // 圖片：本次有帶就用，沒帶就沿用對話裡上一張（多輪追問同一張圖）
+        $image = $this->normalizeImage((string) ($data['image'] ?? ''));
+        if ($image === '' && $cacheKey) {
+            $image = (string) \Illuminate\Support\Facades\Cache::get($cacheKey, '');
         }
+        if ($image === '') {
+            return response()->json(['error' => '沒有圖片（請先拍照/上傳一張）'], 422);
+        }
+        if ($cacheKey) {
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $image, 3600); // 圖片留 1 小時供追問
+        }
+
         $prompt = trim((string) ($data['prompt'] ?? '')) ?: '請看這張圖片，用台灣正體中文描述你看到什麼、有什麼重點。';
         $live = (bool) ($data['live'] ?? false);
-
-        $conv = $this->resolveConv($data['conversation_id'] ?? null, $data['session'] ?? null);
-        $conv?->addMessage('user', '[圖片] '.$prompt, ['source' => 'vision']);
+        $conv?->addMessage('user', $prompt, ['source' => 'vision']);
 
         $sys = '你是「由 Vito 開發的助理」，看得懂圖片。用台灣正體（繁體）中文回答，禁簡體。'
-            .($live ? '這是使用者畫面的即時截圖，請簡短（一兩句）說明畫面重點或回答問題。' : '看圖回答使用者，簡潔實用。');
+            .($live ? '這是使用者畫面的即時截圖，請簡短（一兩句）說明畫面重點或回答問題。' : '看圖回答使用者，簡潔實用。可依對話脈絡針對同一張圖追問。');
+        // 帶近期對話脈絡（多輪追問）；圖片只附在這一輪的 user turn
+        $history = [];
+        if ($conv) {
+            $history = $conv->messages()->where('id', '<', $conv->messages()->max('id'))
+                ->latest('id')->limit(6)->get()->reverse()
+                ->map(fn ($m) => ['role' => $m->role, 'content' => mb_substr((string) $m->content, 0, 500)])->values()->all();
+        }
         $messages = [
             ['role' => 'system', 'content' => $sys],
+            ...$history,
             ['role' => 'user', 'content' => [
                 ['type' => 'text', 'text' => $prompt],
                 ['type' => 'image_url', 'image_url' => ['url' => $image]],
@@ -71,6 +88,29 @@ class VisionController extends Controller
             'reply' => $reply,
             'conversation_id' => $conv?->id,
         ]);
+    }
+
+    /** 手機把照片掛到「語音對話」session → 之後用語音追問都會帶這張圖（直到說「不看了」或 15 分鐘）。 */
+    public function attach(Request $request): JsonResponse
+    {
+        $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
+        $authed = $request->user() !== null
+            || ($secret !== '' && hash_equals($secret, (string) $request->header('X-Voice-Secret')))
+            || hash_equals(GatewayController::registerSecret(), (string) $request->header('X-Register-Secret'));
+        if (! $authed) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $data = $request->validate([
+            'image' => ['required', 'string'],
+            'session' => ['required', 'string', 'max:128'],
+        ]);
+        $image = $this->normalizeImage($data['image']);
+        if ($image === '') {
+            return response()->json(['error' => '圖片格式不正確'], 422);
+        }
+        \Illuminate\Support\Facades\Cache::put('vision:pending:'.$data['session'], $image, 900);
+
+        return response()->json(['ok' => true, 'message' => '照片已附上，直接用語音問就會看著它回答']);
     }
 
     /** 統一成 data URI（llama-server vision 接受 data:image/...;base64,）。 */

@@ -20,7 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',
             'api/voice/*',
-            'api/vision',    // 視覺端點（session 或共用密鑰驗證）
+            'api/vision*',   // 視覺端點（session 或共用密鑰驗證）
             'api/gateway/*', // 語音橋接（voice_server）以共用密鑰驗證，非 session
         ]);
 
