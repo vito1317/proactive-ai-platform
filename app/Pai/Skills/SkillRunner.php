@@ -59,6 +59,7 @@ class SkillRunner
 
         return [
             'web-search' => '🔍 上網搜尋…',
+            'execute-code' => '🧬 一次串接多個工具…',
             'answer-from-web' => '🔍 上網搜尋並閱讀資料…',
             'web-fetch' => '🌐 開啟網頁讀取內容…',
             'read-file' => '📄 讀取檔案…',
@@ -217,6 +218,11 @@ class SkillRunner
                     return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
                 }
 
+                // 自我改進：用了多個工具的成功任務 → 背景萃取成可重用 playbook（下次更快）
+                if (count($obs) >= 2) {
+                    try { LearnSkillJob::dispatch($message, $obs); } catch (Throwable) {}
+                }
+
                 // 有實際跑過工具 → 用串流方式把「解讀結果」的最終回覆逐字輸出（即時看到 AI 輸出內容＋思考）
                 if ($obs !== [] && $onDelta !== null) {
                     $reply = $this->summarize($message, $obs, $onDelta, $onThought);
@@ -330,6 +336,14 @@ class SkillRunner
         $ctx = ($mem !== '' ? "（關於使用者的長期記憶，自然運用）\n{$mem}\n" : '')
             .($conv->summary ? "（先前摘要）{$conv->summary}\n" : '').($history !== '' ? $history : '（無）');
 
+        // 自我改進：注入「以前學會的做法」（命中本次需求關鍵字）→ 讓 agent 照成功配方走，更快更穩
+        $learned = LearnedSkill::relevant($message);
+        $learnedHint = '';
+        if ($learned->isNotEmpty()) {
+            $learnedHint = "\n        【你以前學會的做法（命中本次需求，優先參考照做，可省去摸索）】\n        "
+                .$learned->map(fn ($s) => "▶ {$s->name}（{$s->when_to_use}）：{$s->steps}")->implode("\n        ");
+        }
+
         // 上一輪只「空談要做某事」卻沒選工具 → 這一輪硬性要求選出工具
         $forceNote = $forceTool
             ? "⚠️ 上一輪你只是說要做某事卻沒有選工具（空談承諾）。這一輪 action【絕對不可以是 finish】，"
@@ -361,6 +375,7 @@ class SkillRunner
 
         最近對話脈絡：
         {$ctx}
+        {$learnedHint}
 
         使用者目標：「{$message}」
         已執行步驟與結果：
@@ -393,6 +408,10 @@ class SkillRunner
           （這些工具需要使用者開過「通知存取」「協助工具」權限；工具回覆若說未開啟，把那段話轉告使用者請他開啟。）
           **【你看得懂圖片】**：screen_snapshot 元素讀不懂、畫面是圖片/地圖/影片、或不確定畫面長怎樣時，呼叫 screen_shot——
           截圖會直接附給你「看」，照你看到的內容判斷下一步（要點哪裡就用 screen_click 配可見文字或先 snapshot 拿編號）。
+        - **【多步驟、會重複、要組裝資料的任務 → 用 execute-code 一次做完】**：與其一輪一個工具來回（本地模型慢），
+          可寫一段 PHP 用 $tool('技能名',[參數]) 連續呼叫多個工具＋迴圈/條件/組裝，一輪收斂。
+          例：要查 3 個地點的車程 → 一段程式跑迴圈呼叫 3 次；要彙整多筆搜尋 → 一段程式搜完直接組成結果 return。
+          但「需要看每一步結果才能決定下一步」的探索型任務（如操作未知網頁/App）仍照常一步一工具。
         - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
           若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，
           一個 browser_navigate（搜尋第一個）→ browser_read 讀完 → 再 browser_navigate（搜尋第二個）→ browser_read…逐一查完，最後彙整。

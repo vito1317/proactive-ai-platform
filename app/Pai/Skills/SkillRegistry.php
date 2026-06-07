@@ -19,6 +19,7 @@ use App\Pai\Skills\Builtin\ReadFileSkill;
 use App\Pai\Skills\Builtin\RemoveCommandSkill;
 use App\Pai\Skills\Builtin\RemoveMcpServerSkill;
 use App\Pai\Skills\Builtin\RestartWorkersSkill;
+use App\Pai\Skills\Builtin\ExecuteCodeSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
 use App\Pai\Skills\Builtin\StopTaskSkill;
 use App\Pai\Skills\Builtin\TailLogsSkill;
@@ -44,6 +45,7 @@ class SkillRegistry
         TailLogsSkill::class,
         // 通用系統操作
         RunShellSkill::class,
+        ExecuteCodeSkill::class,
         OpenAppSkill::class,
         ReadFileSkill::class,
         WriteFileSkill::class,
