@@ -42,6 +42,22 @@ class ReverseBus
         return ['ok' => false, 'error' => '反向節點逾時未回應（手機可能離線或 App 未在前景）'];
     }
 
+    /** 發一個工具呼叫但不等結果（fire-and-forget，用於推通知等不需回傳的動作）。 */
+    public static function fire(string $node, string $tool, array $args): void
+    {
+        $queue = Cache::get(self::PENDING.$node, []);
+        $queue[] = ['id' => (string) Str::uuid(), 'tool' => $tool, 'arguments' => $args];
+        Cache::put(self::PENDING.$node, $queue, 120);
+    }
+
+    /** 列出目前所有「在線」的反向節點名稱（最近 5 分鐘有 poll）。 */
+    public static function onlineNodes(): array
+    {
+        return McpServer::where('url', 'like', 'reverse://%')->get()
+            ->filter(fn ($s) => self::lastSeen($s->name) !== null)
+            ->pluck('name')->all();
+    }
+
     /** 節點端 long-poll：取出一個待執行的 call（最多等 $waitSec）。回 null 表示沒有。 */
     public static function next(string $node, int $waitSec = 25): ?array
     {

@@ -2,6 +2,7 @@
 
 namespace App\Pai\Notify;
 
+use App\Pai\Mcp\ReverseBus;
 use App\Pai\Settings\Settings;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -35,7 +36,26 @@ class Notifier
             'webhook' => $this->webhook($text),
             'telegram' => $this->telegram($text),
             'line' => $this->line($text),
+            'phone' => $this->phone($text),
         ];
+    }
+
+    /** 推到所有在線的手機（Android）節點通知列（fire-and-forget，不阻塞）。 */
+    private function phone(string $text): array
+    {
+        try {
+            $nodes = ReverseBus::onlineNodes();
+            if (empty($nodes)) {
+                return ['configured' => false, 'ok' => false, 'error' => '無在線手機節點'];
+            }
+            foreach ($nodes as $n) {
+                ReverseBus::fire($n, 'phone_notify', ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 500)]);
+            }
+
+            return ['configured' => true, 'ok' => true, 'error' => null];
+        } catch (Throwable $e) {
+            return ['configured' => true, 'ok' => false, 'error' => $e->getMessage()];
+        }
     }
 
     /** @return array<string, bool> */
