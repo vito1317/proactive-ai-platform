@@ -425,6 +425,7 @@ class VoiceAgentController extends Controller
                     $meta = $r['meta'] ?? [];
                 }
             } catch (Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('voice stream 失敗', ['err' => $e->getMessage(), 'at' => $e->getFile().':'.$e->getLine(), 'trace' => $e->getTraceAsString()]);
                 $reply = '抱歉，這次處理失敗了：'.$e->getMessage();
                 $meta = ['error' => true];
             }

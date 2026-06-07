@@ -18,6 +18,11 @@ use Throwable;
  */
 class ExecuteCodeSkill implements Skill
 {
+    public static ?SkillRegistry $ctxRegistry = null;
+
+    /** @var array<int,string> */
+    public static array $ctxBuf = [];
+
     public function __construct(private readonly SkillRegistry $registry) {}
 
     public function name(): string
@@ -27,13 +32,13 @@ class ExecuteCodeSkill implements Skill
 
     public function description(): string
     {
-        return '寫一段 PHP 一次串接多個工具與流程（迴圈/條件/組裝），把多步任務收成一輪。程式內用 $tool(\'技能\',[參數]) 呼叫其他工具、$say(值) 輸出、return 回結果';
+        return '寫一段 PHP 一次串接多個工具與流程（迴圈/條件/組裝），把多步任務收成一輪。程式內用 tool(\'技能\',[參數]) 呼叫其他工具、say(值) 輸出、return 回結果（tool/say 是全域函式，在迴圈/匿名函式裡都能直接用）';
     }
 
     public function parameters(): array
     {
         return [
-            'code' => 'PHP 程式碼（不含 <?php）。例：$w=$tool(\'web-search\',[\'query\'=>\'台中天氣\']); $say($w); return \'done\';',
+            'code' => 'PHP 程式碼（不含開頭標記）。例：$w = tool(\'web-search\', [\'query\'=>\'台中天氣\']); say($w); return \'done\';',
         ];
     }
 
@@ -66,26 +71,31 @@ class ExecuteCodeSkill implements Skill
             }
         }
 
+        // 用全域函式 tool()/say()（也保留 $tool/$say 變數）——全域函式在巢狀閉包/匿名函式裡也能呼叫，
+        // 避免 LLM 在 array_map(function(){ ... $tool ... }) 這類寫法裡因未 use 捕捉而「Undefined variable $tool」。
+        ExecuteCodeSkill::$ctxRegistry = $this->registry;
+        ExecuteCodeSkill::$ctxBuf = [];
+        if (! function_exists('tool')) {
+            eval('function tool($name, array $a = []) { $s = \App\Pai\Skills\Builtin\ExecuteCodeSkill::$ctxRegistry?->get($name); return $s ? (string) $s->run($a) : "（沒有工具：$name）"; }');
+        }
+        if (! function_exists('say')) {
+            eval('function say($x) { \App\Pai\Skills\Builtin\ExecuteCodeSkill::$ctxBuf[] = is_string($x) ? $x : json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); }');
+        }
         $registry = $this->registry;
-        $buf = [];
-        // 程式內可呼叫的工具 API
-        $tool = function (string $name, array $a = []) use ($registry): string {
-            $s = $registry->get($name);
-
-            return $s ? (string) $s->run($a) : "（沒有工具：{$name}）";
-        };
-        $say = function ($x) use (&$buf): void {
-            $buf[] = is_string($x) ? $x : json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        };
+        $buf = &ExecuteCodeSkill::$ctxBuf;
+        $tool = fn (string $name, array $a = []): string => tool($name, $a);   // 變數形相容
+        $say = fn ($x) => say($x);
 
         @set_time_limit(90);
         try {
             $ret = eval($code);
         } catch (Throwable $e) {
-            return "execute-code 執行錯誤：{$e->getMessage()}\n（前面輸出）\n".mb_substr(implode("\n", $buf), 0, 2000);
+            \Illuminate\Support\Facades\Log::warning('execute-code 失敗', ['err' => $e->getMessage()]);
+
+            return "execute-code 執行錯誤：{$e->getMessage()}\n（前面輸出）\n".mb_substr(implode("\n", ExecuteCodeSkill::$ctxBuf), 0, 2000);
         }
 
-        $out = implode("\n", $buf);
+        $out = implode("\n", ExecuteCodeSkill::$ctxBuf);
         if (is_string($ret) && $ret !== '') {
             $out .= ($out !== '' ? "\n" : '').$ret;
         } elseif (is_array($ret)) {
