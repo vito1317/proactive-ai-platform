@@ -515,7 +515,8 @@ class VoiceAgentController extends Controller
             ];
         }
         // 建立：「明天早上8:30幫我開導航到台中」「10分鐘後提醒我關火」「每天早上8點報天氣」
-        if ($sched = $this->parseSchedule($t)) {
+        // （提到「行事曆/日曆」→ 那是要建行事曆事件，不是定時自動執行任務，讓給下方的行事曆分支）
+        if (! preg_match('/(行事曆|行事历|日曆|日历|行程表)/u', $t) && ($sched = $this->parseSchedule($t))) {
             [$runAt, $recur, $task] = $sched;
             \App\Pai\Schedule\ScheduledTask::create([
                 'command' => $task, 'run_at' => $runAt, 'recur' => $recur,
@@ -529,6 +530,28 @@ class VoiceAgentController extends Controller
                 'meta' => ['category' => 'skill', 'skill' => 'schedule', 'direct' => true, 'action' => 'create'],
                 'step' => "⏰ 排定 {$when}：{$task}",
             ];
+        }
+
+        // 在手機日曆建立事件：「在行事曆加 明天三點 開會」「幫我排明天下午兩點看牙醫到行事曆」
+        if (preg_match('/(加到行事曆|加進行事曆|新增行程|新增事件|加.{0,3}行事曆|記到行事曆|排.{0,4}行事曆|建立.{0,2}事件|行事曆.{0,2}(新增|加))/u', $t)) {
+            if ($sched = $this->parseSchedule($t)) {
+                [$runAt, , $task] = $sched;
+                $title = $task !== '' ? $task : '提醒';
+                [$target, $targetLabel] = $this->targetGateway($t);
+                $r = $this->reverseCall($target, 'add_calendar_event', [
+                    'title' => $title, 'begin_ms' => $runAt->getTimestampMs(), 'end_ms' => 0,
+                ]);
+                if ($r !== null) {
+                    [$res, $fail] = $r;
+
+                    return [
+                        'reply' => "📅 已在{$targetLabel}日曆預填「{$title}」（{$runAt->format('n/j H:i')}），請在手機按儲存。（{$res}）",
+                        'speech' => $fail ? $this->guiFailSpeech($targetLabel) : "好的，已經在你手機日曆預填{$runAt->format('n月j日H點i分')}的{$title}，請按儲存。",
+                        'meta' => ['category' => 'skill', 'skill' => 'calendar', 'direct' => true, 'action' => 'add_event', 'target' => $target],
+                        'step' => "📅 建立行事曆事件：{$title}",
+                    ];
+                }
+            }
         }
 
         // ── 晨間簡報 / 行事曆 / Gmail ───────────────────────────────────────────
