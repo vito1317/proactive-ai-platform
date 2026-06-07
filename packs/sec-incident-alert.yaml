@@ -1,0 +1,49 @@
+domain: sec-incident-alert
+coordinator: sec-incident-alert-coordinator
+description: 'Monitors security events and provides real-time notifications to users upon incident detection.'
+triggers:
+  events:
+    - security.incident
+    - security.alert
+  cron:
+    - '0 9 * * *: Daily security summary report'
+tools:
+  -
+    uri: 'mcp://security-log-reader'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://notification-service'
+    perms:
+      - write
+    risk: low
+  -
+    uri: 'mcp://network-firewall-control'
+    perms:
+      - exec
+    risk: high
+agents:
+  topology: router
+  roster:
+    - name: incident-detector
+      role: 'Detects and classifies security anomalies from logs'
+    - name: alert-dispatcher
+      role: 'Formats and sends notifications to the user'
+    - name: remediation-agent
+      role: 'Proposes and executes containment actions'
+memory:
+  namespace: sec-incident-alert
+  knowledge:
+    - type: vector
+      source: security_incident_history_db
+    - type: doc
+      source: security_policy_manual
+risk_policy:
+  autonomy: supervisor
+  hitl_required:
+    - firewall-block-action
+  rate_limits:
+    firewall-block-action: 5/min
+contracts:
+  output: contracts/security_alert.schema.json

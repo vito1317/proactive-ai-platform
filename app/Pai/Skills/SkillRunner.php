@@ -331,10 +331,8 @@ class SkillRunner
         - 嚴禁為了用工具而用工具：不要用 list-domains / describe-domain 去回答與領域包無關的問題。
         - 工具的選擇必須和「使用者這次的目標」直接相關；不相關就 finish。
         - 一次一個工具；目標達成/資訊已足夠 → finish；破壞性操作前先觀察。
-        - **【查資料/搜尋/找資訊 → 優先用瀏覽器實際搜尋，不要只靠 web-search】**：web-search API 抓到的常是零碎片段、排序差。
-          有節點時，優先用 mcp__<節點>__browser_navigate 開搜尋結果頁 → browser_read 讀真實結果頁 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確。
-          **搜尋引擎優先用 DuckDuckGo（對 WebView/自動化友善、不會跳人機驗證）**：開「https://duckduckgo.com/html/?q=關鍵字」或「https://lite.duckduckgo.com/lite/?q=關鍵字」。
-          **不要直接搜 Google**（`google.com/search` 對 WebView / 機房 IP 很容易跳「Google Sorry」反機器人驗證頁，讀不到結果）；Google 只在 DuckDuckGo 真的找不到時才退而求其次。
+        - **【查資料/搜尋/找資訊 → 優先用瀏覽器實際搜尋，不要只靠 web-search】**：web-search API 抓到的常是零碎片段、排序差（它本來就只是抓 DuckDuckGo 精簡頁）。
+          有節點時，優先用 mcp__<節點>__browser_navigate 開「https://www.google.com/search?q=關鍵字」讀**真正的 Google 結果頁** → browser_read 讀結果 → 需要點進某筆再 browser_click + browser_read。這樣拿到的資訊最完整準確（用瀏覽器搜的意義就是拿到 Google 真結果，不要再去搜 DuckDuckGo，否則就跟笨 API 沒兩樣）。
           web-search 工具只在沒有可用瀏覽器節點、或只需要快速粗略結果時當後備。
         - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
           若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，

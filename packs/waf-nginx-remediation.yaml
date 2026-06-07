@@ -1,0 +1,41 @@
+domain: waf-nginx-remediation
+coordinator: waf-nginx-remediation-coordinator
+description: 'Monitor Nginx error logs in /opt/security-one-waf and perform automated error remediation.'
+triggers:
+  events:
+    - nginx.error_log_detected
+  cron:
+    - '*/5 * * * *: Periodic log integrity check'
+tools:
+  -
+    uri: 'mcp://nginx-log-reader'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://nginx-remediator'
+    perms:
+      - write
+      - exec
+    risk: high
+agents:
+  topology: sequential
+  roster:
+    - name: log-analyzer
+      role: 'Analyze Nginx error logs to identify root causes and error patterns'
+    - name: remediation-expert
+      role: 'Execute configuration fixes and service restarts to resolve errors'
+memory:
+  namespace: waf-nginx-remediation
+  knowledge:
+    - type: doc
+      source: /opt/security-one-waf/nginx_docs
+risk_policy:
+  autonomy: supervisor
+  hitl_required:
+    - nginx_config_rewrite
+    - nginx_service_restart
+  rate_limits:
+    nginx_config_rewrite: 3/hour
+contracts:
+  output: contracts/nginx_remediation_report.schema.json

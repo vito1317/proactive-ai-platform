@@ -5,7 +5,7 @@ triggers:
   events:
     - logs.waf.error
   cron:
-    - '*/1 * * * *: Poll error logs every minute'
+    - '*/10 * * * *: Poll error logs every 10 minutes'
 tools:
   -
     uri: 'mcp://file-system'

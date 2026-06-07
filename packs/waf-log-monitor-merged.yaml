@@ -1,0 +1,60 @@
+domain: waf-log-monitor-merged
+coordinator: waf-log-monitor-merged-coordinator
+description: 'Integrated monitoring and analysis of WAF error logs to detect security anomalies and system failures, with automated remediation capabilities.'
+triggers:
+  events:
+    - security.waf.error_detected
+    - logs.waf.error
+  cron:
+    - '*/5 * * * *: Periodic log scanning'
+    - '*/10 * * * *: Poll error logs every 10 minutes'
+tools:
+  -
+    uri: 'mcp://file-system-reader'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://file-system'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://waf-admin-cli'
+    perms:
+      - exec
+    risk: high
+  -
+    uri: 'mcp://system-shell'
+    perms:
+      - exec
+    risk: high
+agents:
+  topology: sequential
+  roster:
+    - name: log-watcher
+      role: 'Monitors log files for new error entries'
+    - name: log-observer
+      role: 'Scans /opt/security-one-waf/ for new error log entries'
+    - name: security-analyst
+      role: 'Analyzes log patterns to identify potential attacks or misconfigurations'
+    - name: error-analyst
+      role: 'Interprets error patterns and determines if remediation is required'
+    - name: incident-responder
+      role: 'Executes remediation commands via admin CLI'
+memory:
+  namespace: waf-log-monitor-merged
+  knowledge:
+    - type: doc
+      source: /opt/security-one-waf/error.log
+risk_policy:
+  autonomy: supervisor
+  hitl_required:
+    - restart_waf_service
+    - clear_waf_logs
+    - execute_shell_command
+  rate_limits:
+    restart_waf_service: 1/hour
+    execute_shell_command: 1/hour
+contracts:
+  output: contracts/waf_incident_report.schema.json

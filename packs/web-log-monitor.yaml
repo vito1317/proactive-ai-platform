@@ -1,0 +1,41 @@
+domain: web-log-monitor
+coordinator: web-log-monitor-coordinator
+description: 'Monitor and analyze error logs for the Intellitrust website to ensure service stability.'
+triggers:
+  events:
+    - logs.error_detected
+  cron:
+    - '*/5 * * * *: Periodic log file scanning'
+tools:
+  -
+    uri: 'mcp://filesystem-reader'
+    perms:
+      - read
+    risk: low
+  -
+    uri: 'mcp://service-manager'
+    perms:
+      - exec
+    risk: high
+agents:
+  topology: sequential
+  roster:
+    - name: log-watcher
+      role: 'Monitors file changes and detects new error patterns'
+    - name: error-analyst
+      role: 'Diagnoses the root cause of detected errors'
+    - name: recovery-operator
+      role: 'Executes corrective actions or service restarts'
+memory:
+  namespace: web-log-monitor
+  knowledge:
+    - type: doc
+      source: /home/vito/intellitrust-website/docs/error_codes.md
+risk_policy:
+  autonomy: supervisor
+  hitl_required:
+    - service_restart
+  rate_limits:
+    service_restart: 1/hour
+contracts:
+  output: contracts/error_analysis_report.schema.json
