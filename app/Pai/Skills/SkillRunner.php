@@ -40,7 +40,11 @@ class SkillRunner
             'set_volume' => '🔊 調整音量…', 'set_brightness' => '☀️ 調整亮度…',
             'flashlight' => '🔦 手電筒…', 'battery_status' => '🔋 查電量…',
             'clipboard_set' => '📋 複製到剪貼簿…', 'clipboard_get' => '📋 讀取剪貼簿…',
-            'share_text' => '↗️ 分享…', 'play_music' => '🎵 播放音樂…',
+            'share_text' => '↗️ 分享…', 'play_music' => '🎵 播放音樂…', 'media_control' => '⏯ 媒體控制…',
+            'phone_call' => '📞 撥打電話…', 'notifications_list' => '🔔 讀取通知…', 'notification_reply' => '💬 回覆訊息…',
+            'screen_snapshot' => '👁 讀取手機畫面…', 'screen_click' => '👆 點擊畫面…', 'screen_type' => '⌨️ 輸入文字…',
+            'screen_swipe' => '↕️ 滑動畫面…', 'screen_back' => '↩️ 返回…', 'screen_home' => '🏠 回主畫面…',
+            'screen_shot' => '📸 截圖判讀畫面…',
         ];
 
         return $map[$tool] ?? ('🔧 '.$tool.'…');
@@ -101,6 +105,7 @@ class SkillRunner
     /** 一步執行完的結果狀態（精簡單行預覽），即時回報給使用者。 */
     private function stepResult(Skill $skill, string $result): string
     {
+        $result = (string) preg_replace('/\[\[IMG\]\]data:image\/[a-z]+;base64,[A-Za-z0-9+\/=]+/', '📸（已截圖給 AI 看）', $result);
         $r = trim($result);
         if ($r === '') {
             return '✅ 完成（無輸出）';
@@ -269,7 +274,9 @@ class SkillRunner
             }
             // 執行完馬上回報結果狀態（精簡預覽），讓使用者看到每一步發生了什麼
             $step($this->stepResult($skill, (string) $result));
-            $obs[] = ['action' => $skill->name(), 'args' => $args, 'result' => mb_substr((string) $result, 0, 3000)];
+            // 截圖（[[IMG]]base64）不可截斷，否則圖會壞；其他結果照常截 3000
+            $obs[] = ['action' => $skill->name(), 'args' => $args,
+                'result' => str_contains((string) $result, '[[IMG]]data:image') ? (string) $result : mb_substr((string) $result, 0, 3000)];
         }
 
         // 達步數上限（或偵測到重複呼叫而提前結束）→ 用目前結果做總結（不顯示內部步數限制字樣）
@@ -302,9 +309,17 @@ class SkillRunner
     {
         $catalog = $this->registry->catalog();
         $obsText = '';
+        $lastImage = null; // 觀測結果裡的截圖（[[IMG]]data:URI）→ 抽出來用視覺餵給 LLM（Gemma 4 multimodal）
         foreach ($obs as $i => $o) {
+            $result = (string) $o['result'];
+            if (str_contains($result, '[[IMG]]data:image')) {
+                if (preg_match('/\[\[IMG\]\](data:image\/[a-z]+;base64,[A-Za-z0-9+\/=]+)/', $result, $im)) {
+                    $lastImage = $im[1]; // 只保留最後一張（最新畫面），避免 token 爆量
+                }
+                $result = trim((string) preg_replace('/\[\[IMG\]\]data:image\/[a-z]+;base64,[A-Za-z0-9+\/=]+/', '（截圖已附在下方圖片，請直接看圖判斷）', $result));
+            }
             $a = json_encode($o['args'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $obsText .= ($i + 1).'. '.$o['action'].'('.$a.') → '.mb_substr((string) $o['result'], 0, 1500)."\n";
+            $obsText .= ($i + 1).'. '.$o['action'].'('.$a.') → '.mb_substr($result, 0, 1500)."\n";
         }
         $obsText = $obsText !== '' ? $obsText : '（尚未執行任何步驟）';
 
@@ -370,6 +385,8 @@ class SkillRunner
           **回覆 LINE / 訊息的最快路徑**：notifications_list 看最近通知 → notification_reply(target=對方名字或 LINE, message=內容) 直接回覆，完全不用打開 App。
           打電話：phone_call(to=號碼或聯絡人名稱)。播放音樂：play_music(query=歌名/歌手)。暫停/下一首：media_control。
           （這些工具需要使用者開過「通知存取」「協助工具」權限；工具回覆若說未開啟，把那段話轉告使用者請他開啟。）
+          **【你看得懂圖片】**：screen_snapshot 元素讀不懂、畫面是圖片/地圖/影片、或不確定畫面長怎樣時，呼叫 screen_shot——
+          截圖會直接附給你「看」，照你看到的內容判斷下一步（要點哪裡就用 screen_click 配可見文字或先 snapshot 拿編號）。
         - **【一次只查一個主題，不要把多個問題塞進同一個搜尋字串】**：搜尋引擎一次搜一件事最準。
           若使用者一句話包含多個要查的點（例：「汐止到台中車程」「山河滷肉飯營業時間」「台中兩日遊行程」），請把它們拆成 plan 裡的**獨立步驟**，
           一個 browser_navigate（搜尋第一個）→ browser_read 讀完 → 再 browser_navigate（搜尋第二個）→ browser_read…逐一查完，最後彙整。
@@ -402,12 +419,20 @@ class SkillRunner
         {$forceNote}/no_think
         PROMPT;
 
+        // 有截圖 → 用視覺格式（OpenAI content parts）讓 LLM 直接「看」畫面（Gemma 4 multimodal）
+        $userContent = $lastImage !== null
+            ? [
+                ['type' => 'text', 'text' => $prompt],
+                ['type' => 'image_url', 'image_url' => ['url' => $lastImage]],
+            ]
+            : $prompt;
+
         try {
             // 帶 onThought → 串流模式：把推理鏈即時推給前端，JSON 內容靜默累積後解析
             if ($onThought !== null) {
                 $full = '';
                 $this->llm->stream(
-                    [['role' => 'user', 'content' => $prompt]],
+                    [['role' => 'user', 'content' => $userContent]],
                     function (string $d) use (&$full) { $full .= $d; }, // 累積 JSON，不外露給使用者
                     null,
                     null,
@@ -417,7 +442,7 @@ class SkillRunner
                 return LlmClient::extractJson($full);
             }
 
-            return LlmClient::extractJson($this->llm->chat([['role' => 'user', 'content' => $prompt]], ['max_tokens' => 1024]));
+            return LlmClient::extractJson($this->llm->chat([['role' => 'user', 'content' => $userContent]], ['max_tokens' => 1024]));
         } catch (Throwable) {
             return null;
         }
@@ -432,7 +457,11 @@ class SkillRunner
         if ($obs === []) {
             return '我沒有可執行的步驟。';
         }
-        $results = collect($obs)->map(fn ($o) => $o['action'].' → '.mb_substr((string) $o['result'], 0, 1500))->implode("\n");
+        $results = collect($obs)->map(function ($o) {
+            $r = (string) preg_replace('/\[\[IMG\]\]data:image\/[a-z]+;base64,[A-Za-z0-9+\/=]+/', '（截圖）', (string) $o['result']);
+
+            return $o['action'].' → '.mb_substr($r, 0, 1500);
+        })->implode("\n");
         $messages = [
             ['role' => 'system', 'content' => '根據以下工具實際執行結果，用繁體中文回答使用者目標的結論與重點；只依結果、不要編造。'],
             ['role' => 'user', 'content' => "目標：{$message}\n結果：\n{$results}"],
@@ -505,7 +534,8 @@ class SkillRunner
             $result = '錯誤：'.$e->getMessage();
         }
         $step($this->stepResult($skill, (string) $result));
-        $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [], 'result' => mb_substr((string) $result, 0, 3000)];
+        $obs[] = ['action' => $skill->name(), 'args' => $pending['args'] ?? [],
+            'result' => str_contains((string) $result, '[[IMG]]data:image') ? (string) $result : mb_substr((string) $result, 0, 3000)];
 
         // 接續多輪代理迴圈（confirm 一次後若還有後續步驟，會繼續；'always' 則之後不再問）
         $out = $this->agentic($conv, $message, $onStep, $obs, $onDelta, $onThought);
