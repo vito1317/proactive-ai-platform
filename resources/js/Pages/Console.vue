@@ -15,6 +15,7 @@ const props = defineProps({
     learnedSkills: { type: Array, default: () => [] },
     userMemories: { type: Array, default: () => [] },
     llmUsage: { type: Object, default: () => ({}) },
+    scheduledTasks: { type: Array, default: () => [] },
 });
 
 const copied = ref(false);
@@ -345,6 +346,22 @@ const actionStatusClass = (x) => ({
                                 <span class="text-xs text-slate-400">{{ n.ok ? (n.ms + 'ms · ' + (n.tools?.length || 0) + ' 工具') : (n.error || '離線') }}</span>
                             </li>
                         </ul>
+                    </div>
+
+                    <!-- 排定的定時任務 -->
+                    <div class="glass p-5">
+                        <h2 class="flex items-center gap-2 font-semibold text-white">⏰ 排定的行程 / 定時任務</h2>
+                        <ul v-if="scheduledTasks.length" class="mt-3 space-y-2">
+                            <li v-for="t in scheduledTasks" :key="t.id" class="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+                                <div class="min-w-0">
+                                    <div class="text-sm text-white truncate">{{ t.command }}</div>
+                                    <div class="text-[11px] text-cyan-300">{{ t.run_at }}<span v-if="t.recur === 'daily'" class="ml-1 text-emerald-300">· 每天</span></div>
+                                </div>
+                                <button class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-slate-300 hover:text-red-300"
+                                    @click="router.post('/console/scheduled/' + t.id + '/cancel', {}, { preserveScroll: true })">取消</button>
+                            </li>
+                        </ul>
+                        <p v-else class="mt-3 text-xs text-slate-500">目前沒有排定的定時任務。對 AI 說「每天早上八點報天氣」「明天三點提醒我開會」就會出現在這。</p>
                     </div>
 
                     <!-- #9 LLM 用量觀測 -->

@@ -50,12 +50,28 @@ class ConsoleController extends Controller
                 ->get(['id', 'category', 'content'])->toArray(),
             // #9 LLM 用量觀測（今日/本週 calls、tokens、平均延遲）
             'llmUsage' => \App\Pai\Cognition\LlmUsage::summary(),
+            // 排定的定時任務（pending，依時間排序）
+            'scheduledTasks' => \App\Pai\Schedule\ScheduledTask::where('status', 'pending')->orderBy('run_at')->limit(50)
+                ->get()->map(fn ($t) => [
+                    'id' => $t->id,
+                    'command' => $t->command,
+                    'run_at' => $t->run_at->timezone('Asia/Taipei')->format('Y-m-d H:i'),
+                    'recur' => $t->recur,
+                ])->all(),
 
             // 一鍵安裝指令（dashboard 顯示）
             'installCommand' => $this->installCommand(),
             // Node Gateway 自動接線一鍵指令（裝 gateway + cloudflared 通道 + 自動註冊到 PAI）
             'gatewayInstallCommand' => $this->gatewayConnectCommand(),
         ]);
+    }
+
+    /** 取消一個定時任務。 */
+    public function cancelScheduled(int $id): \Illuminate\Http\RedirectResponse
+    {
+        \App\Pai\Schedule\ScheduledTask::where('id', $id)->update(['status' => 'cancelled']);
+
+        return back()->with('flash', ['success' => '已取消定時任務']);
     }
 
     /** 即時回報各 MCP / Gateway 節點的連線狀態（給主控台節點卡片用）。 */

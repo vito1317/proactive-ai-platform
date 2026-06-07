@@ -43,6 +43,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/console/commands', [ConsoleController::class, 'dispatchEvent'])->name('console.commands');
     Route::post('/console/runs/{run}/decision', [ConsoleController::class, 'decide'])->name('console.decide');
     Route::post('/notifications/read', [ConsoleController::class, 'markNotificationsRead'])->name('notifications.read');
+    Route::post('/console/scheduled/{id}/cancel', [ConsoleController::class, 'cancelScheduled'])->name('console.scheduled.cancel');
 
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
     Route::post('/settings', [SettingsController::class, 'update'])->name('settings.update');
