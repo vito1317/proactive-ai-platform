@@ -80,6 +80,8 @@ Route::post('/api/voice/agent', [VoiceAgentController::class, 'handle'])->name('
 Route::post('/api/voice/agent-stream', [VoiceAgentController::class, 'stream'])->name('voice.agent.stream');
 
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
+Route::get("/api/gateway/poll", [GatewayController::class, "poll"])->name("gateway.poll");       // 反向節點 long-poll 取指令
+Route::post("/api/gateway/result", [GatewayController::class, "result"])->name("gateway.result"); // 反向節點回傳結果
 
 // L1 感知層事件入口（外部系統推送，公開、CSRF 豁免，見 bootstrap/app.php）
 Route::post('/webhooks/{source}', [WebhookController::class, 'store']);

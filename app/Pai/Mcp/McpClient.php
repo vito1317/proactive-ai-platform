@@ -24,6 +24,10 @@ class McpClient
      */
     public function listTools(string $url, array $headers): array
     {
+        // 反向節點：工具清單在註冊時由手機帶上、存於 ReverseBus
+        if (str_starts_with($url, 'reverse://')) {
+            return ReverseBus::tools(substr($url, strlen('reverse://')));
+        }
         try {
             [$resp, $init, $sid] = $this->post($url, $headers, $this->initPayload(), null);
             if ($resp->failed()) {
@@ -53,6 +57,10 @@ class McpClient
      */
     public function callTool(string $url, array $headers, string $tool, array $args): array
     {
+        // 反向節點（如 Android，無公網/cloudflared）：把呼叫放佇列等手機 poll 執行、回傳結果
+        if (str_starts_with($url, 'reverse://')) {
+            return ReverseBus::call(substr($url, strlen('reverse://')), $tool, $args);
+        }
         try {
             [$resp, $init, $sid] = $this->post($url, $headers, $this->initPayload(), null);
             if ($resp->failed() || isset($init['error'])) {

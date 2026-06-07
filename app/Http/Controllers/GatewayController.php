@@ -71,15 +71,30 @@ class GatewayController extends Controller
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:64'],
-            'url' => ['required', 'string', 'max:512'],
+            'url' => ['nullable', 'string', 'max:512'],
             'secret' => ['nullable', 'string', 'max:256'],
+            'mode' => ['nullable', 'string', 'in:http,reverse'],
+            'tools' => ['nullable', 'array'],
         ]);
 
         // 名稱正規化成英數/dash（MCP 工具前綴用）
         $name = preg_replace('/[^a-z0-9_-]/i', '-', $data['name']) ?: 'node';
-        $headers = $data['secret'] ? ['X-Gateway-Secret' => $data['secret']] : [];
 
-        $res = $this->manager->add($name, $data['url'], $headers);
+        // 反向節點（手機等無公網/無法被連入）：不測連線，工具清單由節點帶上，之後走 ReverseBus
+        if (($data['mode'] ?? '') === 'reverse') {
+            $tools = $data['tools'] ?? [];
+            \App\Pai\Mcp\ReverseBus::setTools($name, $tools);
+            \App\Pai\Mcp\McpServer::updateOrCreate(['name' => $name], [
+                'url' => 'reverse://'.$name, 'headers' => [], 'enabled' => true,
+                'tools' => $tools, 'last_error' => null,
+            ]);
+
+            return response()->json(['ok' => true, 'name' => $name, 'mode' => 'reverse',
+                'message' => "反向節點「{$name}」已接入（".count($tools).' 個工具）', 'tools' => $tools]);
+        }
+
+        $headers = $data['secret'] ? ['X-Gateway-Secret' => $data['secret']] : [];
+        $res = $this->manager->add($name, (string) ($data['url'] ?? ''), $headers);
 
         return response()->json([
             'ok' => (bool) ($res['ok'] ?? false),
@@ -87,5 +102,29 @@ class GatewayController extends Controller
             'message' => $res['message'] ?? '',
             'tools' => $res['tools'] ?? [],
         ], ($res['ok'] ?? false) ? 200 : 422);
+    }
+
+    /** 反向節點 long-poll：取一個待執行的工具呼叫（最多等 25 秒）。回 {call:null} 表示沒有，節點應立即重新 poll。 */
+    public function poll(Request $request): JsonResponse
+    {
+        if (! hash_equals(self::registerSecret(), (string) $request->header('X-Register-Secret'))) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $node = preg_replace('/[^a-z0-9_-]/i', '-', (string) $request->query('node')) ?: 'node';
+        $call = \App\Pai\Mcp\ReverseBus::next($node);
+
+        return response()->json(['call' => $call]);
+    }
+
+    /** 反向節點回傳某次呼叫的執行結果。 */
+    public function result(Request $request): JsonResponse
+    {
+        if (! hash_equals(self::registerSecret(), (string) $request->header('X-Register-Secret'))) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $data = $request->validate(['id' => ['required', 'string'], 'text' => ['nullable', 'string']]);
+        \App\Pai\Mcp\ReverseBus::submit($data['id'], (string) ($data['text'] ?? ''));
+
+        return response()->json(['ok' => true]);
     }
 }
