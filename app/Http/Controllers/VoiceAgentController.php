@@ -997,7 +997,8 @@ class VoiceAgentController extends Controller
         }
         // 「打開 LINE / 開啟 Instagram / 啟動某 App」→ 直接 open_app（不繞 agentic、不先讀通知）
         // 但若句子是「打開 X 並/然後 做別的事」這種多意圖 → 不直達，交 agentic（它會開 App 再做後續）
-        $multiIntent = (bool) preg_match('/(並|并|然後|然后|接著|接着|再幫|再帮|，.*[看回傳發查]|,.*[看回傳發查]|順便|顺便)/u', $t);
+        // 多意圖：開 App 之外還要做別的（傳訊息/查看/回覆…）→ 不直達，交 agentic
+        $multiIntent = (bool) preg_match('/(並|并|然後|然后|接著|接着|再幫|再帮|，.*[看回傳發查]|,.*[看回傳發查]|順便|顺便|給.{1,12}說|给.{1,12}说|跟.{1,12}說|跟.{1,12}说|傳給|传给|傳訊息|传讯息|傳個|发个|發個|告訴|告诉|說我|说我|回覆|回复|看.{0,4}訊息|看.{0,4}消息|查看)/u', $t);
         if ($key === null && $hasOpen && ! $hasClose && ! $hasSearch && ! $multiIntent) {
             $appName = $this->extractAppName($t);
             if ($appName !== '') {
