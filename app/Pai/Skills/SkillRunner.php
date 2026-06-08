@@ -60,6 +60,8 @@ class SkillRunner
         return [
             'web-search' => '🔍 上網搜尋…',
             'execute-code' => '🧬 一次串接多個工具…',
+            'wait' => '⏳ 等待中…',
+            'loop' => '🔁 重複/輪詢偵測…',
             'answer-from-web' => '🔍 上網搜尋並閱讀資料…',
             'web-fetch' => '🌐 開啟網頁讀取內容…',
             'read-file' => '📄 讀取檔案…',
