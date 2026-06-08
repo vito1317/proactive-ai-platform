@@ -313,9 +313,72 @@ class SkillRunner
     }
 
     /** 讓 AI 依目前觀察決定下一步工具（帶最近對話脈絡，避免上下文丟失）。 */
+    /**
+     * 只挑「跟這次需求相關」的工具給 LLM（避免上百個工具淹沒本地模型）。
+     * 核心工具永遠帶；其餘依「使用者訊息＋已執行步驟」的關鍵字命中對應分群才帶。
+     */
+    private function relevantCatalog(string $message, array $obs, ?string $preferNode): string
+    {
+        $skills = $this->registry->dedupedSkills($preferNode);
+        // 比對來源：這次訊息 + 最近幾步的動作/結果（讓進行中的流程相關工具持續可用）
+        $hay = mb_strtolower($message.' '.collect($obs)->take(-3)->map(fn ($o) => ($o['action'] ?? '').' '.mb_substr((string) ($o['result'] ?? ''), 0, 120))->implode(' '));
+
+        // 永遠提供的核心工具（基本名）
+        $core = ['web-search', 'answer-from-web', 'web-fetch', 'execute-code', 'wait', 'loop', 'show_document'];
+        // 分群：命中任一關鍵字 → 該群的工具（用「基本名」比對）納入
+        $groups = [
+            'browser' => ['kw' => '查|搜尋|搜寻|找|網頁|网页|瀏覽器|浏览器|google|資料|资料|新聞|新闻|比價|比价|查詢|查询|多少|哪家|哪間|哪间|推薦|推荐|價格|价格|評價|评价|訂|预订|预定|訂位|訂票|機票|机票|住宿|飯店|饭店|攻略|是誰|是什麼|怎麼辦', 'tools' => 'browser_,open_url'],
+            'screen' => ['kw' => '打開|打开|開啟|开启|啟動|启动|操作|點|点|滑|畫面|画面|line|賴|instagram|ig|facebook|fb|youtube|spotify|設定|设置|相機|相机|遊戲|游戏|這個app|那個app|傳訊|傳訊息|傳給|跟.*說|給.*說|回覆|回复|訊息|消息|通知', 'tools' => 'screen_,open_app,list_apps,notifications_list,notification_reply'],
+            'maps' => ['kw' => '導航|导航|地圖|地图|路線|路线|帶我去|带我去|前往|怎麼去|怎么去|怎麼走|怎么走', 'tools' => 'maps_route,open_url'],
+            'call' => ['kw' => '打電話|打电话|撥號|拨号|打給|打给|撥|拨|電話|电话', 'tools' => 'phone_call'],
+            'media' => ['kw' => '音樂|音乐|播放|放歌|聽歌|听歌|歌|暫停|暂停|下一首|上一首|music', 'tools' => 'play_music,media_control'],
+            'calendar' => ['kw' => '行事曆|行事历|日曆|日历|行程|事件|加到.*曆', 'tools' => 'add_calendar_event'],
+            'vision' => ['kw' => '拍照|看.*畫面|看.*画面|截圖|截图|這是什麼|这是什么|圖片|图片|看圖|看图', 'tools' => 'screen_shot'],
+            'device' => ['kw' => '定位|位置|亮度|音量|手電筒|手电筒|電量|电量|剪貼簿|剪贴板|震動|震动|複製|复制|分享', 'tools' => 'device_location,phone_notify,clipboard_set,clipboard_get,flashlight,set_volume,set_brightness,vibrate,battery_status,share_text,phone_speak,phone_toast,device_info'],
+            'system' => ['kw' => '檔案|文件|執行|执行|指令|終端|终端|程式碼|代码|\bcode\b|log|日誌|日志|磁碟|磁盘|記憶體|内存|cpu|部署|安裝|安装|寫入|写入|改檔|讀檔|读取|nginx|docker', 'tools' => 'run-shell,exec,read-file,write-file,edit-file,insert-in-file,tail-logs,list_procs,proc_status,proc_logs,kill,spawn'],
+            'platform' => ['kw' => '設定|设置|領域|领域|mcp|斜線|斜杠|重啟worker|重启worker|自我修改|溫度|temperature|模型', 'tools' => 'get-settings,update-setting,list-domains,describe-domain,toggle-domain,merge-domains,restart-workers,stop-task,add-mcp-server,list-mcp-servers,remove-mcp-server,add-command,list-commands,remove-command,generate-install-command'],
+            'email' => ['kw' => '寄信|寄.*郵件|寄.*邮件|email|gmail|傳email|發郵件|发邮件', 'tools' => 'send-email'],
+            'delegate' => ['kw' => '同時|同时|並行|并行|分頭|分别|好幾件|好几件|多個任務|多个任务', 'tools' => 'delegate'],
+        ];
+        $allowedPatterns = [];
+        foreach ($groups as $g) {
+            if (preg_match('/'.$g['kw'].'/iu', $hay)) {
+                foreach (explode(',', $g['tools']) as $p) {
+                    $allowedPatterns[] = $p;
+                }
+            }
+        }
+        // 沒命中任何群 → 預設給最常用的（瀏覽器查資料 + 手機操作），避免漏工具
+        if ($allowedPatterns === []) {
+            $allowedPatterns = ['browser_', 'open_url', 'open_app', 'screen_', 'maps_route'];
+        }
+
+        $base = fn (string $n) => str_starts_with($n, 'mcp__') ? (explode('__', $n)[2] ?? $n) : $n;
+        $matched = array_filter($skills, function (Skill $s) use ($base, $core, $allowedPatterns) {
+            $b = $base($s->name());
+            if (in_array($b, $core, true)) {
+                return true;
+            }
+            foreach ($allowedPatterns as $p) {
+                if ($p !== '' && (str_starts_with($b, rtrim($p, '_')) ? str_starts_with($b, $p) : $b === $p)) {
+                    return true;
+                }
+                if ($p !== '' && str_ends_with($p, '_') && str_starts_with($b, $p)) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        return SkillRegistry::format(array_values($matched));
+    }
+
     private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false, ?callable $onThought = null, string $planNote = ''): ?array
     {
-        $catalog = $this->registry->catalog();
+        // 只給「跟這次需求相關」的工具（去重 + 關鍵字分群過濾）→ 不讓上百個工具淹沒本地模型
+        $preferNode = (string) $this->settings->get('voice.default_gateway', 'local');
+        $catalog = $this->relevantCatalog($message, $obs, $preferNode !== 'local' ? $preferNode : null);
         $obsText = '';
         $lastImage = null; // 觀測結果裡的截圖（[[IMG]]data:URI）→ 抽出來用視覺餵給 LLM（Gemma 4 multimodal）
         foreach ($obs as $i => $o) {

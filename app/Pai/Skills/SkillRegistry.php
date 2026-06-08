@@ -126,8 +126,50 @@ class SkillRegistry
     /** 給 LLM 選用的技能目錄文字。 */
     public function catalog(): string
     {
+        return $this->catalogFor(null);
+    }
+
+    /**
+     * 精簡工具目錄：MCP 工具依「基本工具名」去重（多節點重複的 browser、exec 等只留一份），
+     * 優先保留 $preferNode（使用者預設節點）的版本。大幅縮短 prompt，避免本地模型被上百個工具淹沒。
+     */
+    public function catalogFor(?string $preferNode): string
+    {
+        return self::format($this->dedupedSkills($preferNode));
+    }
+
+    /** 去重後的技能清單（MCP 工具同名只留一個，優先 $preferNode）。 @return array<int,Skill> */
+    public function dedupedSkills(?string $preferNode): array
+    {
+        $builtin = [];
+        $mcpByBase = [];
+        foreach ($this->all() as $name => $skill) {
+            if (! str_starts_with($name, 'mcp__')) {
+                $builtin[] = $skill;
+
+                continue;
+            }
+            $parts = explode('__', $name);
+            $node = $parts[1] ?? '';
+            $base = $parts[2] ?? $name;
+            if (isset($mcpByBase[$base])) {
+                if ($preferNode !== null && $node === $preferNode && $mcpByBase[$base]['node'] !== $preferNode) {
+                    $mcpByBase[$base] = ['skill' => $skill, 'node' => $node];
+                }
+
+                continue;
+            }
+            $mcpByBase[$base] = ['skill' => $skill, 'node' => $node];
+        }
+
+        return array_merge($builtin, array_map(fn ($e) => $e['skill'], array_values($mcpByBase)));
+    }
+
+    /** @param array<int,Skill> $skills */
+    public static function format(array $skills): string
+    {
         $lines = [];
-        foreach ($this->all() as $skill) {
+        foreach ($skills as $skill) {
             $params = $skill->parameters();
             $p = $params === [] ? '無參數' : implode('；', array_map(fn ($k, $v) => "{$k}：{$v}", array_keys($params), $params));
             $risk = $skill->isHighRisk() ? '[高風險]' : '[低風險]';
