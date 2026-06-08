@@ -255,20 +255,22 @@ class SkillRunner
             $args = is_array($d['args'] ?? null) ? $d['args'] : [];
             $picked = true;
 
-            // 重複呼叫同一工具同參數 → 已有資料，直接彙整作答（避免空轉到步數上限）
-            // 但「讀取畫面/狀態」與「導覽/等待」類工具天生要重複呼叫（畫面會變），不可因重複就中斷——
-            // 否則操作 App（snapshot→click→再 snapshot…）會在第二次 snapshot 被誤判中斷。
+            // 重複呼叫同一工具同參數 → 已有資料/空轉，直接彙整作答（避免無限迴圈到步數上限）。
+            // 但「動作（點擊/輸入/開App/送出…）會改變畫面」→ 動作後就允許重新讀畫面（清掉 seen），
+            // 只有「連續兩次相同讀取且中間沒任何動作」才視為空轉而中斷。
             $base = str_starts_with($action, 'mcp__') ? (explode('__', $action)[2] ?? $action) : $action;
-            $repeatable = in_array($base, [
-                'screen_snapshot', 'screen_shot', 'screen_back', 'screen_home', 'screen_swipe',
-                'browser_read', 'browser_snapshot', 'browser_current_url', 'browser_back', 'browser_reload',
-                'wait', 'loop', 'notifications_list',
-            ], true);
             $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
-            if (! $repeatable && isset($seen[$sig])) {
+            if (isset($seen[$sig])) {
                 break;
             }
             $seen[$sig] = true;
+            // 純讀取/觀察類工具的清單（呼叫它們「不算動作」，不清 seen）
+            $readOnly = in_array($base, [
+                'screen_snapshot', 'screen_shot', 'browser_read', 'browser_snapshot', 'browser_current_url',
+                'notifications_list', 'device_location', 'battery_status', 'clipboard_get', 'get-settings',
+                'list_apps', 'list_procs', 'proc_status', 'proc_logs', 'tail-logs', 'read-file',
+                'list-domains', 'describe-domain', 'list-mcp-servers', 'list-commands', 'web-search', 'answer-from-web', 'web-fetch',
+            ], true);
 
             // 高風險未允許 → 暫存（含已累積 obs）、請求對話確認；確認後由 resolvePending 接續迴圈
             if ($skill->isHighRisk() && ! $this->writesAllowed($conv)) {
@@ -301,6 +303,11 @@ class SkillRunner
             }
             // 執行完馬上回報結果狀態（精簡預覽），讓使用者看到每一步發生了什麼
             $step($this->stepResult($skill, (string) $result));
+            // 動作類工具（點擊/輸入/開App/導航…非純讀取）會改變畫面 → 清掉 seen，讓後續可重新讀畫面/重做，
+            // 但連續相同的純讀取（中間沒動作）仍會被擋，避免一直 snapshot 不動作的空轉迴圈。
+            if (! $readOnly) {
+                $seen = [];
+            }
             // 截圖（[[IMG]]base64）不可截斷，否則圖會壞；其他結果照常截 3000
             $obs[] = ['action' => $skill->name(), 'args' => $args,
                 'result' => str_contains((string) $result, '[[IMG]]data:image') ? (string) $result : mb_substr((string) $result, 0, 3000)];
