@@ -256,8 +256,16 @@ class SkillRunner
             $picked = true;
 
             // 重複呼叫同一工具同參數 → 已有資料，直接彙整作答（避免空轉到步數上限）
+            // 但「讀取畫面/狀態」與「導覽/等待」類工具天生要重複呼叫（畫面會變），不可因重複就中斷——
+            // 否則操作 App（snapshot→click→再 snapshot…）會在第二次 snapshot 被誤判中斷。
+            $base = str_starts_with($action, 'mcp__') ? (explode('__', $action)[2] ?? $action) : $action;
+            $repeatable = in_array($base, [
+                'screen_snapshot', 'screen_shot', 'screen_back', 'screen_home', 'screen_swipe',
+                'browser_read', 'browser_snapshot', 'browser_current_url', 'browser_back', 'browser_reload',
+                'wait', 'loop', 'notifications_list',
+            ], true);
             $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
-            if (isset($seen[$sig])) {
+            if (! $repeatable && isset($seen[$sig])) {
                 break;
             }
             $seen[$sig] = true;
