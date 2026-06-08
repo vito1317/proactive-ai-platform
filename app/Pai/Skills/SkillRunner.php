@@ -168,6 +168,8 @@ class SkillRunner
         $picked = false;
         $forcedTool = false; // 是否已因「空談承諾」逼它選過一次工具（避免無限迴圈）
         $seen = [];           // 已執行過的 (工具+參數) 簽章，偵測重複呼叫
+        $lastRead = [];       // 各讀取工具上次的結果（比對畫面有沒有變）
+        $unchanged = 0;       // 連續「畫面沒變」次數
 
         // 連續操作步數上限：讀後台 react.max_steps（使用者可調），而非寫死
         // 連續操作步數上限：讀後台 react.max_steps（瀏覽器訂票/排行程等多步任務需要較高）。
@@ -266,14 +268,13 @@ class SkillRunner
                 'list_apps', 'list_procs', 'proc_status', 'proc_logs', 'tail-logs', 'read-file',
                 'list-domains', 'describe-domain', 'list-mcp-servers', 'list-commands', 'web-search', 'answer-from-web', 'web-fetch',
             ], true);
-            // 重複偵測（計數）：同畫面讀取最多 2 次（第 3 次才中斷，給「畫面還在載入」重讀的空間）；
-            // 其他工具同參數重複 1 次就中斷。動作後會清 seen，所以這只擋「連續相同呼叫、中間沒動作」的空轉。
+            // 動作類工具同參數重複（中間沒其他動作）→ 中斷（動作不該原地空轉）。
+            // 讀取類工具不在此中斷——改在執行後比對「畫面有沒有變」，沒變就回精簡提示督促它動作（見下方）。
             $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
-            $maxRepeat = $readOnly ? 2 : 1;
-            if (($seen[$sig] ?? 0) >= $maxRepeat) {
+            if (! $readOnly && isset($seen[$sig])) {
                 break;
             }
-            $seen[$sig] = ($seen[$sig] ?? 0) + 1;
+            $seen[$sig] = true;
 
             // 高風險未允許 → 暫存（含已累積 obs）、請求對話確認；確認後由 resolvePending 接續迴圈
             if ($skill->isHighRisk() && ! $this->writesAllowed($conv)) {
@@ -300,17 +301,32 @@ class SkillRunner
             }
             $step($this->stepDetail($skill, $args));
             try {
-                $result = $skill->run($args);
+                $result = (string) $skill->run($args);
             } catch (Throwable $e) {
                 $result = '錯誤：'.$e->getMessage();
             }
-            // 執行完馬上回報結果狀態（精簡預覽），讓使用者看到每一步發生了什麼
-            $step($this->stepResult($skill, (string) $result));
-            // 動作類工具（點擊/輸入/開App/導航…非純讀取）會改變畫面 → 清掉 seen，讓後續可重新讀畫面/重做，
-            // 但連續相同的純讀取（中間沒動作）仍會被擋，避免一直 snapshot 不動作的空轉迴圈。
-            if (! $readOnly) {
+            // 讀取類：畫面跟上次一模一樣（沒變化）→ 不重送整個畫面，改回精簡提示督促它「直接動作」。
+            // 連續多次都沒變 → 才中斷（避免無限讀取空轉）。
+            if ($readOnly) {
+                if (($lastRead[$sig] ?? null) === $result && $result !== '') {
+                    $unchanged = ($unchanged ?? 0) + 1;
+                    if ($unchanged >= 2) {
+                        // 已經連續讀到相同畫面 → 中斷，交回彙整（避免卡死）
+                        $obs[] = ['action' => $skill->name(), 'args' => $args, 'result' => '（畫面連續多次沒變化，停止讀取）'];
+                        break;
+                    }
+                    $result = '（畫面跟上次一模一樣、沒有變化。別再讀取畫面了，請直接根據先前已讀到的畫面選下一步「動作」：點擊輸入框→screen_type 輸入內容→點擊送出鈕。）';
+                } else {
+                    $unchanged = 0;
+                    $lastRead[$sig] = $result;
+                }
+            } else {
+                // 動作類工具（點擊/輸入/開App/導航…）會改變畫面 → 清掉 seen，讓後續可重新讀畫面/重做
                 $seen = [];
+                $unchanged = 0;
             }
+            // 執行完馬上回報結果狀態（精簡預覽），讓使用者看到每一步發生了什麼
+            $step($this->stepResult($skill, $result));
             // 截圖（[[IMG]]base64）不可截斷，否則圖會壞；其他結果照常截 3000
             $obs[] = ['action' => $skill->name(), 'args' => $args,
                 'result' => str_contains((string) $result, '[[IMG]]data:image') ? (string) $result : mb_substr((string) $result, 0, 3000)];
