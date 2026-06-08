@@ -736,7 +736,10 @@ class VoiceAgentController extends Controller
         }
 
         // 附近搜尋（用瀏覽器定位）：「附近有什麼好喝的飲料」→ 開 Google Maps 以使用者位置搜尋
-        if (preg_match('/(附近|這附近|这附近|周邊|周边)/u', $t)) {
+        // 但「比較型」需求（最便宜/最高上限/評價最好/24小時/收費…要比較才知道）→ 地圖釘點搜尋做不到，
+        // 交給 agentic（瀏覽器搜尋＋讀取＋比較）。這裡只處理「單純找某類地點」。
+        $comparative = (bool) preg_match('/(最[高低貴便宜近好大小多少棒讚]|上限|評價|评价|cp值|c\/p|划算|24小時|24小时|收費|收费|計費|计费|費率|费率|比較|比较|哪.{0,3}(便宜|划算|好停|好))/iu', $t);
+        if (preg_match('/(附近|這附近|这附近|周邊|周边)/u', $t) && ! $comparative) {
             $q = $this->extractNearbyQuery($t);
             if ($geo === null) {
                 return [
