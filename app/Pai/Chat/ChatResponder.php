@@ -115,6 +115,11 @@ class ChatResponder
     /** 判斷意圖類別（帶最近對話脈絡）。 */
     public function category(Conversation $conv, string $userMessage): string
     {
+        // 明顯的「裝置/App/網路操作」指令 → 直接判 skill（agentic），不交給常把操作誤判成純聊天的 LLM 分類器。
+        if (preg_match('/(打開|打开|開啟|开启|啟動|启动|傳訊息|传讯息|傳個訊息|傳.{1,10}(給|说|說)|发讯息|回覆|回复|回.{1,8}(說|说|訊息|消息)|播放|播.{0,6}歌|放.{0,4}(歌|音樂|音乐)|放歌|聽歌|听歌|导航|導航|帶我去|带我去|路線|路线|打電話|打电话|打給|打给|撥號|拨号|截圖|截图|看.{0,4}畫面|看.{0,4}画面|操作|點擊|点击|搜尋|搜寻|查一下|查詢|查询|上網查|附近|寄信|寄.{0,3}郵件|發郵件|开启相机|拍照|螢幕|屏幕|滑一下|關閉|关闭)/u', $userMessage)) {
+            return 'skill';
+        }
+
         $history = $conv->activeMessages()->get()->map(fn ($m) => ['role' => $m->role, 'content' => $m->content])->all();
 
         return $this->meta->classify($this->contextString($history))['category'];

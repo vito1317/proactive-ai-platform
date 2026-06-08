@@ -387,9 +387,10 @@ class SkillRunner
 
     private function decide(Conversation $conv, string $message, array $obs, bool $forceTool = false, ?callable $onThought = null, string $planNote = ''): ?array
     {
-        // 只給「跟這次需求相關」的工具（去重 + 關鍵字分群過濾）→ 不讓上百個工具淹沒本地模型
+        // 工具目錄：只做「去重」（同名多節點留一份，優先預設節點），不做關鍵字篩選——
+        // 之前的分群篩選會在某些措辭下把需要的工具濾掉（如傳訊息卻沒給 screen 工具），寧可多不要漏。
         $preferNode = (string) $this->settings->get('voice.default_gateway', 'local');
-        $catalog = $this->relevantCatalog($message, $obs, $preferNode !== 'local' ? $preferNode : null);
+        $catalog = $this->registry->catalogFor($preferNode !== 'local' ? $preferNode : null);
         $obsText = '';
         $lastImage = null; // 觀測結果裡的截圖（[[IMG]]data:URI）→ 抽出來用視覺餵給 LLM（Gemma 4 multimodal）
         foreach ($obs as $i => $o) {
