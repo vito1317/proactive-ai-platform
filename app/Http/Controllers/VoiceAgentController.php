@@ -827,6 +827,11 @@ class VoiceAgentController extends Controller
             $navMode = str_contains($m[1], '走') || str_contains($m[1], '步') ? 'walking' : 'driving';
         } elseif (preg_match('/(去|到)\s*(.{1,30}?)\s*(怎麼走|怎么走|怎麼去|怎么去)/u', $t, $m)) {
             $navDest = trim($m[2]);
+        } elseif (preg_match('/^(.{1,30}?)\s*的?\s*(導航|导航|路線|路线)\s*$/u', $t, $m) && ! preg_match('/(怎麼|怎么|多久)/u', $t)) {
+            // 「山河滷肉飯的導航」「台中導航」：目的地在「導航」之前
+            $navDest = trim($m[1]);
+        } elseif (preg_match('/(帶我去|带我去|帶我到|带我到)\s*(.{1,30}?)[。!！?？]?\s*$/u', $t, $m)) {
+            $navDest = trim($m[2]);
         }
         if ($navDest !== null && $navDest !== '' && ! preg_match('/^(那|這|这|哪|過去|过去)/u', $navDest)) {
             [$target, $targetLabel] = $this->targetGateway($t);
@@ -988,7 +993,9 @@ class VoiceAgentController extends Controller
             $key = 'chrome';
         }
         // 「打開 LINE / 開啟 Instagram / 啟動某 App」→ 直接 open_app（不繞 agentic、不先讀通知）
-        if ($key === null && $hasOpen && ! $hasClose && ! $hasSearch) {
+        // 但若句子是「打開 X 並/然後 做別的事」這種多意圖 → 不直達，交 agentic（它會開 App 再做後續）
+        $multiIntent = (bool) preg_match('/(並|并|然後|然后|接著|接着|再幫|再帮|，.*[看回傳發查]|,.*[看回傳發查]|順便|顺便)/u', $t);
+        if ($key === null && $hasOpen && ! $hasClose && ! $hasSearch && ! $multiIntent) {
             $appName = $this->extractAppName($t);
             if ($appName !== '') {
                 [$target, $targetLabel] = $this->targetGateway($t);
@@ -1235,7 +1242,10 @@ class VoiceAgentController extends Controller
 
         // 任務文字 = 原句去掉時間片段與贅詞；保留「提醒」語意
         $task = trim(str_replace($matched, '', $t));
-        $task = (string) preg_replace('/^(請|请|麻煩|麻烦|幫我|帮我|記得|记得|到時候|到时候|到時|到时|再|然後|然后)+/u', '', trim($task));
+        // 反覆清掉開頭的時間殘詞/語助/代名詞（明天把、幫我、我要…），直到穩定
+        for ($i = 0; $i < 4; $i++) {
+            $task = (string) preg_replace('/^(請|请|麻煩|麻烦|幫我|帮我|幫|帮|記得|记得|到時候|到时候|到時|到时|再|然後|然后|明天|明日|今天|後天|后天|大後天|大后天|每天|每日|把|我要|我想|想|要|順便|顺便|就)+/u', '', trim($task));
+        }
         $task = (string) preg_replace('/(幫我|帮我)/u', '', $task);
         $task = trim($task, " ，。,．.、");
         if (mb_strlen($task) < 2) {
@@ -1341,6 +1351,8 @@ class VoiceAgentController extends Controller
     private function extractAppName(string $t): string
     {
         $s = $t;
+        // 多意圖只取 App 名部分：在「並/和/然後/再/，」之前切斷（後續動作交 agentic）
+        $s = (string) preg_replace('/(並|并|和|然後|然后|接著|接着|再|，|,|、).*$/u', '', $s);
         // 去掉「在某節點上/裡」（惰性，需方位詞收尾，避免吃掉後面的 App 名）
         $s = preg_replace('/在[\x{4e00}-\x{9fff}A-Za-z0-9_\-]{1,12}?[上裡裏]\s*的?\s*/u', '', $s);
         $s = preg_replace('/(請|请|麻煩|麻烦|幫我|帮我|幫|帮|我想|我要|想要|可以|能不能|順便|顺便|然後|然后)/u', '', $s);

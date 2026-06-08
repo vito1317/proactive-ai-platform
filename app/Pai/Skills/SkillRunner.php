@@ -403,6 +403,9 @@ class SkillRunner
           **【在 LINE 裡傳訊息給特定的人 / 連續傳給不同人】**：每傳完一個人，要先回到「聊天列表」再找下一個人，不要以為還停在原本的聊天室：
           ① open_app LINE →（若不在聊天列表）連續 screen_back 退回主列表 → ② screen_snapshot 看聊天列表/找到對方名字；找不到就點上方「搜尋」用 screen_type 打名字 →
           ③ screen_click 點開那個人的聊天室 → ④ screen_click 點訊息輸入框 → screen_type 打字 → screen_click 點「送出/傳送」→ ⑤ screen_snapshot 確認已送出。
+          **【未把訊息「打字＋送出」完成前，嚴禁 finish】**：只「打開 App」或「點進某人聊天室」都【不算完成傳訊息】——
+          那只是中間步驟，務必繼續 ④ 點輸入框→screen_type 打內容→screen_click 送出鈕（找「傳送/送出/Send/紙飛機」圖示，或 screen_shot 看圖找送出鈕）→確認訊息出現在對話裡才算完成。
+          找不到送出鈕時：screen_type 後按 Enter（screen_type 也可），或 screen_shot 看圖判斷送出鈕位置再 screen_click。
           **換下一個人時：務必先 screen_back 回到聊天列表、重新 screen_snapshot 找新對象**，每換一頁都重新 snapshot 拿最新編號，不要沿用舊畫面的編號。讀不懂畫面就 screen_shot 看圖。
           打電話：phone_call(to=號碼或聯絡人名稱)。播放音樂：play_music(query=歌名/歌手)。暫停/下一首：media_control。
           （這些工具需要使用者開過「通知存取」「協助工具」權限；工具回覆若說未開啟，把那段話轉告使用者請他開啟。）

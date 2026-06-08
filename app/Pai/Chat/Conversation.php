@@ -50,6 +50,9 @@ class Conversation extends Model
 
     public function addMessage(string $role, string $content, array $meta = []): ConversationMessage
     {
+        // 來源（STT 語音逐字稿）可能含壞 UTF-8 → 存進去會害之後任何序列化此訊息的頁面 500。
+        // 在唯一寫入點清成合法 UTF-8（丟掉壞位元），根治 console/chat 等頁面崩潰。
+        $content = mb_convert_encoding($content, 'UTF-8', 'UTF-8');
         $msg = $this->messages()->create(['role' => $role, 'content' => $content, 'meta' => $meta]);
 
         // 自動上下文壓縮：每次 AI 回覆後檢查，超過門檻就排背景摘要（不阻塞回覆）
