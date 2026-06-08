@@ -215,6 +215,17 @@ class SkillRunner
                     continue;
                 }
 
+                // 自承「尚未完成/還沒做到」卻想結束（如傳訊息只開到聊天室就回「尚未完成傳送」）→ 強制繼續做完
+                if ($obs !== [] && $planGuard < 4 && preg_match('/(尚未完成|還沒完成|还没完成|未完成|未送出|未傳送|還沒(送出|傳送|傳|送)|还没(发送|传送|发)|沒能完成|没能完成|還沒做完|还没做完|下一步.{0,6}(送出|傳送|輸入|點))/u', $final)) {
+                    $planGuard++;
+                    $planNote = '你剛剛說「還沒完成」——那就【不可以 finish】。請依目前畫面/狀態，直接選工具把最後一步做完'
+                        .'（例如傳訊息：點輸入框→screen_type 打內容→點送出鈕→screen_snapshot 確認訊息出現）。';
+                    $forcedTool = true;
+                    $round--;
+
+                    continue;
+                }
+
                 if (! $picked && $obs === [] && $final === '') {
                     // 第一步就判定無工具可用 → 交回對話大腦正常回答
                     return ['reply' => '', 'meta' => ['category' => 'skill', 'no_skill' => true]];
