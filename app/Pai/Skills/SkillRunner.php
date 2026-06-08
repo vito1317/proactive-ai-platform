@@ -259,11 +259,6 @@ class SkillRunner
             // 但「動作（點擊/輸入/開App/送出…）會改變畫面」→ 動作後就允許重新讀畫面（清掉 seen），
             // 只有「連續兩次相同讀取且中間沒任何動作」才視為空轉而中斷。
             $base = str_starts_with($action, 'mcp__') ? (explode('__', $action)[2] ?? $action) : $action;
-            $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
-            if (isset($seen[$sig])) {
-                break;
-            }
-            $seen[$sig] = true;
             // 純讀取/觀察類工具的清單（呼叫它們「不算動作」，不清 seen）
             $readOnly = in_array($base, [
                 'screen_snapshot', 'screen_shot', 'browser_read', 'browser_snapshot', 'browser_current_url',
@@ -271,6 +266,14 @@ class SkillRunner
                 'list_apps', 'list_procs', 'proc_status', 'proc_logs', 'tail-logs', 'read-file',
                 'list-domains', 'describe-domain', 'list-mcp-servers', 'list-commands', 'web-search', 'answer-from-web', 'web-fetch',
             ], true);
+            // 重複偵測（計數）：同畫面讀取最多 2 次（第 3 次才中斷，給「畫面還在載入」重讀的空間）；
+            // 其他工具同參數重複 1 次就中斷。動作後會清 seen，所以這只擋「連續相同呼叫、中間沒動作」的空轉。
+            $sig = $action.'|'.md5((string) json_encode($args, JSON_UNESCAPED_UNICODE));
+            $maxRepeat = $readOnly ? 2 : 1;
+            if (($seen[$sig] ?? 0) >= $maxRepeat) {
+                break;
+            }
+            $seen[$sig] = ($seen[$sig] ?? 0) + 1;
 
             // 高風險未允許 → 暫存（含已累積 obs）、請求對話確認；確認後由 resolvePending 接續迴圈
             if ($skill->isHighRisk() && ! $this->writesAllowed($conv)) {
