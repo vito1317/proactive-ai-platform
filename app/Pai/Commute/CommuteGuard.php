@@ -3,6 +3,8 @@
 namespace App\Pai\Commute;
 
 use App\Models\User;
+use App\Pai\Chat\ChatResponder;
+use App\Pai\Chat\Conversation;
 use App\Pai\Mcp\ReverseBus;
 use App\Pai\Memory\UserMemory;
 use App\Pai\Notify\Notifier;
@@ -196,11 +198,11 @@ class CommuteGuard
         $managerVia = (string) $this->settings->get('commute.manager_via', 'line', $uid);
         $managerTo = (string) $this->settings->get('commute.manager_to', '', $uid);
         $tpl = (string) ($this->settings->get('commute.message_template', '', $uid)
-            ?: '報告主管，我目前在通勤途中，預計約 {eta} 到，會晚到約 {late} 分鐘，抱歉造成不便！');
-        $message = str_replace(['{late}', '{eta}'], [(string) ($late ?? '?'), $eta->format('H:i')], $tpl);
+            ?: '報告{manager}，我目前在通勤途中，預計約 {eta} 到，會晚到約 {late} 分鐘，抱歉造成不便！');
+        $message = str_replace(['{manager}', '{late}', '{eta}'], [$this->managerName($uid), (string) ($late ?? '?'), $eta->format('H:i')], $tpl);
 
         Cache::put("commute:pending:{$uid}", [
-            'via' => $managerVia, 'to' => $managerTo, 'message' => $message,
+            'via' => $managerVia, 'to' => $managerTo, 'manager' => $this->managerName($uid), 'message' => $message,
         ], 3600);
 
         $actions = [
@@ -249,26 +251,53 @@ class CommuteGuard
         }
     }
 
-    /** 接受後真的把訊息送給主管（接受按鈕的後端）。 */
+    /** 接受後把訊息送給主管。有設明確收件 ID→直接 API 送；否則走 agent（用主管姓名自動發送，像你平常叫它傳 LINE 給某人）。 */
     public function sendToManager(int $uid): string
     {
         $p = Cache::pull("commute:pending:{$uid}");
-        if (! is_array($p) || trim((string) ($p['to'] ?? '')) === '') {
-            return '沒有待發送的遲到訊息，或尚未設定主管聯絡方式。';
+        if (! is_array($p)) {
+            return '沒有待發送的遲到訊息。';
         }
-        $to = (string) $p['to'];
+        $to = trim((string) ($p['to'] ?? ''));
         $text = (string) $p['message'];
-        $via = (string) $p['via'];
-        try {
-            match ($via) {
-                'telegram' => $this->sendTelegram($uid, $to, $text),
-                'sms' => $this->sendSms($uid, $to, $text),
-                default => $this->sendLine($uid, $to, $text),
-            };
+        $via = (string) ($p['via'] ?: 'line');
+        $manager = (string) ($p['manager'] ?? '主管');
 
-            return "已透過 {$via} 傳訊息給主管：{$text}";
+        // 有明確收件 ID（LINE userId / TG chat_id / 手機號碼）→ 直接 API 送
+        if ($to !== '') {
+            try {
+                match ($via) {
+                    'telegram' => $this->sendTelegram($uid, $to, $text),
+                    'sms' => $this->sendSms($uid, $to, $text),
+                    default => $this->sendLine($uid, $to, $text),
+                };
+
+                return "已透過 {$via} 傳訊息給{$manager}：{$text}";
+            } catch (\Throwable $e) {
+                return '傳送失敗：'.$e->getMessage();
+            }
+        }
+
+        // 沒設 ID → 交給 agent，用主管姓名自動發送（agent 會操作手機 LINE 找到人傳）
+        $user = User::find($uid);
+        if ($user === null) {
+            return '找不到帳號，無法傳送。';
+        }
+        $verb = match ($via) {
+            'sms' => '用簡訊',
+            'telegram' => '用 Telegram',
+            default => '用 LINE',
+        };
+        try {
+            $conv = Conversation::where('voice_sid', "commute:{$uid}")->latest('id')->first()
+                ?? Conversation::create(['voice_sid' => "commute:{$uid}", 'user_id' => $uid, 'title' => '通勤遲到通知']);
+            $conv->addMessage('user', "（通勤助手）請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}", ['source' => 'commute']);
+            $r = app(ChatResponder::class)->respond($conv, "請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}");
+            $conv->addMessage('assistant', (string) ($r['reply'] ?? ''), ['source' => 'commute']);
+
+            return "已請 AI {$verb}傳給{$manager}：{$text}";
         } catch (\Throwable $e) {
-            return '傳送失敗：'.$e->getMessage();
+            return '請 AI 傳送時失敗：'.$e->getMessage();
         }
     }
 
@@ -322,6 +351,28 @@ class CommuteGuard
         }
 
         return null;
+    }
+
+    /** 主管稱呼：設定優先 → 長期記憶（如「我主管叫王經理」）→ 「主管」。 */
+    private function managerName(int $uid): string
+    {
+        $n = trim((string) $this->settings->get('commute.manager_name', '', $uid));
+        if ($n !== '') {
+            return $n;
+        }
+        try {
+            foreach (UserMemory::where('user_id', $uid)
+                ->where(fn ($q) => $q->where('content', 'like', '%主管%')->orWhere('content', 'like', '%經理%')->orWhere('content', 'like', '%老闆%'))
+                ->get() as $r) {
+                // 「主管叫王經理」「我的主管是李大明」「老闆 陳總」
+                if (preg_match('/(?:主管|經理|老闆|上司|主任)\s*(?:叫|是|為|：|:)?\s*([\x{4e00}-\x{9fff}]{2,5}(?:經理|總|主任|協理|副總|課長|組長)?)/u', (string) $r->content, $m)) {
+                    return trim($m[1]);
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return '主管';
     }
 
     /** 上班日：設定（如 1,2,3,4,5）優先 → 長期記憶（如「週一到週五上班」）→ 預設週一~週五。回 ISO 日(1=一…7=日)。 */

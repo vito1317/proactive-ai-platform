@@ -132,7 +132,8 @@ class Settings
             ['value' => 'sms', 'label' => 'SMS（Twilio 簡訊到主管號碼）'],
         ]],
         'commute.manager_to' => ['label' => '主管聯絡 ID（LINE userId / TG chat_id / 手機號碼）', 'type' => 'string', 'group' => '通勤提醒'],
-        'commute.message_template' => ['label' => '遲到訊息範本（可用 {late} 分鐘、{eta} 到達時間）', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.manager_name' => ['label' => '主管稱呼（如「王經理」；留空=「主管」或長期記憶）', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.message_template' => ['label' => '遲到訊息範本（可用 {manager} 主管稱呼、{late} 分鐘、{eta} 到達時間）', 'type' => 'string', 'group' => '通勤提醒'],
         // 通勤地理服務端點（免金鑰，可改自架）
         'commute.geocode_url' => ['label' => '地理編碼端點 (Nominatim)', 'type' => 'string', 'group' => '通勤提醒'],
         'commute.osrm_url' => ['label' => '車程估算端點 (OSRM)', 'type' => 'string', 'group' => '通勤提醒'],
@@ -248,7 +249,7 @@ class Settings
         'firecrawl.api_key', 'fal.api_key',
         // 通勤遲到提醒：每帳號自己的公司/主管/上班時間
         'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.work_days', 'commute.nav_app', 'commute.lead_min', 'commute.radius_m',
-        'commute.manager_via', 'commute.manager_to', 'commute.message_template',
+        'commute.manager_via', 'commute.manager_to', 'commute.manager_name', 'commute.message_template',
     ];
 
     /** 只讀「該帳號自己設的」值（不 fallback 全域）；userId=null 才回全域。 */
