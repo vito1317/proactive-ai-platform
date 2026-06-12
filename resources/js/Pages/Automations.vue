@@ -7,25 +7,26 @@ const props = defineProps({
     builtins: { type: Array, default: () => [] },
 });
 
-function toggleBuiltin(b) {
-    router.post('/api/automations/builtin', { key: b.key, enabled: !b.enabled }, {
-        preserveScroll: true,
-        onSuccess: () => router.reload({ only: ['builtins'] }),
+// 這些是與手機共用的 JSON API（非 Inertia）→ 用 fetch 呼叫後再 reload 頁面
+async function apiPost(url, body) {
+    await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body || {}),
     });
+    router.reload({ preserveScroll: true });
 }
 
+function toggleBuiltin(b) {
+    apiPost('/api/automations/builtin', { key: b.key, enabled: !b.enabled });
+}
 function toggle(a) {
-    router.post(`/api/automations/${a.id}/toggle`, { action: a.enabled ? 'disable' : 'enable' }, {
-        preserveScroll: true,
-        onSuccess: () => router.reload({ only: ['automations'] }),
-    });
+    apiPost(`/api/automations/${a.id}/toggle`, { action: a.enabled ? 'disable' : 'enable' });
 }
 function remove(a) {
     if (!confirm(`刪除自動化「${a.name}」？`)) return;
-    router.post(`/api/automations/${a.id}/toggle`, { action: 'delete' }, {
-        preserveScroll: true,
-        onSuccess: () => router.reload({ only: ['automations'] }),
-    });
+    apiPost(`/api/automations/${a.id}/toggle`, { action: 'delete' });
 }
 </script>
 
