@@ -198,6 +198,8 @@ class AutomationEngine
         Cache::put("automation:ask:{$uid}:{$aid}", [
             'yes' => $a['yes'] ?? [], 'no' => $a['no'] ?? [], 'ctx' => $ctx,
         ], 3600);
+        // 待回答提問：讓使用者可用語音直接回「好/不用」
+        Cache::put("voice:pendingq:{$uid}", ['kind' => 'automation', 'autoId' => $aid], 1800);
         $yesLabel = (string) ($a['yes_label'] ?? '✅ 好');
         $noLabel = (string) ($a['no_label'] ?? '✖ 不用');
         $actions = [

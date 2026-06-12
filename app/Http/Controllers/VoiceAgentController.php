@@ -559,6 +559,11 @@ class VoiceAgentController extends Controller
         $this->turnDeviceNode = $this->currentDevice($conv);
         $t = trim($transcript);
 
+        // ── 待回答的提問（通勤/自動化 ask）→ 用語音回答「好/不用」即可決定 ──────────
+        if ($conv && ($pq = $this->pendingVoiceAnswer($conv->user_id, $t)) !== null) {
+            return $pq;
+        }
+
         // ── 停止/取消進行中的處理序列 ──────────────────────────────────────────
         if ($conv && preg_match('/^(請|请)?\s*(停止|停下|停下來|停一下|別做了|别做了|不用了|不要做了|取消(處理|处理|執行|执行|任務|任务)?|別處理了|别处理了|停|cancel|stop)[。!！.\s]*$/iu', $t)) {
             \Illuminate\Support\Facades\Cache::put('pai:abort:'.$conv->id, true, 300);
@@ -1512,6 +1517,46 @@ class VoiceAgentController extends Controller
     private function currentDevice(?Conversation $conv): ?string
     {
         return $conv ? \Illuminate\Support\Facades\Cache::get("pai:device:{$conv->id}") : null;
+    }
+
+    /**
+     * 若有「待回答的提問」（通勤要不要傳主管 / 自動化 ask），用語音的「好/不用」直接作答。
+     * 命中回傳語音回應陣列；沒有待答問題或聽不出是/否 → 回 null（走正常流程）。
+     */
+    private function pendingVoiceAnswer(?int $uid, string $t): ?array
+    {
+        if ($uid === null) {
+            return null;
+        }
+        $pq = \Illuminate\Support\Facades\Cache::get("voice:pendingq:{$uid}");
+        if (! is_array($pq)) {
+            return null;
+        }
+        $yes = (bool) preg_match('/(好|是|對|对|可以|麻煩|麻烦|幫我|帮我|傳|传|要|沒問題|没问题|ok|yes|請|请)/iu', $t);
+        $no = (bool) preg_match('/(不用|不要|別|别|算了|沒事|没事|取消|不需要|no)/iu', $t);
+        if (! $yes && ! $no) {
+            return null; // 聽不出是/否 → 不攔截，照常處理
+        }
+        \Illuminate\Support\Facades\Cache::forget("voice:pendingq:{$uid}");
+        $node = $this->turnDeviceNode;
+
+        if (($pq['kind'] ?? '') === 'commute') {
+            if ($no) {
+                \Illuminate\Support\Facades\Cache::forget("commute:pending:{$uid}");
+                $msg = '好，這次不傳訊息給主管。';
+            } else {
+                $msg = app(\App\Pai\Commute\CommuteGuard::class)->sendToManager($uid, (string) $node);
+            }
+
+            return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'commute', 'direct' => true], 'step' => '🚗 通勤回覆'];
+        }
+        if (($pq['kind'] ?? '') === 'automation') {
+            $msg = app(\App\Pai\Automation\AutomationEngine::class)->decide($uid, (int) ($pq['autoId'] ?? 0), $no ? 'no' : 'yes', (string) $node);
+
+            return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'automation', 'direct' => true], 'step' => '🤖 自動化回覆'];
+        }
+
+        return null;
     }
 
     /** 指代型地點（公司/家/學校…）→ 從使用者記憶換成真實地址；查不到回 null。 */
