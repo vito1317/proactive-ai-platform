@@ -84,9 +84,61 @@ class MediaFetcher
         }
     }
 
-    private function dataUri(string $bytes, string $mime): string
+    /** 進 vision prompt 的圖片大小上限（base64 後會再膨脹 4/3，太大會吃爆 context）。 */
+    private const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+    /** 超限時縮圖的最長邊（px）。 */
+    private const DOWNSCALE_MAX_EDGE = 1600;
+
+    private function dataUri(string $bytes, string $mime): ?string
     {
+        // 極小圖防護：1×1 之類的退化圖會打掛 llama.cpp 的視覺解碼（實測 crash）→ 直接略過
+        $dim = @getimagesizefromstring($bytes);
+        if (is_array($dim) && (($dim[0] ?? 0) < 8 || ($dim[1] ?? 0) < 8)) {
+            \Illuminate\Support\Facades\Log::warning('圖片尺寸過小，略過 vision', ['w' => $dim[0] ?? 0, 'h' => $dim[1] ?? 0]);
+
+            return null;
+        }
+
+        // 過大的圖先縮（vision 不需要原尺寸）；縮不了（非圖片/GD 不可用）就放棄，不要丟爆量 base64 給 LLM
+        if (strlen($bytes) > self::MAX_IMAGE_BYTES) {
+            $resized = $this->downscale($bytes);
+            if ($resized === null) {
+                \Illuminate\Support\Facades\Log::warning('圖片過大且無法縮圖，略過 vision', ['bytes' => strlen($bytes)]);
+
+                return null;
+            }
+            [$bytes, $mime] = $resized;
+        }
+
         return 'data:'.$mime.';base64,'.base64_encode($bytes);
+    }
+
+    /** @return ?array{0: string, 1: string} [jpeg bytes, mime]；失敗回 null */
+    private function downscale(string $bytes): ?array
+    {
+        if (! extension_loaded('gd')) {
+            return null;
+        }
+        try {
+            $img = @imagecreatefromstring($bytes);
+            if ($img === false) {
+                return null;
+            }
+            $w = imagesx($img);
+            $h = imagesy($img);
+            $scale = min(1.0, self::DOWNSCALE_MAX_EDGE / max(1, max($w, $h)));
+            $out = $scale < 1.0
+                ? imagescale($img, max(1, (int) round($w * $scale)), max(1, (int) round($h * $scale)))
+                : $img;
+            ob_start();
+            imagejpeg($out ?: $img, null, 82);
+            $jpeg = (string) ob_get_clean();
+
+            return $jpeg === '' ? null : [$jpeg, 'image/jpeg'];
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function mimeFromPath(string $path): string

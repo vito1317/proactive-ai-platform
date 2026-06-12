@@ -48,12 +48,19 @@ class ChatController extends Controller
                 ->latest('id')->limit(25)->get(['id', 'title', 'tg_chat_id', 'line_to'])
                 ->map(fn ($c) => ['id' => $c->id, 'title' => $c->title ?? '新對話', 'channel' => $this->channelOf($c)])->all(),
             // 全雙工語音設定（前端據此連 Socket.IO；密鑰不外露）
-            'voice' => $this->voiceConfig(),
+            'voice' => $this->voiceConfig($request->user()?->id),
+            // 斜線指令清單（輸入「/」時自動提示）：內建 + 使用者自訂
+            'slashCommands' => array_merge(
+                [['name' => 'new', 'description' => '開新對話'], ['name' => 'clear', 'description' => '清空目前對話']],
+                \App\Pai\Chat\SlashCommand::where('enabled', true)->orderBy('name')
+                    ->get(['name', 'description'])
+                    ->map(fn ($c) => ['name' => $c->name, 'description' => $c->description ?: '自訂指令'])->all()
+            ),
         ]);
     }
 
     /** 全雙工語音前端設定（可由 Settings/AI 即時調整）。 */
-    private function voiceConfig(): array
+    private function voiceConfig(?int $userId = null): array
     {
         $s = app(\App\Pai\Settings\Settings::class);
 
@@ -63,7 +70,9 @@ class ChatController extends Controller
             'path' => (string) $s->get('voice.fullduplex_path', config('pai.voice.fullduplex_path')),
             // hybrid：原生 S2S 即時對話（快），偵測到指令才繞 PAI 執行（open/close/search/系統操作）
             'mode' => 'hybrid',
-            'prompt' => (string) $s->get('voice.system_prompt', config('pai.voice.system_prompt')), // PAI 語音人格
+            'prompt' => trim(
+                ($ov = app(\App\Pai\Agent\PersonaProfiles::class)->systemOverlay($userId)) !== '' ? $ov."\n\n" : ''
+            ).(string) $s->get('voice.system_prompt', config('pai.voice.system_prompt'), $userId), // 人格 overlay + 語音人格
         ];
     }
 
@@ -89,6 +98,16 @@ class ChatController extends Controller
     public function new(Request $request): RedirectResponse
     {
         $conv = Conversation::create(['user_id' => $request->user()->id]);
+
+        return redirect()->route('chat', ['c' => $conv->id]);
+    }
+
+    /** 清空目前對話的所有訊息（/clear）。 */
+    public function clear(Request $request): RedirectResponse
+    {
+        $conv = $this->current($request);
+        $conv->messages()->delete();
+        $conv->update(['title' => null, 'summary' => null, 'compacted_through_id' => null]);
 
         return redirect()->route('chat', ['c' => $conv->id]);
     }

@@ -19,7 +19,7 @@ final class ProposeActionTool implements Tool
 
     public function description(): string
     {
-        return '提出一個處置動作。action_input: {"action": "動作鍵", "rationale": "理由"}。'
+        return '提出一個處置動作。action_input: {"action": "動作鍵", "rationale": "理由", "confidence": 0~1 你對此處置的把握}。'
             .'高風險動作會自動進入人類審核。';
     }
 
@@ -36,7 +36,10 @@ final class ProposeActionTool implements Tool
             ? 'high'
             : (in_array($input['risk'] ?? null, ['low', 'medium', 'high'], true) ? $input['risk'] : 'low');
 
-        $ctx->addAction($action, $rationale, $risk);
+        // 信心：模型自報（0~1）；沒給用 0.7（治理層 gate 會用到）
+        $confidence = is_numeric($input['confidence'] ?? null) ? (float) $input['confidence'] : 0.7;
+
+        $ctx->addAction($action, $rationale, $risk, [], $confidence);
 
         $gate = $risk === 'high' ? '（高風險，將送人類審核）' : '（可自動執行）';
 

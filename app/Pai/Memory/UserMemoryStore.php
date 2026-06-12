@@ -9,21 +9,26 @@ namespace App\Pai\Memory;
 class UserMemoryStore
 {
     private const MAX_KEEP = 200;     // 每位使用者保留上限
-    private const MAX_INJECT = 60;    // 注入 prompt 的最多筆數
 
     /** 注入用：把長期記憶整理成可讀文字；沒有則回空字串。 */
-    public function recall(?int $userId): string
+    public function recall(?int $userId, ?int $max = null): string
     {
+        // 注入筆數上限可調（pai.memory.user_inject_max）：太多會吃爆 context、稀釋注意力
+        $max ??= (int) config('pai.memory.user_inject_max', 30);
         $rows = UserMemory::where('user_id', $userId)
             ->orderByDesc('pinned')->orderByDesc('hits')->orderByDesc('updated_at')
-            ->limit(self::MAX_INJECT)->get();
+            ->limit(max(1, $max))->get();
         if ($rows->isEmpty()) {
             return '';
         }
         $label = ['identity' => '身分', 'location' => '地點', 'preference' => '偏好',
             'dislike' => '不喜歡', 'contact' => '聯絡人', 'routine' => '習慣', 'fact' => '事實'];
 
-        return $rows->map(fn ($m) => '・['.($label[$m->category] ?? $m->category).'] '.$m->content)->implode("\n");
+        // 記憶內容會逐字進 system prompt（且可由使用者對話間接寫入）→ 注入前先中和注入語句
+        $sanitizer = app(\App\Pai\Security\ToolDescriptionSanitizer::class);
+
+        return $rows->map(fn ($m) => '・['.($label[$m->category] ?? $m->category).'] '
+            .$sanitizer->sanitize((string) $m->content)->clean)->implode("\n");
     }
 
     /** 寫入一筆（去重：內容高度相似就略過/更新）。回 true=有實際新增。 */

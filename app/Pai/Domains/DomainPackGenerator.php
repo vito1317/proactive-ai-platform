@@ -31,7 +31,7 @@ class DomainPackGenerator
         for ($attempt = 1; $attempt <= 2; $attempt++) {
             try {
                 // 領域 manifest 生成較重（思考模型輸出長）→ 給較長逾時，避免 180s 中斷
-                $manifest = LlmClient::extractJson($this->llm->chat($messages, ['timeout' => 600]));
+                $manifest = $this->llm->chatJson($messages, ['timeout' => 600]);
             } catch (Throwable $e) {
                 $errors = ['LLM 輸出解析失敗：'.$e->getMessage()];
 

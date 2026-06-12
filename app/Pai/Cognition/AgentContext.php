@@ -14,7 +14,7 @@ final class AgentContext
     /** @var list<string> */
     public array $findings = [];
 
-    /** @var list<array{action: string, rationale: string, risk: string, payload: array}> */
+    /** @var list<array{action: string, rationale: string, risk: string, payload: array, confidence: float}> */
     public array $actions = [];
 
     /** @var list<array{to: string, task: string, artifact: array}> 跨域 A2A 交辦 */
@@ -34,13 +34,14 @@ final class AgentContext
         $this->findings[] = $finding;
     }
 
-    public function addAction(string $action, string $rationale, string $risk, array $payload = []): void
+    public function addAction(string $action, string $rationale, string $risk, array $payload = [], float $confidence = 0.7): void
     {
         $this->actions[] = [
             'action' => $action,
             'rationale' => $rationale,
             'risk' => $risk,
             'payload' => $payload,
+            'confidence' => max(0.0, min(1.0, $confidence)),
         ];
     }
 

@@ -26,32 +26,52 @@ class ConsoleController extends Controller
     {
         $packs = array_values($registry->all());
 
+        // 完全獨立租戶：每個帳號（含 admin）只看自己的資料。
+        // admin 的特權只在「管理帳號/授權/配對」與「操作所有裝置」，不在於看別人的對話/事件/記憶。
+        $u = $request->user();
+        $isAdmin = $u?->isAdmin() ?? false;
+        $uid = $u?->id;
+        $convIds = \App\Pai\Chat\Conversation::where('user_id', $uid)->pluck('id')->all();
+        // 事件/runs 範圍：屬於自己對話的事件 + （admin）沒綁對話的系統/領域事件（平台層級）。
+        $eventIds = PaiEvent::where(function ($q) use ($convIds, $isAdmin) {
+            $q->whereIn('payload->conversation_id', $convIds);
+            if ($isAdmin) {
+                $q->orWhereNull('payload->conversation_id');
+            }
+        })->pluck('id')->all();
+
         return Inertia::render('Console', [
             'platform' => 'PAI',
-            'domains' => array_map(static fn ($p) => $p->toArray(), $packs),
+            // 已載入領域：平台層級能力，僅 admin 看得到（非 admin 租戶不顯示）
+            'domains' => $isAdmin ? array_map(static fn ($p) => $p->toArray(), $packs) : [],
 
-            // 指令面板可快速選用的「領域 → 訂閱主題」
-            'commandTargets' => array_map(static fn ($p) => [
+            // 指令面板可快速選用的「領域 → 訂閱主題」（同樣僅 admin）
+            'commandTargets' => $isAdmin ? array_map(static fn ($p) => [
                 'domain' => $p->domain,
                 'coordinator' => $p->coordinator,
                 'topics' => $p->eventTopics(),
-            ], $packs),
+            ], $packs) : [],
 
-            // 即時事件流（輪詢時只重載這幾個 prop）
-            'events' => $this->recentEvents(),
-            'runs' => $this->recentRuns(),
+            // 即時事件流（輪詢時只重載這幾個 prop）—— 依帳號過濾
+            'events' => $this->recentEvents(50, $eventIds),
+            'runs' => $this->recentRuns(12, $eventIds),
             'stats' => $this->stats(),
 
-            // 自我改進：AI 從成功任務學會的做法（playbook）
-            'learnedSkills' => self::cleanUtf8(\App\Pai\Skills\LearnedSkill::orderByDesc('uses')->orderByDesc('updated_at')->limit(50)
+            // 自我改進：AI 從成功任務學會的做法（playbook）—— 每個帳號只看自己的
+            'learnedSkills' => self::cleanUtf8(\App\Pai\Skills\LearnedSkill::where('user_id', $uid)
+                ->orderByDesc('uses')->orderByDesc('updated_at')->limit(50)
                 ->get(['id', 'name', 'when_to_use', 'steps', 'uses'])->toArray()),
-            // 長期記憶：關於使用者的個人事實/偏好
-            'userMemories' => self::cleanUtf8(\App\Pai\Memory\UserMemory::orderByDesc('updated_at')->limit(50)
+            // 長期記憶：關於使用者的個人事實/偏好 —— 每個帳號只看自己的
+            'userMemories' => self::cleanUtf8(\App\Pai\Memory\UserMemory::where('user_id', $uid)
+                ->orderByDesc('updated_at')->limit(50)
                 ->get(['id', 'category', 'content'])->toArray()),
             // #9 LLM 用量觀測（今日/本週 calls、tokens、平均延遲）
-            'llmUsage' => \App\Pai\Cognition\LlmUsage::summary(),
+            // AI 用量是平台層級彙總（底層 LLM 呼叫無使用者脈絡）→ 僅 admin 看得到（非 admin 給空物件避免前端崩潰）
+            'llmUsage' => $isAdmin ? \App\Pai\Cognition\LlmUsage::summary() : (object) [],
+            'isAdmin' => $isAdmin,
             // 排定的定時任務（pending，依時間排序）；command 來自 STT 可能含壞 UTF-8 → 清乾淨避免整頁 JSON 失敗
-            'scheduledTasks' => self::cleanUtf8(\App\Pai\Schedule\ScheduledTask::where('status', 'pending')->orderBy('run_at')->limit(50)
+            'scheduledTasks' => self::cleanUtf8(\App\Pai\Schedule\ScheduledTask::where('status', 'pending')
+                ->where('user_id', $uid)->orderBy('run_at')->limit(50)
                 ->get()->map(fn ($t) => [
                     'id' => $t->id,
                     'command' => $t->command,
@@ -88,10 +108,15 @@ class ConsoleController extends Controller
     }
 
     /** 即時回報各 MCP / Gateway 節點的連線狀態（給主控台節點卡片用）。 */
-    public function mcpHealth(): \Illuminate\Http\JsonResponse
+    public function mcpHealth(Request $request): \Illuminate\Http\JsonResponse
     {
         $manager = app(\App\Pai\Mcp\McpManager::class);
-        $nodes = $manager->all()->map(function ($s) use ($manager) {
+        // 租戶隔離：非 admin 只看自己擁有/被授權的節點（admin → 全部）
+        $u = $request->user();
+        $allowed = ($u && ! $u->isAdmin()) ? $u->allowedDeviceNames() : null;
+        $nodes = $manager->all()
+            ->when($allowed !== null, fn ($c) => $c->filter(fn ($s) => in_array($s->name, $allowed, true)))
+            ->map(function ($s) use ($manager) {
             $t0 = microtime(true);
             $res = $manager->test($s->name);
             return [
@@ -159,10 +184,11 @@ class ConsoleController extends Controller
         ]);
     }
 
-    /** @return list<array<string, mixed>> */
-    private function recentEvents(int $limit = 50): array
+    /** @return list<array<string, mixed>> $eventIds=null → 全部；陣列 → 只這些事件(已含擁有者+系統事件範圍) */
+    private function recentEvents(int $limit = 50, ?array $eventIds = null): array
     {
         return PaiEvent::query()
+            ->when($eventIds !== null, fn ($q) => $q->whereIn('id', $eventIds))
             ->latest('id')
             ->limit($limit)
             ->get()
@@ -207,40 +233,20 @@ class ConsoleController extends Controller
      * L5 人機協同：核准 / 駁回某個待核准的動作。
      * 核准 = 放行執行（此處標為 executed；真實執行由 L4 工具完成）。
      */
-    public function decide(Request $request, AgentRun $run, ActionExecutor $executor): RedirectResponse
+    public function decide(Request $request, AgentRun $run, \App\Pai\Governance\Hitl $hitl): RedirectResponse
     {
         $data = $request->validate([
             'index' => ['required', 'integer', 'min:0'],
             'decision' => ['required', 'in:approve,reject'],
         ]);
 
-        $actions = $run->actions;
-        $i = $data['index'];
-        if (! isset($actions[$i])) {
+        if (! isset($run->actions[$data['index']])) {
             abort(404);
         }
-        if (($actions[$i]['status'] ?? null) !== 'awaiting_approval') {
-            return back()->with('flash', ['error' => '此動作已處理過了。']);
-        }
 
-        if ($data['decision'] === 'approve') {
-            // 核准 → 真實執行（apply-patch 寫回+重跑測試 / 遏制動作經 EgressGateway）
-            $result = $executor->execute($actions[$i], $run->domain);
-            $actions[$i]['status'] = 'executed';
-            $actions[$i]['result'] = $result['output'];
-            $msg = "動作「{$actions[$i]['action']}」已核准並執行：{$result['output']}";
-        } else {
-            $actions[$i]['status'] = 'rejected';
-            $msg = "動作「{$actions[$i]['action']}」已駁回。";
-        }
-        $run->actions = $actions;
+        $res = $hitl->decide($run, $data['decision'], $data['index']);
 
-        // 若已無待核准動作 → 運行完成
-        $stillPending = collect($actions)->contains(fn ($a) => ($a['status'] ?? null) === 'awaiting_approval');
-        $run->status = $stillPending ? RunStatus::AwaitingHitl : RunStatus::Completed;
-        $run->save();
-
-        return back()->with('flash', ['success' => $msg]);
+        return back()->with('flash', [$res['ok'] ? 'success' : 'error' => $res['message']]);
     }
 
     /** 將目前使用者的未讀通知全部標記為已讀。 */
@@ -251,10 +257,11 @@ class ConsoleController extends Controller
         return back();
     }
 
-    /** @return list<array<string, mixed>> 最近的認知運行軌跡 */
-    private function recentRuns(int $limit = 12): array
+    /** @return list<array<string, mixed>> 最近的認知運行軌跡 $eventIds=null → 全部(admin) */
+    private function recentRuns(int $limit = 12, ?array $eventIds = null): array
     {
         return AgentRun::query()
+            ->when($eventIds !== null, fn ($q) => $q->whereIn('event_id', $eventIds))
             ->with('event:id,topic')
             ->latest('id')
             ->limit($limit)

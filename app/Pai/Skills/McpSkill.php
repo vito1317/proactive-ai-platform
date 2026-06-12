@@ -4,6 +4,8 @@ namespace App\Pai\Skills;
 
 use App\Pai\Mcp\McpClient;
 use App\Pai\Mcp\McpServer;
+use App\Pai\Security\ToolDescriptionSanitizer;
+use Illuminate\Support\Facades\Log;
 
 /**
  * 把一個 MCP server 的工具包成「對話技能」，讓即時聊天的 agentic 迴圈
@@ -24,9 +26,20 @@ class McpSkill implements Skill
         return 'mcp__'.$this->server->name.'__'.$this->def['name'];
     }
 
+    private ?string $cleanDescription = null;
+
     public function description(): string
     {
-        return "[MCP:{$this->server->name}] ".($this->def['description'] ?? '（無說明）');
+        // 外部 MCP 工具描述「預設不信任」：移除零寬字元/控制碼、中和提示詞注入語句
+        if ($this->cleanDescription === null) {
+            $r = app(ToolDescriptionSanitizer::class)->sanitize((string) ($this->def['description'] ?? '（無說明）'));
+            if ($r->isSuspicious()) {
+                Log::warning('MCP 工具描述含可疑內容，已中和', ['tool' => $this->name(), 'flags' => $r->flags]);
+            }
+            $this->cleanDescription = $r->clean;
+        }
+
+        return "[MCP:{$this->server->name}] ".$this->cleanDescription;
     }
 
     public function parameters(): array

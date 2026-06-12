@@ -16,8 +16,10 @@ export function useVoiceChat() {
     const status = ref('');
     const volume = ref(0); // 0.0 to ~1.0
     const isMuted = ref(false);
+    const liveVision = ref('off'); // off / screen / camera —— 即時把畫面給 AI 看
 
     let socket = null;
+    let visionStream = null, visionVideo = null, visionTimer = null;
     let micStream = null, audioCtx = null, scriptNode = null, gainNode = null;
     let handlers = {}, cfg = {};
     let micMuteUntil = 0; // AI 播放期間暫停麥克風（純時間判斷，自動過期）
@@ -126,7 +128,7 @@ export function useVoiceChat() {
     }
 
     function promptPayload() {
-        return { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '', wake: !!cfg.wake, geo: cfg.geo || null };
+        return { mode: cfg.mode || 'hybrid', conversation_id: cfg.conversationId ?? null, prompt: cfg.prompt || '', session: cfg.session || '', wake: !!cfg.wake, geo: cfg.geo || null, vision: liveVision.value !== 'off' };
     }
 
     // 取得定位（使用者允許才有）；拿到後補送 prompt_text 讓伺服器更新位置
@@ -187,6 +189,57 @@ export function useVoiceChat() {
         socket.on('agent_step', (s) => handlers.onStep && handlers.onStep(String(s || '')));
     }
 
+    // ── 即時畫面：把螢幕/鏡頭每 ~2 秒擷取一張給 AI（短 TTL，停止後自動恢復普通對話）──
+    const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+    async function pushFrame() {
+        if (!visionVideo || visionVideo.videoWidth === 0) return;
+        try {
+            const w = Math.min(1280, visionVideo.videoWidth);
+            const scale = w / visionVideo.videoWidth;
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = visionVideo.videoHeight * scale;
+            canvas.getContext('2d').drawImage(visionVideo, 0, 0, canvas.width, canvas.height);
+            const image = canvas.toDataURL('image/jpeg', 0.7);
+            await fetch('/api/vision/attach', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() },
+                body: JSON.stringify({ image, session: cfg.session || '', ttl: 8 }),
+            });
+        } catch (e) { /* 單張失敗略過，下一張再來 */ }
+    }
+    async function setLiveVision(mode) {
+        // mode: 'off' | 'screen' | 'camera'
+        stopVision();
+        if (mode === 'off' || !mode) {
+            liveVision.value = 'off';
+            if (socket && socket.connected) socket.emit('prompt_text', promptPayload());  // 通知 voice_server vision 關
+            return;
+        }
+        try {
+            visionStream = mode === 'screen'
+                ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 1 }, audio: false })
+                : await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+            visionVideo = document.createElement('video');
+            visionVideo.srcObject = visionStream; visionVideo.muted = true;
+            await visionVideo.play();
+            // 使用者自己關閉分享 → 自動回 off
+            visionStream.getVideoTracks()[0].addEventListener('ended', () => setLiveVision('off'));
+            liveVision.value = mode;
+            if (socket && socket.connected) socket.emit('prompt_text', promptPayload());  // 通知 voice_server vision 開
+            visionTimer = setInterval(pushFrame, 2000);
+            pushFrame();
+        } catch (e) {
+            liveVision.value = 'off';
+            status.value = mode === 'screen' ? '未允許螢幕分享' : '未允許使用鏡頭';
+        }
+    }
+    function stopVision() {
+        if (visionTimer) { clearInterval(visionTimer); visionTimer = null; }
+        try { visionStream && visionStream.getTracks().forEach((t) => t.stop()); } catch (e) { /* noop */ }
+        visionStream = visionVideo = null;
+        liveVision.value = 'off';
+    }
+
     function stop() {
         active.value = false;
         connected.value = false;
@@ -194,6 +247,7 @@ export function useVoiceChat() {
         status.value = '';
         volume.value = 0;
         isMuted.value = false;
+        stopVision();
         try { socket && socket.connected && socket.emit('recording-stopped'); } catch (e) { /* noop */ }
         try { scriptNode && (scriptNode.onaudioprocess = null, scriptNode.disconnect()); } catch (e) { /* noop */ }
         try { gainNode && gainNode.disconnect(); } catch (e) { /* noop */ }
@@ -204,5 +258,5 @@ export function useVoiceChat() {
         socket = micStream = audioCtx = scriptNode = gainNode = null;
     }
 
-    return { active, connected, speaking, status, volume, isMuted, toggleMute, setWake, setBargeIn, start, stop };
+    return { active, connected, speaking, status, volume, isMuted, liveVision, setLiveVision, toggleMute, setWake, setBargeIn, start, stop };
 }

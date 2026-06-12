@@ -152,6 +152,7 @@ class ChatStreamController extends Controller
                     $meta['reasoning'] = $reasoning;
                 }
                 $conv->addMessage('assistant', $reply, array_merge($meta, ['trace' => $trace]));
+                \App\Pai\Memory\ExtractMemoryJob::dispatch($message, $reply, $conv->user_id); // 自動抽取長期記憶
                 $emit('done', ['conversation_id' => $conv->id, 'meta' => $meta]);
             } catch (StopStreaming) {
                 // 使用者按「終止」→ 連阻塞中的 LLM 請求都被打斷；存一則「已中止」收尾

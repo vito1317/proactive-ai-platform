@@ -37,4 +37,14 @@ class DelegateSubtaskJob implements ShouldQueue
         }
         Cache::put("delegate:{$this->batchId}:{$this->index}", $result !== '' ? $result : '（無輸出）', 900);
     }
+
+    /** 被硬殺（逾時 kill / worker 崩潰）也要回寫失敗標記，父代理才不會空等到 deadline。 */
+    public function failed(?Throwable $e = null): void
+    {
+        Cache::put(
+            "delegate:{$this->batchId}:{$this->index}",
+            '（子任務失敗：'.($e?->getMessage() ?: '逾時或異常終止').'）',
+            900,
+        );
+    }
 }

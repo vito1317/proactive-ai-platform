@@ -15,16 +15,17 @@ use Inertia\Response;
  */
 class SettingsController extends Controller
 {
-    public function index(Settings $settings, DomainRegistry $registry): Response
+    public function index(Request $request, Settings $settings, DomainRegistry $registry): Response
     {
+        $uid = $request->user()?->id;   // 每個帳號看/存自己的設定（fallback 全域）
         $domains = array_map(static fn ($p) => [
             'domain' => $p->domain,
             'default' => $p->autonomy,
-            'effective' => $settings->domainAutonomy($p->domain, $p->autonomy),
+            'effective' => $settings->domainAutonomy($p->domain, $p->autonomy, $uid),
         ], array_values($registry->all()));
 
         return Inertia::render('Settings', [
-            'fields' => $settings->editableFields(),
+            'fields' => $settings->editableFields($uid, $request->user()?->isAdmin() ?? false),
             'domains' => $domains,
             'autonomyLevels' => config('pai.autonomy_levels'),
         ]);
@@ -37,19 +38,24 @@ class SettingsController extends Controller
             'autonomy' => ['array'],
             'autonomy.*' => ['in:copilot,supervisor,autopilot'],
         ]);
+        $uid = $request->user()?->id;   // 存成「這個帳號自己的」設定，不動全域
+        $isAdmin = $request->user()?->isAdmin() ?? false;
 
         foreach (($data['settings'] ?? []) as $key => $value) {
             if (! array_key_exists($key, Settings::FIELDS)) {
                 continue; // 只接受已知欄位
             }
-            $settings->set($key, $this->coerce(Settings::FIELDS[$key]['type'], $value));
+            if (! $isAdmin && in_array($key, Settings::ADMIN_ONLY, true)) {
+                continue; // 非 admin 不得改平台層級/密鑰設定
+            }
+            $settings->set($key, $this->coerce(Settings::FIELDS[$key]['type'], $value), $uid);
         }
 
         foreach (($data['autonomy'] ?? []) as $domain => $level) {
-            $settings->set("domain.{$domain}.autonomy", $level);
+            $settings->set("domain.{$domain}.autonomy", $level, $uid);
         }
 
-        return back()->with('flash', ['success' => '設定已儲存，即時生效。']);
+        return back()->with('flash', ['success' => '設定已儲存（此帳號專屬），即時生效。']);
     }
 
     private function coerce(string $type, mixed $value): mixed

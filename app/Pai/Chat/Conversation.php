@@ -56,7 +56,7 @@ class Conversation extends Model
         $msg = $this->messages()->create(['role' => $role, 'content' => $content, 'meta' => $meta]);
 
         // 自動上下文壓縮：每次 AI 回覆後檢查，超過門檻就排背景摘要（不阻塞回覆）
-        if ($role === 'assistant' && $this->activeMessages()->count() > ContextCompactor::THRESHOLD) {
+        if ($role === 'assistant' && $this->activeMessages()->count() > ContextCompactor::threshold()) {
             CompactConversationJob::dispatch($this->id);
         }
 

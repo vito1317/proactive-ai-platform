@@ -69,13 +69,14 @@ class PaiServiceProvider extends ServiceProvider
             );
         });
 
-        // L2 記憶：嵌入 + 向量儲存（driver 由 config 切換）
+        // L2 記憶：嵌入 + 向量儲存（driver 由 config 切換）；外層加快取（同文字不重算）
         $this->app->singleton(Embeddings::class, function () {
             $c = config('pai.memory.embeddings');
-
-            return ($c['driver'] ?? 'local') === 'openai'
+            $inner = ($c['driver'] ?? 'local') === 'openai'
                 ? new OpenAiEmbeddings($c['base_url'], $c['model'], $c['api_key'], (int) $c['dim'])
                 : new LocalHashEmbeddings((int) $c['dim']);
+
+            return new \App\Pai\Memory\CachedEmbeddings($inner);
         });
         $this->app->singleton(VectorStore::class, fn () => config('pai.memory.store') === 'pgvector'
             ? new PgVectorStore

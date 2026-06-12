@@ -43,7 +43,8 @@ class HandleInertiaRequests extends Middleware
             ],
             'auth' => [
                 'user' => fn () => $request->user()
-                    ? ['id' => $request->user()->id, 'name' => $request->user()->name, 'email' => $request->user()->email]
+                    ? ['id' => $request->user()->id, 'name' => $request->user()->name, 'email' => $request->user()->email,
+                        'role' => $request->user()->role, 'is_admin' => $request->user()->isAdmin()]
                     : null,
                 'unread' => fn () => $request->user()?->unreadNotifications()->count() ?? 0,
                 'notifications' => fn () => $request->user()

@@ -12,13 +12,42 @@ use Throwable;
  */
 class Settings
 {
+    /**
+     * LLM API 供應商 preset：選了供應商就自動帶 base_url（OpenAI 相容端點），
+     * 只要再填該供應商的 api_key + model 即可。選 custom 則完全用下面的 llm.base_url。
+     * （base_url 若有填，一律覆寫 preset —— 方便接自架/代理。）
+     */
+    public const PROVIDERS = [
+        'custom' => ['label' => '自訂 / 自架（用下方端點）', 'base_url' => '', 'hint' => '自行填 llm.base_url'],
+        'local' => ['label' => '本機 llama-server', 'base_url' => 'http://127.0.0.1:10003/v1', 'hint' => '本地模型'],
+        'ollama' => ['label' => 'Ollama（本機）', 'base_url' => 'http://127.0.0.1:11434/v1', 'hint' => 'llama3.1 / qwen2.5 …'],
+        'openai' => ['label' => 'OpenAI', 'base_url' => 'https://api.openai.com/v1', 'hint' => 'gpt-4o / gpt-4o-mini / o3 …'],
+        'anthropic' => ['label' => 'Anthropic Claude', 'base_url' => 'https://api.anthropic.com/v1', 'hint' => 'claude-opus-4 / claude-sonnet-4 …'],
+        'gemini' => ['label' => 'Google Gemini', 'base_url' => 'https://generativelanguage.googleapis.com/v1beta/openai', 'hint' => 'gemini-2.0-flash / gemini-1.5-pro'],
+        'openrouter' => ['label' => 'OpenRouter（聚合）', 'base_url' => 'https://openrouter.ai/api/v1', 'hint' => '任一上游模型，如 anthropic/claude-3.5-sonnet'],
+        'groq' => ['label' => 'Groq（極速）', 'base_url' => 'https://api.groq.com/openai/v1', 'hint' => 'llama-3.3-70b / mixtral …'],
+        'deepseek' => ['label' => 'DeepSeek', 'base_url' => 'https://api.deepseek.com/v1', 'hint' => 'deepseek-chat / deepseek-reasoner'],
+        'mistral' => ['label' => 'Mistral', 'base_url' => 'https://api.mistral.ai/v1', 'hint' => 'mistral-large-latest …'],
+        'xai' => ['label' => 'xAI Grok', 'base_url' => 'https://api.x.ai/v1', 'hint' => 'grok-2-latest …'],
+        'together' => ['label' => 'Together AI', 'base_url' => 'https://api.together.xyz/v1', 'hint' => 'meta-llama/… / Qwen/…'],
+        'fireworks' => ['label' => 'Fireworks AI', 'base_url' => 'https://api.fireworks.ai/inference/v1', 'hint' => 'accounts/fireworks/models/…'],
+        'perplexity' => ['label' => 'Perplexity', 'base_url' => 'https://api.perplexity.ai', 'hint' => 'sonar / sonar-pro（內建上網）'],
+        'cerebras' => ['label' => 'Cerebras（極速）', 'base_url' => 'https://api.cerebras.ai/v1', 'hint' => 'llama-3.3-70b …'],
+    ];
+
     /** 後台可編輯的欄位定義（型別 / 預設來自 config）。 */
     public const FIELDS = [
-        'llm.base_url' => ['label' => 'LLM 端點 (OpenAI 相容)', 'type' => 'string', 'group' => 'LLM'],
+        'llm.provider' => ['label' => 'LLM 供應商', 'type' => 'select', 'group' => 'LLM'],
+        'llm.base_url' => ['label' => 'LLM 端點 (OpenAI 相容；填了會覆寫供應商 preset)', 'type' => 'string', 'group' => 'LLM'],
         'llm.api_key' => ['label' => 'AI API Token / 金鑰', 'type' => 'secret', 'group' => 'LLM'],
         'llm.model' => ['label' => '模型名稱', 'type' => 'string', 'group' => 'LLM'],
         'llm.temperature' => ['label' => 'Temperature', 'type' => 'number', 'group' => 'LLM', 'min' => 0, 'max' => 2, 'step' => 0.1],
         'llm.max_tokens' => ['label' => 'Max tokens（思考型模型需較大）', 'type' => 'int', 'group' => 'LLM', 'min' => 256, 'max' => 16384],
+        'llm.context_window' => ['label' => 'Context window（模型上下文長度，prompt 預算依此裁切）', 'type' => 'int', 'group' => 'LLM', 'min' => 2048, 'max' => 1048576],
+        'llm.small_model' => ['label' => '輕量模型（意圖分類/壓縮/萃取用；空=用主模型）', 'type' => 'string', 'group' => 'LLM'],
+        'llm.small_base_url' => ['label' => '輕量模型端點（空=同主模型端點）', 'type' => 'string', 'group' => 'LLM'],
+        'llm.small_api_key' => ['label' => '輕量模型金鑰（空=同主模型金鑰）', 'type' => 'secret', 'group' => 'LLM'],
+        'llm.no_think' => ['label' => 'Prompt 帶 /no_think（Qwen 系抑制思考鏈；模型不支援就關）', 'type' => 'bool', 'group' => 'LLM'],
         'llm.timeout' => ['label' => '逾時 (秒)', 'type' => 'int', 'group' => 'LLM', 'min' => 10, 'max' => 600],
         'react.max_steps' => ['label' => 'ReAct 最大步數', 'type' => 'int', 'group' => 'ReAct', 'min' => 1, 'max' => 12],
         'react.reflect' => ['label' => '啟用自我反思', 'type' => 'bool', 'group' => 'ReAct'],
@@ -44,11 +73,74 @@ class Settings
         'briefing.time' => ['label' => '晨間簡報時間 (HH:MM)', 'type' => 'string', 'group' => '行事曆/郵件'],
         'briefing.place' => ['label' => '簡報天氣地點（預設台北）', 'type' => 'string', 'group' => '行事曆/郵件'],
         'reminder.lead_min' => ['label' => '行事曆事件提前提醒分鐘數', 'type' => 'int', 'group' => '行事曆/郵件', 'min' => 1, 'max' => 120],
+        // 圖片生成（OpenAI 相容 /images/generations 端點，如 OpenAI / 本地 / 相容服務）
+        'image.api_url' => ['label' => '生圖端點 (OpenAI 相容 /images/generations)', 'type' => 'string', 'group' => '生圖'],
+        'image.api_key' => ['label' => '生圖 API 金鑰', 'type' => 'secret', 'group' => '生圖'],
+        'image.model' => ['label' => '生圖模型名稱', 'type' => 'string', 'group' => '生圖'],
+        // Discord 接入（Interactions /ask 斜線指令；填入 Discord 開發者後台的 Application ID + Public Key）
+        'discord.app_id' => ['label' => 'Discord Application ID', 'type' => 'string', 'group' => 'Discord'],
+        'discord.public_key' => ['label' => 'Discord Public Key（驗證互動簽章）', 'type' => 'string', 'group' => 'Discord'],
+        // Slack 接入（Events API：@提及 bot 或私訊；填 Signing Secret + Bot Token）
+        'slack.signing_secret' => ['label' => 'Slack Signing Secret（驗證請求簽章）', 'type' => 'secret', 'group' => 'Slack'],
+        'slack.bot_token' => ['label' => 'Slack Bot Token (xoxb-…，回覆用)', 'type' => 'secret', 'group' => 'Slack'],
+        // 第三方供應商
+        'firecrawl.api_key' => ['label' => 'Firecrawl API Key（高品質網頁抓取/爬取）', 'type' => 'secret', 'group' => '供應商'],
+        'fal.api_key' => ['label' => 'FAL API Key（FLUX 生圖/影片等模型）', 'type' => 'secret', 'group' => '供應商'],
+        // Feishu / Lark（Events API：@提及或私訊 bot）
+        'feishu.app_id' => ['label' => 'Feishu App ID', 'type' => 'string', 'group' => 'Feishu'],
+        'feishu.app_secret' => ['label' => 'Feishu App Secret', 'type' => 'secret', 'group' => 'Feishu'],
+        'feishu.verification_token' => ['label' => 'Feishu Verification Token', 'type' => 'secret', 'group' => 'Feishu'],
+        // DingTalk（機器人 outgoing webhook；用 sessionWebhook 回覆）
+        'dingtalk.app_secret' => ['label' => 'DingTalk 機器人 Signing Secret（驗證簽章）', 'type' => 'secret', 'group' => 'DingTalk'],
+        // Mattermost（outgoing webhook 進、bot token 回）
+        'mattermost.token' => ['label' => 'Mattermost Outgoing Webhook Token（驗證）', 'type' => 'secret', 'group' => 'Mattermost'],
+        'mattermost.base_url' => ['label' => 'Mattermost 站台 URL（如 https://mm.example.com）', 'type' => 'string', 'group' => 'Mattermost'],
+        'mattermost.bot_token' => ['label' => 'Mattermost Bot Token（回覆用）', 'type' => 'secret', 'group' => 'Mattermost'],
+        // SMS（Twilio）
+        'twilio.account_sid' => ['label' => 'Twilio Account SID', 'type' => 'string', 'group' => 'SMS/Twilio'],
+        'twilio.auth_token' => ['label' => 'Twilio Auth Token', 'type' => 'secret', 'group' => 'SMS/Twilio'],
+        'twilio.from' => ['label' => 'Twilio 發送號碼 (+1…)', 'type' => 'string', 'group' => 'SMS/Twilio'],
+        // QQ（OneBot v11 / go-cqhttp / NapCat：事件 POST 進來，HTTP API 回覆）
+        'onebot.secret' => ['label' => 'OneBot/QQ 簽章 Secret（HMAC 驗證，可空）', 'type' => 'secret', 'group' => 'QQ/OneBot'],
+        'onebot.api_url' => ['label' => 'OneBot HTTP API URL（如 http://127.0.0.1:5700，回覆用）', 'type' => 'string', 'group' => 'QQ/OneBot'],
+        'onebot.api_token' => ['label' => 'OneBot API access_token（可空）', 'type' => 'secret', 'group' => 'QQ/OneBot'],
+        // BlueBubbles（iMessage 橋接 server）
+        'bluebubbles.server_url' => ['label' => 'BlueBubbles Server URL', 'type' => 'string', 'group' => 'BlueBubbles'],
+        'bluebubbles.password' => ['label' => 'BlueBubbles Server Password', 'type' => 'secret', 'group' => 'BlueBubbles'],
+        // Signal（signal-cli-rest-api；輪詢收訊，HTTP 發訊）
+        'signal.api_url' => ['label' => 'signal-cli-rest-api URL（如 http://127.0.0.1:8080）', 'type' => 'string', 'group' => 'Signal'],
+        'signal.number' => ['label' => 'Signal 已註冊號碼 (+886…)', 'type' => 'string', 'group' => 'Signal'],
+        // 早晨通勤遲到提醒（每帳號自己的公司/主管）
+        'commute.enabled' => ['label' => '啟用早晨通勤遲到提醒', 'type' => 'bool', 'group' => '通勤提醒'],
+        'commute.work_place' => ['label' => '公司地點（地址，或「緯度,經度」）', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.work_start' => ['label' => '上班時間 (HH:MM)', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.lead_min' => ['label' => '提前監看分鐘數（在此區間內，到「上班時間−車程」就提醒該出發）', 'type' => 'int', 'group' => '通勤提醒', 'min' => 10, 'max' => 180],
+        'commute.radius_m' => ['label' => '公司範圍半徑（公尺，超出才算還沒到）', 'type' => 'int', 'group' => '通勤提醒', 'min' => 50, 'max' => 5000],
+        'commute.manager_via' => ['label' => '通知主管的管道', 'type' => 'select', 'group' => '通勤提醒', 'options' => [
+            ['value' => 'line', 'label' => 'LINE（用你的 LINE bot 推給主管 userId）'],
+            ['value' => 'telegram', 'label' => 'Telegram（推給主管 chat_id）'],
+            ['value' => 'sms', 'label' => 'SMS（Twilio 簡訊到主管號碼）'],
+        ]],
+        'commute.manager_to' => ['label' => '主管聯絡 ID（LINE userId / TG chat_id / 手機號碼）', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.message_template' => ['label' => '遲到訊息範本（可用 {late} 分鐘、{eta} 到達時間）', 'type' => 'string', 'group' => '通勤提醒'],
+        // 通勤地理服務端點（免金鑰，可改自架）
+        'commute.geocode_url' => ['label' => '地理編碼端點 (Nominatim)', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.osrm_url' => ['label' => '車程估算端點 (OSRM)', 'type' => 'string', 'group' => '通勤提醒'],
     ];
 
-    public function get(string $key, mixed $default = null): mixed
+    /**
+     * 讀設定。$userId 不為 null 時：先找該帳號專屬設定（key 前綴 u{id}:），
+     * 沒有再回全域設定，再回 config 預設 —— 這就是「所有設定都能分權」的核心。
+     */
+    public function get(string $key, mixed $default = null, ?int $userId = null): mixed
     {
         try {
+            if ($userId !== null) {
+                $u = PaiSetting::find("u{$userId}:{$key}");
+                if ($u !== null) {
+                    return $u->value;
+                }
+            }
             $row = PaiSetting::find($key);
         } catch (Throwable) {
             $row = null; // 表尚未建立 → 用 config
@@ -61,15 +153,54 @@ class Settings
         return config("pai.{$key}", $default);
     }
 
-    public function set(string $key, mixed $value): void
+    /** 寫設定。$userId 不為 null → 寫該帳號專屬（不動全域）。 */
+    public function set(string $key, mixed $value, ?int $userId = null): void
     {
-        PaiSetting::updateOrCreate(['key' => $key], ['value' => $value]);
+        $k = $userId !== null ? "u{$userId}:{$key}" : $key;
+        PaiSetting::updateOrCreate(['key' => $k], ['value' => $value]);
     }
 
-    /** 領域 autonomy 的有效值（後台覆寫優先，否則用領域包預設）。 */
-    public function domainAutonomy(string $domain, string $default): string
+    /**
+     * 解析「實際要打的 LLM 端點」：明確填的 llm.base_url 優先，否則用供應商 preset 的 base_url。
+     * LlmClient 用這個取代直接讀 llm.base_url，這樣選了供應商不填 base_url 也能用。
+     */
+    public function llmBaseUrl(?int $userId = null): string
     {
-        $v = $this->get("domain.{$domain}.autonomy");
+        $explicit = trim((string) $this->get('llm.base_url', '', $userId));
+        if ($explicit !== '') {
+            return $explicit;
+        }
+        $provider = (string) $this->get('llm.provider', 'custom', $userId);
+
+        return (string) (self::PROVIDERS[$provider]['base_url'] ?? '');
+    }
+
+    /** 設定分類：把零散的 group 收進大分類，設定頁用分頁/分區呈現（依此順序）。 */
+    public const CATEGORIES = [
+        '🧠 核心 AI' => ['LLM', 'ReAct', '技能'],
+        '🎙️ 語音助理' => ['語音'],
+        '📅 行事曆 / 郵件' => ['行事曆/郵件', '通勤提醒'],
+        '🔔 通知' => ['通知', '通知（此帳號專屬）'],
+        '💬 通訊管道' => ['Discord', 'Slack', 'Feishu', 'DingTalk', 'Mattermost', 'SMS/Twilio', 'QQ/OneBot', 'BlueBubbles', 'Signal'],
+        '🔌 供應商 / 工具' => ['供應商', '生圖'],
+    ];
+
+    /** 某個 group 屬於哪個大分類（找不到 → 「其他」）。 */
+    public static function categoryFor(string $group): string
+    {
+        foreach (self::CATEGORIES as $cat => $groups) {
+            if (in_array($group, $groups, true)) {
+                return $cat;
+            }
+        }
+
+        return '其他';
+    }
+
+    /** 領域 autonomy 的有效值（帳號覆寫 > 全域覆寫 > 領域包預設）。 */
+    public function domainAutonomy(string $domain, string $default, ?int $userId = null): string
+    {
+        $v = $this->get("domain.{$domain}.autonomy", null, $userId);
 
         return in_array($v, ['copilot', 'supervisor', 'autopilot'], true) ? $v : $default;
     }
@@ -79,17 +210,80 @@ class Settings
      *
      * @return list<array<string, mixed>>
      */
-    public function editableFields(): array
+    /** 只有 admin 能看/設的「平台層級」設定（LLM/語音基礎建設、共用密鑰）—— 非 admin 設定頁不顯示。 */
+    public const ADMIN_ONLY = [
+        'llm.provider', 'llm.base_url', 'llm.api_key', 'llm.model',
+        'llm.small_model', 'llm.small_base_url', 'llm.small_api_key',
+        'voice.stt_url', 'voice.fullduplex_enabled', 'voice.fullduplex_url', 'voice.fullduplex_path', 'voice.agent_secret',
+        // Discord/Slack 是平台層級單一 bot → admin 設定
+        'discord.app_id', 'discord.public_key',
+        'slack.signing_secret', 'slack.bot_token',
+        'feishu.app_id', 'feishu.app_secret', 'feishu.verification_token',
+        'dingtalk.app_secret',
+        'mattermost.token', 'mattermost.base_url', 'mattermost.bot_token',
+        'twilio.account_sid', 'twilio.auth_token', 'twilio.from',
+        'onebot.secret', 'onebot.api_url', 'onebot.api_token',
+        'bluebubbles.server_url', 'bluebubbles.password',
+        'signal.api_url', 'signal.number',
+        // 通勤地理服務端點屬平台共用基建
+        'commute.geocode_url', 'commute.osrm_url',
+    ];
+
+    /** 「每個帳號各自獨立」的設定（通知頻道）：顯示與讀取都只看自己的，不 fallback 全域，才能完全分開。 */
+    public const USER_SCOPED = [
+        'notify.webhook_url', 'notify.telegram.token', 'notify.telegram.chat_id',
+        'notify.line.secret', 'notify.line.token', 'notify.line.to',
+        // 供應商金鑰：每個帳號用自己的（生圖/Firecrawl/FAL）
+        'image.api_url', 'image.api_key', 'image.model',
+        'firecrawl.api_key', 'fal.api_key',
+        // 通勤遲到提醒：每帳號自己的公司/主管/上班時間
+        'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.lead_min', 'commute.radius_m',
+        'commute.manager_via', 'commute.manager_to', 'commute.message_template',
+    ];
+
+    /** 只讀「該帳號自己設的」值（不 fallback 全域）；userId=null 才回全域。 */
+    public function own(string $key, ?int $userId): mixed
+    {
+        try {
+            $row = PaiSetting::find($userId !== null ? "u{$userId}:{$key}" : $key);
+
+            return $row?->value;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /** @param  bool  $isAdmin  非 admin → 隱藏 ADMIN_ONLY 平台/密鑰欄位 */
+    public function editableFields(?int $userId = null, bool $isAdmin = true): array
     {
         $out = [];
         foreach (self::FIELDS as $key => $meta) {
+            if (! $isAdmin && in_array($key, self::ADMIN_ONLY, true)) {
+                continue;
+            }
+            // 每帳號各自獨立的設定：只顯示自己設的（不 fallback 全域，否則會看到別人的）；
+            // 沿用各自原本的 group / 分類（通知→通知；生圖/供應商→供應商）。
+            if (in_array($key, self::USER_SCOPED, true)) {
+                $out[] = [...$meta, 'key' => $key, 'value' => $this->own($key, $userId), 'category' => self::categoryFor($meta['group'])];
+
+                continue;
+            }
+            // LLM 供應商：選單帶入所有 preset（label 附端點/模型提示）
+            if ($key === 'llm.provider') {
+                $meta['options'] = array_map(
+                    fn ($k, $p) => ['value' => $k, 'label' => $p['label'].($p['base_url'] ? "（{$p['base_url']}）" : '')],
+                    array_keys(self::PROVIDERS), self::PROVIDERS
+                );
+            }
             // 預設操作節點：選單動態帶入「主節點 + 已註冊的 gateway 節點」
             if ($key === 'voice.default_gateway') {
                 $opts = [['value' => 'local', 'label' => '主節點（本機）']];
                 try {
-                    // 列出所有已註冊節點（含離線，標示出來讓使用者仍可選）
-                    foreach (PaiSetting::query()->getConnection()->table('mcp_servers')->get(['name', 'enabled']) as $s) {
-                        if ($s->name !== 'gateway') {
+                    // 只列「這個帳號可存取」的節點（admin → 全部；非 admin → 自己擁有/被授權的）
+                    $owner = $userId ? \App\Models\User::find($userId) : null;
+                    $allowed = ($owner && ! $owner->isAdmin()) ? $owner->allowedDeviceNames() : null;
+                    foreach (\App\Pai\Mcp\McpServer::query()->get(['name', 'enabled']) as $s) {
+                        if ($s->name !== 'gateway' && ($allowed === null || in_array($s->name, $allowed, true))) {
                             $opts[] = ['value' => $s->name, 'label' => $s->name.($s->enabled ? '' : '（離線）')];
                         }
                     }
@@ -98,7 +292,7 @@ class Settings
                 }
                 $meta['options'] = $opts;
             }
-            $out[] = [...$meta, 'key' => $key, 'value' => $this->get($key)];
+            $out[] = [...$meta, 'key' => $key, 'value' => $this->get($key, null, $userId), 'category' => self::categoryFor($meta['group'])];
         }
 
         return $out;

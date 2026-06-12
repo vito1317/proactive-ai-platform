@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'webhooks/*',
             'api/voice/*',
             'api/vision*',   // 視覺端點（session 或共用密鑰驗證）
+            'api/chat/*',    // 手機訊息對話端點（session 或共用密鑰驗證）
             'api/gateway/*', // 語音橋接（voice_server）以共用密鑰驗證，非 session
         ]);
 

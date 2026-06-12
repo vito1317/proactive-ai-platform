@@ -1,0 +1,29 @@
+domain: new-domain
+coordinator: new-domain-coordinator
+description: 'A newly initialized domain for proactive AI operations.'
+triggers:
+  events:
+    - system.init
+  cron: {}
+tools:
+  -
+    uri: 'mcp://system-info'
+    perms:
+      - read
+    risk: low
+agents:
+  topology: router
+  roster:
+    - name: initializer
+      role: 'Domain setup and configuration management'
+memory:
+  namespace: new-domain
+  knowledge:
+    - type: doc
+      source: domain-specification
+risk_policy:
+  autonomy: supervisor
+  hitl_required: {}
+  rate_limits: {}
+contracts:
+  output: contracts/new-domain-init.schema.json

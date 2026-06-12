@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class McpServer extends Model
 {
-    protected $fillable = ['name', 'url', 'headers', 'enabled', 'tools', 'last_error'];
+    protected $fillable = ['name', 'url', 'headers', 'enabled', 'tools', 'last_error', 'user_id'];
 
     protected $casts = [
         'headers' => 'array',

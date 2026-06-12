@@ -17,6 +17,7 @@ class NotifyController extends Controller
 {
     public function assist(Request $request, NotifyAssistant $assistant, Settings $settings, Notifier $notifier): RedirectResponse
     {
+        abort_unless(request()->user()?->isAdmin(), 403, '通知頻道設定僅限管理員；一般帳號請在「設定」頁設定自己的通知頻道');
         $data = $request->validate(['message' => ['required', 'string', 'max:1000']]);
         $result = $assistant->extract($data['message']);
 
@@ -34,6 +35,7 @@ class NotifyController extends Controller
 
     public function test(Notifier $notifier, Settings $settings): RedirectResponse
     {
+        abort_unless(request()->user()?->isAdmin(), 403, '通知頻道設定僅限管理員；一般帳號請在「設定」頁設定自己的通知頻道');
         $r = $this->attempt($notifier, $settings);
 
         return back()->with('flash', [($r['ok'] ? 'success' : 'error') => $r['summary']]);
@@ -42,6 +44,7 @@ class NotifyController extends Controller
     /** 列出已知的 TG / LINE 頻道（含目前選取者）。 */
     public function channels(ChannelRegistry $channels): JsonResponse
     {
+        abort_unless(request()->user()?->isAdmin(), 403, '通知頻道設定僅限管理員；一般帳號請在「設定」頁設定自己的通知頻道');
         return response()->json([
             'telegram' => $channels->list('telegram'),
             'line' => $channels->list('line'),
@@ -55,6 +58,7 @@ class NotifyController extends Controller
     /** Telegram：主動用 getUpdates 撈最近對話過的頻道。 */
     public function refreshChannels(ChannelRegistry $channels): RedirectResponse
     {
+        abort_unless(request()->user()?->isAdmin(), 403, '通知頻道設定僅限管理員；一般帳號請在「設定」頁設定自己的通知頻道');
         $n = $channels->refreshTelegram();
 
         return back()->with('flash', ['success' => "已刷新 Telegram 頻道，新增 {$n} 個。若仍是空的，請先用你的帳號對 bot 傳一則訊息。"]);
@@ -63,6 +67,7 @@ class NotifyController extends Controller
     /** 選取某平台目前要推播的頻道。 */
     public function selectChannel(Request $request, ChannelRegistry $channels): RedirectResponse
     {
+        abort_unless(request()->user()?->isAdmin(), 403, '通知頻道設定僅限管理員；一般帳號請在「設定」頁設定自己的通知頻道');
         $data = $request->validate([
             'platform' => ['required', 'in:telegram,line'],
             'id' => ['required', 'string', 'max:128'],

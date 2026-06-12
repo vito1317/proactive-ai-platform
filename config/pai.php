@@ -38,12 +38,59 @@ return [
         // 思考型模型（gemma 帶 reasoning_content）需足夠額度：先推理再產出答案
         'max_tokens' => (int) env('PAI_LLM_MAX_TOKENS', 3072),
         'timeout' => (int) env('PAI_LLM_TIMEOUT', 180),
+        // 模型 context window（tokens）：prompt 預算 = context_window - max_tokens - 安全餘裕，
+        // 超出時由新到舊裁掉較舊的歷史/記憶，避免被推理後端無聲截頭
+        'context_window' => (int) env('PAI_LLM_CONTEXT_WINDOW', 16384),
+        // 模型分層：輕量任務（意圖分類 / metarouting / 對話壓縮 / 記憶與技能萃取）用小模型，
+        // 延遲從分鐘級降到秒級。small_model 留空 = 全部用主模型（維持原行為）。
+        // base_url / api_key 留空 = 沿用主模型端點（同一台 llama-server 載第二顆模型即可）。
+        'small_model' => env('PAI_LLM_SMALL_MODEL', ''),
+        'small_base_url' => env('PAI_LLM_SMALL_BASE_URL', ''),
+        'small_api_key' => env('PAI_LLM_SMALL_API_KEY', ''),
+        // 模型 quirk：prompt 模板裡的 /no_think（Qwen 系抑制思考鏈）。換不認得它的模型時關掉，
+        // Prompts loader 會全域拿掉該行，不必逐一改模板。
+        'no_think' => (bool) env('PAI_LLM_NO_THINK', true),
+    ],
+
+    // 對話上下文壓縮（以訊息數觸發；token 層級的預算另由 llm.context_window 控制）
+    'chat' => [
+        'compact_threshold' => (int) env('PAI_CHAT_COMPACT_THRESHOLD', 24),  // 未壓縮訊息超過此數即觸發壓縮
+        'keep_recent' => (int) env('PAI_CHAT_KEEP_RECENT', 8),               // 壓縮時保留最近 N 則；prompt 也帶這 N 則
     ],
 
     // ReAct 迴圈上限（含反思）
     'react' => [
         'max_steps' => (int) env('PAI_REACT_MAX_STEPS', 30),
         'reflect' => (bool) env('PAI_REACT_REFLECT', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | 主動性治理 (ProactivityPolicy) — 移植自 pai-framework
+    |--------------------------------------------------------------------------
+    | 所有領域協調者提出的動作都過此閘門。預設值刻意「寬鬆」（不改變既有
+    | copilot/supervisor/autopilot 行為）；要收緊就調這裡或 .env。
+    | 等級：0=observe(只記錄) 1=suggest(只建議) 2=ask(人類核准) 3=act(自動執行)
+    */
+    'governance' => [
+        'enabled' => (bool) env('PAI_GOV_ENABLED', true),
+        // 信心門檻：低於 min 一律只記錄；自動執行(act) 需達 act_confidence
+        'min_confidence' => (float) env('PAI_GOV_MIN_CONFIDENCE', 0.4),
+        'act_confidence' => (float) env('PAI_GOV_ACT_CONFIDENCE', 0.85),
+        // 各動作的自主等級上限（沒列的用 default）。例：['contain-host' => 2] = 遏制最多只能 ask
+        'default_max_level' => (int) env('PAI_GOV_DEFAULT_MAX_LEVEL', 3),
+        'action_max_levels' => [],
+        // 回饋自動降級：視窗內被人類駁回 N 次的動作自動降一級（變保守）
+        'decline_penalty_threshold' => (int) env('PAI_GOV_DECLINE_THRESHOLD', 3),
+        'decline_window_days' => (int) env('PAI_GOV_DECLINE_WINDOW', 7),
+        // 打擾治理（影響「推播」而非動作本身——待核准動作仍會留在中控台）
+        'quiet_hours' => env('PAI_GOV_QUIET_HOURS', ''),       // '22-8' = 22:00–08:00 不推播；空=停用
+        'urgency_override' => (float) env('PAI_GOV_URGENCY_OVERRIDE', 0.9), // 緊急度達此值可突破安靜時段
+        'max_interruptions_per_hour' => (int) env('PAI_GOV_MAX_INTERRUPTS', 0), // 0=不限制
+        // PAI 干擾度公式：urgency × confidence > interruption_cost 才允許打擾（0=停用）
+        'interruption_cost' => (float) env('PAI_GOV_INTERRUPTION_COST', 0.0),
+        // PAI Protocol v1.1 紀錄輸出目錄（每次運行一份 .pai.json，可對外交換）
+        'records_path' => env('PAI_GOV_RECORDS_PATH', storage_path('app/pai_records')),
     ],
 
     /*
@@ -56,6 +103,10 @@ return [
     'memory' => [
         'store' => env('PAI_MEMORY_STORE', 'database'),  // database | pgvector
         'top_k' => (int) env('PAI_MEMORY_TOPK', 3),
+        // recall 相似度門檻：低於此分數的結果不注入（避免硬湊 k 筆污染 context）
+        'min_score' => (float) env('PAI_MEMORY_MIN_SCORE', 0.15),
+        // 每輪注入 prompt 的使用者長期記憶筆數上限
+        'user_inject_max' => (int) env('PAI_MEMORY_USER_INJECT_MAX', 30),
         'embeddings' => [
             'driver' => env('PAI_EMBED_DRIVER', 'local'),  // local | openai
             'dim' => (int) env('PAI_EMBED_DIM', 256),

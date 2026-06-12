@@ -26,6 +26,10 @@ use App\Pai\Skills\Builtin\WaitSkill;
 use App\Pai\Skills\Builtin\RollbackSkill;
 use App\Pai\Skills\Builtin\RunShellSkill;
 use App\Pai\Skills\Builtin\SendEmailSkill;
+use App\Pai\Skills\Builtin\CancelScheduledSkill;
+use App\Pai\Skills\Builtin\FalGenerateSkill;
+use App\Pai\Skills\Builtin\FirecrawlScrapeSkill;
+use App\Pai\Skills\Builtin\GenerateImageSkill;
 use App\Pai\Skills\Builtin\StopTaskSkill;
 use App\Pai\Skills\Builtin\TailLogsSkill;
 use App\Pai\Skills\Builtin\ToggleDomainSkill;
@@ -47,6 +51,10 @@ class SkillRegistry
         MergeDomainsSkill::class,
         RestartWorkersSkill::class,
         StopTaskSkill::class,
+        CancelScheduledSkill::class,
+        GenerateImageSkill::class,
+        FirecrawlScrapeSkill::class,
+        FalGenerateSkill::class,
         TailLogsSkill::class,
         // 通用系統操作
         RunShellSkill::class,
@@ -133,18 +141,32 @@ class SkillRegistry
      * 精簡工具目錄：MCP 工具依「基本工具名」去重（多節點重複的 browser、exec 等只留一份），
      * 優先保留 $preferNode（使用者預設節點）的版本。大幅縮短 prompt，避免本地模型被上百個工具淹沒。
      */
-    public function catalogFor(?string $preferNode): string
+    public function catalogFor(?string $preferNode, ?array $allowedNodes = null, ?array $allowedSkills = null, ?array $modeTools = null): string
     {
-        return self::format($this->dedupedSkills($preferNode));
+        return self::format($this->dedupedSkills($preferNode, $allowedNodes, $allowedSkills, $modeTools));
     }
 
-    /** 去重後的技能清單（MCP 工具同名只留一個，優先 $preferNode）。 @return array<int,Skill> */
-    public function dedupedSkills(?string $preferNode): array
+    /**
+     * 去重後的技能清單（MCP 工具同名只留一個，優先 $preferNode）。
+     * $allowedNodes：null=不限制；陣列=只保留節點名在清單內的 MCP 工具（租戶裝置隔離）。
+     * $allowedSkills：null=不限制；陣列=只保留清單內的 builtin skill（租戶 skill 授權）。
+     * $modeTools：null=不限制；陣列=Agent Profile 模式工具白名單（同時過濾 builtin 名 + mcp base）。
+     * @return array<int,Skill>
+     */
+    public function dedupedSkills(?string $preferNode, ?array $allowedNodes = null, ?array $allowedSkills = null, ?array $modeTools = null): array
     {
         $builtin = [];
         $mcpByBase = [];
         foreach ($this->all() as $name => $skill) {
             if (! str_starts_with($name, 'mcp__')) {
+                // 租戶 skill 逐項授權：非 admin 且未授權此 skill → 不放進目錄
+                if ($allowedSkills !== null && ! in_array($name, $allowedSkills, true)) {
+                    continue;
+                }
+                // Agent Profile 模式白名單（builtin 依名稱）
+                if ($modeTools !== null && ! in_array($name, $modeTools, true)) {
+                    continue;
+                }
                 $builtin[] = $skill;
 
                 continue;
@@ -152,6 +174,14 @@ class SkillRegistry
             $parts = explode('__', $name);
             $node = $parts[1] ?? '';
             $base = $parts[2] ?? $name;
+            // 租戶裝置隔離：節點不在此帳號可存取清單 → 不放進目錄
+            if ($allowedNodes !== null && ! in_array($node, $allowedNodes, true)) {
+                continue;
+            }
+            // Agent Profile 模式白名單（mcp 依 base 工具名）
+            if ($modeTools !== null && ! in_array($base, $modeTools, true)) {
+                continue;
+            }
             if (isset($mcpByBase[$base])) {
                 if ($preferNode !== null && $node === $preferNode && $mcpByBase[$base]['node'] !== $preferNode) {
                     $mcpByBase[$base] = ['skill' => $skill, 'node' => $node];

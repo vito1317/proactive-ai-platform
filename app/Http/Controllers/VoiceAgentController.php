@@ -38,6 +38,7 @@ class VoiceAgentController extends Controller
             'transcript' => ['required', 'string', 'max:2000'],
             'conversation_id' => ['nullable', 'integer'],
             'session' => ['nullable', 'string', 'max:128'],
+            'node' => ['nullable', 'string', 'max:64'],   // 發指令的當前裝置（手機節點名）
             'geo' => ['nullable', 'array'],
             'geo.lat' => ['required_with:geo', 'numeric'],
             'geo.lng' => ['required_with:geo', 'numeric'],
@@ -49,6 +50,7 @@ class VoiceAgentController extends Controller
         }
 
         $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
+        $this->rememberDevice($conv, $data['node'] ?? null);   // 記住「當前裝置」→ 預設操作節點
         $geo = $data['geo'] ?? null;
         $geoPlace = $geo ? $this->reverseGeocode((float) $geo['lat'], (float) $geo['lng']) : '';
         $conv->addMessage('user', $transcript, array_filter([
@@ -340,6 +342,39 @@ class VoiceAgentController extends Controller
      * SSE 串流版：邊生成邊回（voice_server 收到一句念一句，不用等全部跑完）。
      * 事件：step（執行步驟）/ delta（回覆文字片段）/ done（完整結果）。
      */
+    /**
+     * 主動對語音 session 念一句話（開車模式念通知、主動問目的地用）。
+     * 手機用 X-Register-Secret 認證；轉呼 voice_server /voice/push（by session）。
+     */
+    public function announce(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
+        $authed = $request->user() !== null
+            || ($secret !== '' && hash_equals($secret, (string) $request->header('X-Voice-Secret')))
+            || \App\Http\Controllers\GatewayController::ownerFromRequest($request) !== null;
+        if (! $authed) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+        $data = $request->validate([
+            'session' => ['required', 'string', 'max:128'],
+            'text' => ['required', 'string', 'max:1000'],
+            'progress' => ['nullable', 'boolean'],
+        ]);
+        try {
+            $url = (string) config('pai.voice.push_url', 'http://127.0.0.1:8891/voice/push');
+            $resp = \Illuminate\Support\Facades\Http::timeout(60)->post($url, [
+                'session' => $data['session'],
+                'text' => $data['text'],
+                'progress' => (bool) ($data['progress'] ?? false),
+                'secret' => $secret,
+            ]);
+
+            return response()->json(['ok' => (bool) ($resp->json('ok') ?? false), 'voice' => $resp->json()]);
+        } catch (Throwable $e) {
+            return response()->json(['ok' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
     public function stream(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
@@ -349,6 +384,7 @@ class VoiceAgentController extends Controller
             'transcript' => ['required', 'string', 'max:2000'],
             'conversation_id' => ['nullable', 'integer'],
             'session' => ['nullable', 'string', 'max:128'],
+            'node' => ['nullable', 'string', 'max:64'],   // 發指令的當前裝置
             'geo' => ['nullable', 'array'],
             'geo.lat' => ['required_with:geo', 'numeric'],
             'geo.lng' => ['required_with:geo', 'numeric'],
@@ -370,6 +406,7 @@ class VoiceAgentController extends Controller
                 return;
             }
             $conv = $this->resolveConversation($data['conversation_id'] ?? null, $data['session'] ?? null);
+            $this->rememberDevice($conv, $data['node'] ?? null);   // 記住當前裝置
             $geo = $data['geo'] ?? null;
             $geoPlace = $geo ? $this->reverseGeocode((float) $geo['lat'], (float) $geo['lng']) : '';
             $conv->addMessage('user', $transcript, array_filter([
@@ -487,13 +524,17 @@ class VoiceAgentController extends Controller
      * @return array{reply:string,meta:array,step?:string}|null
      */
     /** 帶圖回答（Gemma 4 看圖）：附近期對話脈絡 + 這張圖。 */
-    private function visionReply(Conversation $conv, string $question, string $image): string
+    private function visionReply(Conversation $conv, string $question, string $image, bool $live = false): string
     {
         $q = trim($question) !== '' ? $question : '請看這張圖片，用台灣正體中文說明重點。';
-        $history = $conv->messages()->latest('id')->limit(6)->get()->reverse()
+        // 即時投影/鏡頭：每次都是「當前畫面」，不帶歷史（否則模型會一直複述第一張看到的畫面）
+        $history = $live ? [] : $conv->messages()->latest('id')->limit(6)->get()->reverse()
             ->map(fn ($m) => ['role' => $m->role, 'content' => mb_substr((string) $m->content, 0, 500)])->values()->all();
+        $sys = $live
+            ? '你是「由 Vito 開發的助理」，看得懂圖片。這是使用者「目前螢幕/鏡頭的即時畫面」。只根據這張當前畫面回答，用台灣正體（繁體）中文、簡短，禁簡體。'
+            : '你是「由 Vito 開發的助理」，看得懂圖片。用台灣正體（繁體）中文回答，禁簡體。依對話脈絡針對這張圖回答或追問。';
         $messages = [
-            ['role' => 'system', 'content' => '你是「由 Vito 開發的助理」，看得懂圖片。用台灣正體（繁體）中文回答，禁簡體。依對話脈絡針對這張圖回答或追問。'],
+            ['role' => 'system', 'content' => $sys],
             ...$history,
             ['role' => 'user', 'content' => [
                 ['type' => 'text', 'text' => $q],
@@ -509,9 +550,36 @@ class VoiceAgentController extends Controller
         }
     }
 
+    private ?int $turnOwnerId = null;   // 本回合對話擁有者（per-user 設定 + 裝置範圍用）
+    private ?string $turnDeviceNode = null; // 本回合「當前裝置」（發指令的那台）
+
     private function directCommand(string $transcript, ?array $geo = null, ?Conversation $conv = null): ?array
     {
+        $this->turnOwnerId = $conv?->user_id;
+        $this->turnDeviceNode = $this->currentDevice($conv);
         $t = trim($transcript);
+
+        // ── 停止/取消進行中的處理序列 ──────────────────────────────────────────
+        if ($conv && preg_match('/^(請|请)?\s*(停止|停下|停下來|停一下|別做了|别做了|不用了|不要做了|取消(處理|处理|執行|执行|任務|任务)?|別處理了|别处理了|停|cancel|stop)[。!！.\s]*$/iu', $t)) {
+            \Illuminate\Support\Facades\Cache::put('pai:abort:'.$conv->id, true, 300);
+
+            return ['reply' => '好，停止了。', 'speech' => '好的，停止了。',
+                'meta' => ['category' => 'skill', 'skill' => 'control', 'direct' => true, 'action' => 'stop'], 'step' => '🛑 停止處理'];
+        }
+
+        // ── 切換人格 / 模式（Agent Profile）────────────────────────────────────
+        if ($conv && preg_match('/(切換|切换|換成|换成|改用|切到|使用)\s*(.{1,20}?)\s*(人格|模式|persona|profile|角色)/iu', $t, $pm)) {
+            $name = trim($pm[2]);
+            $svc = app(\App\Pai\Agent\PersonaProfiles::class);
+            $ok = $svc->switchTo($conv->user_id, $name);
+            if ($ok !== null) {
+                return ['reply' => "好，已切換到「{$ok}」人格。", 'speech' => "好的，已經切換到{$ok}人格。",
+                    'meta' => ['category' => 'skill', 'skill' => 'persona', 'direct' => true, 'action' => 'switch'], 'step' => "🎭 切換人格：{$ok}"];
+            }
+            $names = collect($svc->all($conv->user_id))->pluck('name')->implode('、');
+            return ['reply' => "找不到「{$name}」這個人格。目前有：{$names}", 'speech' => "找不到那個人格喔，目前有 {$names}。",
+                'meta' => ['category' => 'skill', 'skill' => 'persona', 'direct' => true], 'step' => '🎭 人格切換失敗'];
+        }
 
         // ── 圖片對話：語音對話已掛了照片 → 這一輪帶圖回答（可多輪追問同一張）────────
         $sid = $conv?->voice_sid;
@@ -525,12 +593,24 @@ class VoiceAgentController extends Controller
             }
             $img = \Illuminate\Support\Facades\Cache::get($pkey);
             if (is_string($img) && $img !== '') {
-                $reply = $this->visionReply($conv, $t, $img);
-                \Illuminate\Support\Facades\Cache::put($pkey, $img, 900); // 保留供追問
-                $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'vision']);
+                $live = (bool) \Illuminate\Support\Facades\Cache::get('vision:live:'.$sid);
+                // 視覺意圖 vs 明確動作指令：避免「去公司/打開X/傳訊息」被殘留圖片綁架成看圖
+                $visionIntent = (bool) preg_match('/(看到|看見|看见|看的|這是|这是|這張|这张|這個|这个|什麼|甚麼|什么|畫面|画面|螢幕|屏幕|圖片|图片|誰|谁|讀|读|介紹|介绍|描述|顏色|颜色|寫什麼|写什么|幾個|几个|哪一|是不是)/u', $t);
+                $otherCmd = (bool) preg_match('/(導航|导航|帶我去|带我去|去[\x{4e00}-\x{9fff}]{1,10}|打開|打开|開啟|开启|啟動|启动|傳|传|訊息|讯息|播放|放歌|放音樂|取消|刪除|删除|記住|记住|記得|记得|提醒|排程|定時|打電話|打电话)/u', $t);
+                if (($live || $visionIntent) && ! $otherCmd) {
+                    $reply = $this->visionReply($conv, $t, $img, $live);
+                    if (! $live) {
+                        \Illuminate\Support\Facades\Cache::forget($pkey); // 一次性照片：答完自動放下，不再綁架後續對話
+                    }
+                    $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'vision']);
 
-                return ['reply' => $reply, 'speech' => $this->speechClean($reply),
-                    'meta' => ['category' => 'skill', 'skill' => 'vision', 'direct' => true], 'step' => '👁 看圖回答（說「不看了」可放下圖片）'];
+                    return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+                        'meta' => ['category' => 'skill', 'skill' => 'vision', 'direct' => true], 'step' => '👁 看圖回答'];
+                }
+                // 明確指令但有殘留的一次性圖片 → 順手放下，避免一直卡在看圖
+                if (! $live && $otherCmd) {
+                    \Illuminate\Support\Facades\Cache::forget($pkey);
+                }
             }
         }
 
@@ -842,36 +922,53 @@ class VoiceAgentController extends Controller
             $navDest = trim($m[2]);
         }
         if ($navDest !== null && $navDest !== '' && ! preg_match('/^(那|這|这|哪|過去|过去)/u', $navDest)) {
-            [$target, $targetLabel] = $this->targetGateway($t);
-            // 實算距離/時間（OSRM）：起點 = 指名地點（地名轉座標）或目前定位
-            $fromCoord = $navFrom !== null && $navFrom !== ''
-                ? $this->geocodePlace($navFrom)
+            // 指代型地點（公司/家/學校…）→ 先查使用者記憶換成真實地址；查不到才用字面
+            $destQuery = $this->resolvePlaceFromMemory($navDest, $this->turnOwnerId) ?? $navDest;
+            $fromQuery = $navFrom !== null && $navFrom !== '' ? ($this->resolvePlaceFromMemory($navFrom, $this->turnOwnerId) ?? $navFrom) : '';
+
+            // 實算距離/時間（OSRM）
+            $fromCoord = $fromQuery !== '' ? $this->geocodePlace($fromQuery)
                 : ($geo !== null ? ['lat' => $geo['lat'], 'lng' => $geo['lng']] : null);
-            $toCoord = $this->geocodePlace($navDest);
+            $toCoord = $this->geocodePlace($destQuery);
             $est = ($fromCoord !== null && $toCoord !== null) ? $this->routeEstimate($fromCoord, $toCoord) : null;
             $fromLabel = $navFrom !== null && $navFrom !== '' ? $navFrom : '你的位置';
 
-            $params = ['api' => '1', 'destination' => $navDest, 'travelmode' => $navMode];
-            if ($navFrom !== null && $navFrom !== '') {
-                $params['origin'] = $navFrom;
-            } elseif ($geo !== null) {
-                $params['origin'] = $geo['lat'].','.$geo['lng'];
+            // 導航優先開在「使用者自己的手機」原生地圖（開車時看手機）；沒有在線手機才退桌面
+            $phoneNode = $this->ownerPhoneNode();
+            if ($phoneNode !== null) {
+                $args = ['destination' => $destQuery, 'mode' => $navMode];
+                if ($fromQuery !== '') {
+                    $args['origin'] = $fromQuery;
+                } elseif ($geo !== null) {
+                    $args['origin'] = $geo['lat'].','.$geo['lng'];
+                }
+                $rv = $this->reverseCall($phoneNode, 'maps_route', $args);
+                $fail = $rv === null ? true : $rv[1];
+                $where = '手機';
+            } else {
+                $params = ['api' => '1', 'destination' => $destQuery, 'travelmode' => $navMode];
+                if ($fromQuery !== '') {
+                    $params['origin'] = $fromQuery;
+                } elseif ($geo !== null) {
+                    $params['origin'] = $geo['lat'].','.$geo['lng'];
+                }
+                $url = 'https://www.google.com/maps/dir/?'.http_build_query($params);
+                $fail = $this->guiFailed($this->runGui($this->targetGateway($t)[0], 'open', 'chrome', $url));
+                $where = '電腦';
             }
-            $url = 'https://www.google.com/maps/dir/?'.http_build_query($params);
-            $res = $this->runGui($target, 'open', 'chrome', $url);
-            $fail = $this->guiFailed($res);
 
             $estText = $est !== null ? "開車約 {$est[0]} 公里、大概 {$est[1]} 分鐘" : '';
             $speech = $fail
-                ? $this->guiFailSpeech($targetLabel)
+                ? '抱歉，導航沒能開起來，等等再試一次。'
                 : ($estText !== ''
-                    ? "從{$fromLabel}到{$navDest}{$estText}，路線也幫你打開了。"
-                    : "好的，到{$navDest}的路線已經打開了，預估時間看地圖上的標示。");
+                    ? "好的，到{$navDest}{$estText}，路線開好了。"
+                    : "好的，到{$navDest}的路線開好了。");
 
             return [
-                'reply' => "好，已打開「{$fromLabel} → {$navDest}」的路線".($estText !== '' ? "（{$estText}）" : '')."（{$res}）",
+                'reply' => $fail ? '導航開啟失敗，請稍後再試。'
+                    : "好，已在{$where}打開「{$fromLabel} → {$navDest}」的路線".($estText !== '' ? "（{$estText}）" : ''),
                 'speech' => $speech,
-                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'navigate', 'target' => $target],
+                'meta' => ['category' => 'skill', 'skill' => 'gui', 'direct' => true, 'action' => 'navigate'],
                 'step' => "🧭 導航：{$fromLabel}→{$navDest}".($estText !== '' ? "（{$est[0]}km/{$est[1]}分）" : ''),
             ];
         }
@@ -1103,6 +1200,9 @@ class VoiceAgentController extends Controller
     /** 在目標節點（local=主節點 gateway，或某 MCP gateway）跑唯讀指令，回 stdout。 */
     private function runExec(string $target, string $cmd): string
     {
+        if ($target === '__denied__') {
+            return '（此帳號沒有操作主節點的權限）';
+        }
         $name = ($target === '' || $target === 'local') ? 'gateway' : $target;
         $server = \App\Pai\Mcp\McpServer::where('name', $name)->where('enabled', true)->first();
         if (! $server) {
@@ -1396,27 +1496,102 @@ class VoiceAgentController extends Controller
     }
 
     /** 決定在哪個節點操作：句中指名 > 預設設定 > local。回傳 [target, 顯示名]。 */
+    /** 記住「發指令的當前裝置」→ 之後該對話的操作預設跑這台（平板說話就跑平板，不跑手機）。 */
+    private function rememberDevice(?Conversation $conv, ?string $node): void
+    {
+        if (! $conv) {
+            return;
+        }
+        $node = preg_replace('/[^a-z0-9_-]/i', '-', (string) $node);
+        if ($node !== '' && $node !== 'local' && $node !== 'node') {
+            \Illuminate\Support\Facades\Cache::put("pai:device:{$conv->id}", $node, 7200);
+        }
+    }
+
+    /** 這個對話「當前裝置」節點名（發指令的那台）；沒有回 null。 */
+    private function currentDevice(?Conversation $conv): ?string
+    {
+        return $conv ? \Illuminate\Support\Facades\Cache::get("pai:device:{$conv->id}") : null;
+    }
+
+    /** 指代型地點（公司/家/學校…）→ 從使用者記憶換成真實地址；查不到回 null。 */
+    private function resolvePlaceFromMemory(string $place, ?int $userId): ?string
+    {
+        if ($userId === null) {
+            return null;
+        }
+        $p = trim($place);
+        if (! preg_match('/(公司|家|學校|学校|老家|辦公室|办公室|宿舍|租屋|住處|住处|店裡|店里)/u', $p)) {
+            return null;
+        }
+        $rows = \App\Pai\Memory\UserMemory::where('user_id', $userId)->where('content', 'like', '%'.$p.'%')->get();
+        foreach ($rows as $r) {
+            // 內容像地址（含 市/區/路/號…）→ 直接拿整段當查詢
+            if (preg_match('/(市|縣|县|區|区|鄉|乡|鎮|镇|路|街|號|号|巷|弄|樓|楼|段)/u', (string) $r->content)) {
+                return (string) $r->content;
+            }
+        }
+
+        return null;
+    }
+
+    /** 該帳號自己擁有、目前在線的手機（反向節點）名稱；沒有回 null。 */
+    private function ownerPhoneNode(): ?string
+    {
+        try {
+            $owned = \App\Pai\Mcp\McpServer::where('user_id', $this->turnOwnerId)
+                ->where('url', 'like', 'reverse://%')->pluck('name')->all();
+            foreach (\App\Pai\Mcp\ReverseBus::onlineNodes() as $n) {
+                if (in_array($n, $owned, true)) {
+                    return $n;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
+    }
+
     private function targetGateway(string $t): array
     {
         $low = mb_strtolower($t);
+        // 租戶裝置範圍：非 admin 只認自己擁有/被授權的節點（admin → 全部）
+        $owner = $this->turnOwnerId ? \App\Models\User::find($this->turnOwnerId) : null;
+        $allowed = ($owner && ! $owner->isAdmin()) ? $owner->allowedDeviceNames() : null;
+        $canLocal = ! $owner || $owner->canUseLocal();
         if (preg_match('/(主節點|主节点|伺服器|服务器|這台|这台|本機|本机|server)/u', $t)) {
-            return ['local', '主節點'];
+            return $canLocal ? ['local', '主節點'] : ['__denied__', '主節點（無權限）'];
         }
+        $devices = \App\Pai\Mcp\McpServer::where('enabled', true)
+            ->when($allowed !== null, fn ($q) => $q->whereIn('name', $allowed))->get();
         // 句中提到某個已註冊 MCP 節點名稱 → 用它
-        foreach (\App\Pai\Mcp\McpServer::where('enabled', true)->get() as $s) {
+        foreach ($devices as $s) {
             if ($s->name !== 'gateway' && str_contains($low, mb_strtolower($s->name))) {
                 return [$s->name, $s->name];
             }
         }
         if (preg_match('/(我的mac|我的電腦|我的电脑|我的筆電|mac\b|macbook)/iu', $t)) {
-            $mac = \App\Pai\Mcp\McpServer::where('enabled', true)->where('name', 'like', '%mac%')->first();
+            $mac = $devices->first(fn ($s) => str_contains(mb_strtolower($s->name), 'mac'));
             if ($mac) {
                 return [$mac->name, $mac->name];
             }
         }
-        $def = (string) $this->settings->get('voice.default_gateway', config('pai.voice.default_gateway', 'local'));
+        // 預設節點 = 當前裝置（發指令的那台）優先；其次才是設定的預設節點
+        $def = $this->turnDeviceNode !== null && $this->turnDeviceNode !== ''
+            ? $this->turnDeviceNode
+            : (string) $this->settings->get('voice.default_gateway', config('pai.voice.default_gateway', 'local'), $this->turnOwnerId);
+        if ($def === '' || $def === 'local') {
+            // 預設是主節點，但此帳號無主節點權限 → 改用它第一個可用裝置，沒有就拒絕
+            if (! $canLocal) {
+                $first = $devices->first(fn ($s) => $s->name !== 'gateway');
 
-        return $def === '' || $def === 'local' ? ['local', '主節點'] : [$def, $def];
+                return $first ? [$first->name, $first->name] : ['__denied__', '（無可操作的節點）'];
+            }
+
+            return ['local', '主節點'];
+        }
+
+        return [$def, $def];
     }
 
     /** 在指定節點開/關 GUI app。local→pai-gui-open；遠端→該 MCP gateway 的 open_app/exec。 */
@@ -1437,6 +1612,9 @@ class VoiceAgentController extends Controller
 
     private function runGui(string $target, string $action, string $key, ?string $arg): string
     {
+        if ($target === '__denied__') {
+            return '（此帳號沒有操作主節點的權限，請管理員授權，或改用你自己的裝置）';
+        }
         if ($target === 'local') {
             $base = 'sudo -u '.escapeshellarg($this->guiUser()).' /usr/local/bin/pai-gui-open ';
             $cmd = $action === 'close'

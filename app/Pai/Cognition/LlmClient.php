@@ -5,6 +5,7 @@ namespace App\Pai\Cognition;
 use App\Pai\Chat\StopStreaming;
 use App\Pai\Settings\Settings;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -16,6 +17,12 @@ use Throwable;
  */
 class LlmClient
 {
+    /** 暫時性錯誤（連線失敗 / 429 / 5xx）額外重試次數。 */
+    private const MAX_RETRIES = 2;
+
+    /** 各次重試前的退避（微秒）：0.5s → 1.5s。 */
+    private const RETRY_BACKOFF_US = [500_000, 1_500_000];
+
     /** 全程心跳：任何 LLM HTTP 等待期間定期呼叫（TG/LINE 維持「輸入中」動畫用）。 */
     private static $heartbeat = null;
 
@@ -49,6 +56,36 @@ class LlmClient
     }
 
     /**
+     * 依 tier 解析端點與模型（模型分層）：
+     *  - $opts['tier'] === 'small' 且後台有設 llm.small_model → 用輕量模型跑
+     *    分類/壓縮/萃取等小任務（延遲秒級）；未設定則自動退回主模型（行為不變）。
+     *
+     * @return array{base_url: string, model: string, api_key: string}
+     */
+    private function endpoint(?int $uid, array $opts): array
+    {
+        if (($opts['tier'] ?? 'main') === 'small') {
+            $model = trim((string) $this->settings->get('llm.small_model', '', $uid));
+            if ($model !== '') {
+                $base = trim((string) $this->settings->get('llm.small_base_url', '', $uid));
+                $key = trim((string) $this->settings->get('llm.small_api_key', '', $uid));
+
+                return [
+                    'base_url' => rtrim($base !== '' ? $base : $this->settings->llmBaseUrl($uid), '/'),
+                    'model' => $model,
+                    'api_key' => $key !== '' ? $key : (string) $this->settings->get('llm.api_key', 'sk-local', $uid),
+                ];
+            }
+        }
+
+        return [
+            'base_url' => rtrim($this->settings->llmBaseUrl($uid), '/'),
+            'model' => (string) $this->settings->get('llm.model', null, $uid),
+            'api_key' => (string) $this->settings->get('llm.api_key', 'sk-local', $uid),
+        ];
+    }
+
+    /**
      * 模板思考關閉時，模型仍會生成頻道標記（<|channel>thought / <channel|>）混進 content
      * → 統一剝除，避免顯示/朗讀出標記。
      */
@@ -69,10 +106,9 @@ class LlmClient
      */
     public function stream(array $messages, callable $onDelta, ?callable $onReasoning = null, ?callable $onTick = null, ?callable $onThought = null): array
     {
-        $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
-        $model = (string) $this->settings->get('llm.model');
-        $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
-        $timeout = (int) $this->settings->get('llm.timeout');
+        $uid = \App\Pai\Agent\Tenant::id();
+        ['base_url' => $baseUrl, 'model' => $model, 'api_key' => $apiKey] = $this->endpoint($uid, []);
+        $timeout = (int) $this->settings->get('llm.timeout', null, $uid);
 
         self::$aborted = false;
         try {
@@ -81,8 +117,8 @@ class LlmClient
                 ->post($baseUrl.'/chat/completions', [
                     'model' => $model,
                     'messages' => $messages,
-                    'temperature' => (float) $this->settings->get('llm.temperature'),
-                    'max_tokens' => (int) $this->settings->get('llm.max_tokens'),
+                    'temperature' => (float) $this->settings->get('llm.temperature', null, $uid),
+                    'max_tokens' => (int) $this->settings->get('llm.max_tokens', null, $uid),
                     'stream' => true,
                 ]);
         } catch (StopStreaming $e) {
@@ -175,30 +211,51 @@ class LlmClient
      */
     public function complete(array $messages, array $opts = []): array
     {
-        // 每次讀設定 → 後台調整即時生效
-        $baseUrl = rtrim((string) $this->settings->get('llm.base_url'), '/');
-        $model = (string) $this->settings->get('llm.model');
-        $apiKey = (string) $this->settings->get('llm.api_key', 'sk-local');
-        $timeout = (int) ($opts['timeout'] ?? $this->settings->get('llm.timeout'));
+        // 每次讀設定 → 後台調整即時生效（帶租戶 → per-account 供應商/金鑰；tier=small 走輕量模型）
+        $uid = \App\Pai\Agent\Tenant::id();
+        ['base_url' => $baseUrl, 'model' => $model, 'api_key' => $apiKey] = $this->endpoint($uid, $opts);
+        $timeout = (int) ($opts['timeout'] ?? $this->settings->get('llm.timeout', null, $uid));
         $t0 = microtime(true);
 
-        try {
-            $response = Http::timeout($timeout)
-                ->withToken($apiKey)
-                ->acceptJson()
-                ->withOptions(self::progressOption())
-                ->post($baseUrl.'/chat/completions', [
-                    'model' => $model,
-                    'messages' => $messages,
-                    'temperature' => $opts['temperature'] ?? (float) $this->settings->get('llm.temperature'),
-                    'max_tokens' => $opts['max_tokens'] ?? (int) $this->settings->get('llm.max_tokens'),
-                ]);
-        } catch (Throwable $e) {
-            throw new LlmException('LLM 後端連線失敗：'.$e->getMessage(), previous: $e);
-        }
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'temperature' => $opts['temperature'] ?? (float) $this->settings->get('llm.temperature', null, $uid),
+            'max_tokens' => $opts['max_tokens'] ?? (int) $this->settings->get('llm.max_tokens', null, $uid),
+        ];
 
-        if ($response->failed()) {
-            throw new LlmException("LLM 後端回應 {$response->status()}：".$response->body());
+        // 暫時性錯誤（連線失敗 / 429 / 5xx）退避重試；使用者中止（心跳丟 StopStreaming）不重試
+        self::$aborted = false;
+        $response = null;
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                $response = Http::timeout($timeout)
+                    ->withToken($apiKey)
+                    ->acceptJson()
+                    ->withOptions(self::progressOption())
+                    ->post($baseUrl.'/chat/completions', $payload);
+            } catch (Throwable $e) {
+                if (self::$aborted || $attempt >= self::MAX_RETRIES) {
+                    throw new LlmException('LLM 後端連線失敗：'.$e->getMessage(), previous: $e);
+                }
+                Log::warning('LLM 連線失敗，準備重試', ['attempt' => $attempt + 1, 'error' => $e->getMessage()]);
+                usleep(self::RETRY_BACKOFF_US[$attempt] ?? 1_500_000);
+
+                continue;
+            }
+
+            if ($response->failed()) {
+                $status = $response->status();
+                if (($status === 429 || $status >= 500) && $attempt < self::MAX_RETRIES) {
+                    Log::warning('LLM 後端暫時性錯誤，準備重試', ['attempt' => $attempt + 1, 'status' => $status]);
+                    usleep(self::RETRY_BACKOFF_US[$attempt] ?? 1_500_000);
+
+                    continue;
+                }
+                throw new LlmException("LLM 後端回應 {$status}：".$response->body());
+            }
+
+            break;
         }
 
         $choice = $response->json('choices.0') ?? [];
@@ -244,6 +301,7 @@ class LlmClient
 
     /**
      * 取得並解析模型輸出的單一 JSON 物件。
+     * 解析失敗時把原輸出與錯誤回饋給模型重試一次（要求只輸出純 JSON）。
      *
      * @return array<string, mixed>
      */
@@ -251,7 +309,18 @@ class LlmClient
     {
         $raw = $this->chat($messages, $opts);
 
-        return self::extractJson($raw);
+        try {
+            return self::extractJson($raw);
+        } catch (LlmException $e) {
+            Log::warning('LLM JSON 解析失敗，回饋模型重試一次', ['error' => $e->getMessage()]);
+            $retry = [
+                ...$messages,
+                ['role' => 'assistant', 'content' => $raw],
+                ['role' => 'user', 'content' => '上面的輸出無法解析成 JSON。請重新回答：只輸出「一個」合法的 JSON 物件，不要 code fence、不要任何說明文字。'],
+            ];
+
+            return self::extractJson($this->chat($retry, $opts));
+        }
     }
 
     /**
@@ -268,7 +337,16 @@ class LlmClient
             $text = $m[1];
         }
 
-        // 取第一個 { 到最後一個 }（容忍前後雜訊）
+        // 括號配對掃描：取第一個「平衡」的 JSON 物件（容忍前後雜訊與多個物件並存）
+        $balanced = self::firstBalancedObject($text);
+        if ($balanced !== null) {
+            $decoded = json_decode($balanced, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        // 退而求其次：第一個 { 到最後一個 }（舊行為，捕捉跨段雜訊的殘餘案例）
         $start = strpos($text, '{');
         $end = strrpos($text, '}');
         if ($start === false || $end === false || $end < $start) {
@@ -282,5 +360,47 @@ class LlmClient
         }
 
         return $decoded;
+    }
+
+    /**
+     * 從文字中掃出第一個括號平衡的 {...} 區段（正確處理字串字面值與跳脫字元）。
+     * 找不到完整平衡區段時回傳 null。
+     */
+    private static function firstBalancedObject(string $text): ?string
+    {
+        $start = strpos($text, '{');
+        if ($start === false) {
+            return null;
+        }
+        $depth = 0;
+        $inString = false;
+        $escaped = false;
+        $len = strlen($text);
+        for ($i = $start; $i < $len; $i++) {
+            $c = $text[$i];
+            if ($inString) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($c === '\\') {
+                    $escaped = true;
+                } elseif ($c === '"') {
+                    $inString = false;
+                }
+
+                continue;
+            }
+            if ($c === '"') {
+                $inString = true;
+            } elseif ($c === '{') {
+                $depth++;
+            } elseif ($c === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    return substr($text, $start, $i - $start + 1);
+                }
+            }
+        }
+
+        return null;
     }
 }

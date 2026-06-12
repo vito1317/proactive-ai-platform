@@ -25,7 +25,7 @@ class LearnSkillJob implements ShouldQueue
 
     public int $timeout = 90;
 
-    public function __construct(public string $message, public array $obs) {}
+    public function __construct(public string $message, public array $obs, public ?int $userId = null) {}
 
     public function handle(LlmClient $llm): void
     {
@@ -41,33 +41,29 @@ class LearnSkillJob implements ShouldQueue
             return ($i + 1).'. '.$o['action'].'('.$a.') → '.mb_substr($r, 0, 200);
         })->implode("\n");
 
-        $prompt = <<<P
-        以下是一次「成功完成」的任務軌跡。請把它萃取成一個【可重用的做法（playbook）】，讓未來遇到類似需求能照做。
-        用台灣正體中文。若這次任務太瑣碎、一步就好、或沒有重用價值，name 回空字串。
-
-        使用者需求：「{$this->message}」
-        實際成功步驟：
-        {$traj}
-
-        只輸出 JSON：
-        {"name":"白話技能名","when_to_use":"什麼情境用","steps":"濃縮成幾條關鍵步驟與要點(用哪些工具、順序、注意事項)","keywords":"命中關鍵字 空白分隔 3到6個"}
-        /no_think
-        P;
+        $prompt = \App\Pai\Cognition\Prompts::render('learn-skill', ['message' => $this->message, 'trajectory' => $traj]);
 
         try {
-            $j = LlmClient::extractJson($llm->chat([['role' => 'user', 'content' => $prompt]], ['max_tokens' => 600]));
-            $name = trim((string) ($j['name'] ?? ''));
-            $steps = trim((string) ($j['steps'] ?? ''));
+            $j = $llm->chatJson([['role' => 'user', 'content' => $prompt]], ['max_tokens' => 600, 'tier' => 'small']);
+            $name = mb_substr(trim((string) ($j['name'] ?? '')), 0, 50);
+            $steps = mb_substr(trim((string) ($j['steps'] ?? '')), 0, 2000);
             if ($name === '' || mb_strlen($steps) < 5) {
                 return;
             }
-            $keywords = trim((string) ($j['keywords'] ?? ''));
-            // 去重：同名或關鍵字高度重疊就更新，不重複建立
-            $existing = LearnedSkill::where('name', $name)->first()
-                ?? LearnedSkill::where('keywords', $keywords)->first();
+            // keywords 正規化：逗號/頓號當分隔、去標點、每個 ≤24 字、最多 6 個——
+            // 模型沒照「空白分隔」格式時也能修復，否則之後 relevant() 比對命中率會爛掉
+            $kwTokens = preg_split('/[\s,，、;；]+/u', trim((string) ($j['keywords'] ?? ''))) ?: [];
+            $kwTokens = array_values(array_filter(array_map(
+                fn ($t) => mb_substr(trim((string) preg_replace('/[「」『』"\'`!?！？。.]+/u', '', (string) $t)), 0, 24),
+                $kwTokens,
+            )));
+            $keywords = implode(' ', array_slice($kwTokens, 0, 6));
+            // 去重：同名或關鍵字高度重疊就更新，不重複建立（限同一擁有者，租戶隔離）
+            $existing = LearnedSkill::where('user_id', $this->userId)->where('name', $name)->first()
+                ?? LearnedSkill::where('user_id', $this->userId)->where('keywords', $keywords)->first();
             if ($existing) {
                 $existing->update([
-                    'when_to_use' => trim((string) ($j['when_to_use'] ?? $existing->when_to_use)),
+                    'when_to_use' => mb_substr(trim((string) ($j['when_to_use'] ?? $existing->when_to_use)), 0, 200),
                     'steps' => $steps, 'keywords' => $keywords !== '' ? $keywords : $existing->keywords,
                     'uses' => $existing->uses + 1,
                 ]);
@@ -75,12 +71,13 @@ class LearnSkillJob implements ShouldQueue
                 return;
             }
             LearnedSkill::create([
-                'name' => $name, 'when_to_use' => trim((string) ($j['when_to_use'] ?? '')),
-                'steps' => $steps, 'keywords' => $keywords, 'uses' => 1,
+                'name' => $name, 'when_to_use' => mb_substr(trim((string) ($j['when_to_use'] ?? '')), 0, 200),
+                'steps' => $steps, 'keywords' => $keywords, 'uses' => 1, 'user_id' => $this->userId,
             ]);
-            // 上限：保留最近/最常用 150 筆
-            if (LearnedSkill::count() > 150) {
-                LearnedSkill::orderBy('uses')->orderBy('updated_at')->limit(LearnedSkill::count() - 150)->delete();
+            // 上限：每位擁有者保留最近/最常用 150 筆
+            $cnt = LearnedSkill::where('user_id', $this->userId)->count();
+            if ($cnt > 150) {
+                LearnedSkill::where('user_id', $this->userId)->orderBy('uses')->orderBy('updated_at')->limit($cnt - 150)->delete();
             }
         } catch (Throwable) {
             // 學習失敗不影響主流程

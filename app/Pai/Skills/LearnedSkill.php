@@ -16,13 +16,14 @@ use Illuminate\Database\Eloquent\Model;
  */
 class LearnedSkill extends Model
 {
-    protected $fillable = ['name', 'when_to_use', 'steps', 'keywords', 'uses'];
+    protected $fillable = ['name', 'when_to_use', 'steps', 'keywords', 'uses', 'user_id'];
 
-    /** 找出與本次訊息相關的學會技能（關鍵字命中），最多 $limit 筆。 */
-    public static function relevant(string $message, int $limit = 3): \Illuminate\Support\Collection
+    /** 找出與本次訊息相關的學會技能（關鍵字命中），最多 $limit 筆。$userId 限定擁有者（租戶隔離）。 */
+    public static function relevant(string $message, int $limit = 3, ?int $userId = null): \Illuminate\Support\Collection
     {
         $msg = mb_strtolower($message);
-        $all = static::orderByDesc('uses')->orderByDesc('updated_at')->limit(80)->get();
+        $all = static::when($userId !== null, fn ($q) => $q->where('user_id', $userId))
+            ->orderByDesc('uses')->orderByDesc('updated_at')->limit(80)->get();
 
         return $all->filter(function ($s) use ($msg) {
             foreach (preg_split('/\s+/', (string) $s->keywords) ?: [] as $kw) {

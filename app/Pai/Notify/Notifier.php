@@ -20,36 +20,91 @@ class Notifier
      *
      * @return array<string, bool>
      */
-    public function send(string $text): array
+    public function send(string $text, array $phoneActions = []): array
     {
-        return array_map(fn ($r) => $r['ok'], $this->dispatch($text));
+        return array_map(fn ($r) => $r['ok'], $this->dispatch($text, $phoneActions));
     }
 
     /**
      * 詳細推送結果，含是否已設定與錯誤原因。
+     * $phoneActions：手機通知可附的動作按鈕（如 HITL 接受/拒絕），格式見 phone()。
      *
      * @return array<string, array{configured: bool, ok: bool, error: ?string}>
      */
-    public function dispatch(string $text): array
+    public function dispatch(string $text, array $phoneActions = []): array
     {
         return [
             'webhook' => $this->webhook($text),
             'telegram' => $this->telegram($text),
             'line' => $this->line($text),
-            'phone' => $this->phone($text),
+            'phone' => $this->phone($text, $phoneActions),
         ];
     }
 
+    /**
+     * 送通知給「特定帳號」自己的頻道（TG chat / LINE target / 自己擁有的手機）。
+     * 該帳號沒設任何個人頻道 → 退回全域 send()（向後相容）。
+     */
+    public function sendToUser(\App\Models\User $user, string $text): void
+    {
+        $uid = $user->id;
+        // 完全分開：只用「該帳號自己設的」通知頻道（不 fallback 全域，否則會用到別人的 bot）
+        $tgToken = trim((string) ($this->settings->own('notify.telegram.token', $uid) ?? ''));
+        $tgChat = trim((string) ($this->settings->own('notify.telegram.chat_id', $uid) ?? ''));
+        $lineToken = trim((string) ($this->settings->own('notify.line.token', $uid) ?? ''));
+        $lineTo = trim((string) ($this->settings->own('notify.line.to', $uid) ?? ''));
+        $webhook = trim((string) ($this->settings->own('notify.webhook_url', $uid) ?? ''));
+
+        if ($tgToken !== '' && $tgChat !== '') {
+            try {
+                Http::timeout(8)->post("https://api.telegram.org/bot{$tgToken}/sendMessage", ['chat_id' => $tgChat, 'text' => $text]);
+            } catch (Throwable) {
+            }
+        }
+        if ($lineToken !== '' && $lineTo !== '') {
+            try {
+                Http::timeout(8)->withToken($lineToken)->post('https://api.line.me/v2/bot/message/push', [
+                    'to' => $lineTo, 'messages' => [['type' => 'text', 'text' => $text]],
+                ]);
+            } catch (Throwable) {
+            }
+        }
+        if ($webhook !== '') {
+            try {
+                Http::timeout(8)->post($webhook, ['text' => $text, 'content' => $text]);
+            } catch (Throwable) {
+            }
+        }
+        // 推到「該帳號自己擁有」的手機節點
+        try {
+            $owned = \App\Pai\Mcp\McpServer::where('user_id', $uid)->pluck('name')->all();
+            foreach (ReverseBus::onlineNodes() as $node) {
+                if (in_array($node, $owned, true)) {
+                    ReverseBus::fire($node, 'phone_notify', ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 3000)]);
+                }
+            }
+        } catch (Throwable) {
+        }
+        // 沒設任何個人頻道 → 不外送（只剩中控台鈴鐺），不會用到別人的頻道
+    }
+
     /** 推到所有在線的手機（Android）節點通知列（fire-and-forget，不阻塞）。 */
-    private function phone(string $text): array
+    /**
+     * @param  list<array{label:string,path:string,body:array}>  $actions  通知按鈕：按下→手機帶自己的憑證 POST 到 path
+     */
+    private function phone(string $text, array $actions = []): array
     {
         try {
             $nodes = ReverseBus::onlineNodes();
             if (empty($nodes)) {
                 return ['configured' => false, 'ok' => false, 'error' => '無在線手機節點'];
             }
+            $payload = ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 3000)];
+            if (! empty($actions)) {
+                $payload['actions'] = $actions;
+            }
             foreach ($nodes as $n) {
-                ReverseBus::fire($n, 'phone_notify', ['title' => 'PAI 通知', 'text' => mb_substr($text, 0, 3000)]);
+                ReverseBus::fire($n, 'phone_notify', $payload);
             }
 
             return ['configured' => true, 'ok' => true, 'error' => null];

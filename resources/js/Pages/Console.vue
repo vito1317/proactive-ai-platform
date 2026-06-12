@@ -178,6 +178,7 @@ const runStatusLabel = (x) => ({
 const actionStatusClass = (x) => ({
     executed: 'bg-emerald-500/20 text-emerald-300', awaiting_approval: 'bg-amber-500/20 text-amber-300',
     rejected: 'bg-red-500/25 text-red-300', proposed: 'bg-slate-600/40 text-slate-300',
+    suggested: 'bg-sky-500/20 text-sky-300', observed: 'bg-slate-600/30 text-slate-400',
 }[x] || 'bg-slate-700/40 text-slate-400');
 </script>
 
@@ -364,8 +365,8 @@ const actionStatusClass = (x) => ({
                         <p v-else class="mt-3 text-xs text-slate-500">目前沒有排定的定時任務。對 AI 說「每天早上八點報天氣」「明天三點提醒我開會」就會出現在這。</p>
                     </div>
 
-                    <!-- #9 LLM 用量觀測 -->
-                    <div class="glass p-5">
+                    <!-- #9 LLM 用量觀測（平台層級，僅 admin 顯示） -->
+                    <div v-if="$page.props.auth?.user?.is_admin" class="glass p-5">
                         <h2 class="flex items-center gap-2 font-semibold text-white">📊 AI 用量（今日）</h2>
                         <div class="mt-3 grid grid-cols-3 gap-3 text-center">
                             <div class="rounded-lg border border-white/10 bg-black/30 py-3">
@@ -536,7 +537,7 @@ const actionStatusClass = (x) => ({
                         <div v-for="(a, i) in r.actions" :key="i" class="flex flex-wrap items-center gap-2">
                             <span class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs" :class="actionStatusClass(a.status)">
                                 ⚡ {{ a.action }}
-                                <span class="opacity-70">· {{ a.status === 'awaiting_approval' ? '待核准' : a.status === 'executed' ? '已執行' : a.status === 'rejected' ? '已駁回' : a.status }}</span>
+                                <span class="opacity-70">· {{ a.status === 'awaiting_approval' ? '待核准' : a.status === 'executed' ? '已執行' : a.status === 'rejected' ? '已駁回' : a.status === 'suggested' ? '建議（未執行）' : a.status === 'observed' ? '僅記錄' : a.status }}</span>
                                 <template v-if="a.status === 'awaiting_approval'">
                                     <button class="ml-1 rounded bg-emerald-500/30 px-1.5 py-0.5 text-emerald-200 hover:bg-emerald-500/50" title="核准並執行" @click.stop="decide(r.id, i, 'approve')">✓ 核准</button>
                                     <button class="rounded bg-red-500/30 px-1.5 py-0.5 text-red-200 hover:bg-red-500/50" title="駁回" @click.stop="decide(r.id, i, 'reject')">✗ 駁回</button>

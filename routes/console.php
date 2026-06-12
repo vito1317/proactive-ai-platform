@@ -54,6 +54,32 @@ Schedule::call(function () {
     }
 })->everyMinute()->name('pai:morning-briefing')->withoutOverlapping();
 
+// Signal（signal-cli-rest-api）：輪詢收訊（Signal 無 webhook push）→ 交對話大腦回覆
+Schedule::call(function () {
+    $settings = app(\App\Pai\Settings\Settings::class);
+    $url = rtrim((string) $settings->get('signal.api_url', ''), '/');
+    $number = (string) $settings->get('signal.number', '');
+    if ($url === '' || $number === '') {
+        return;
+    }
+    try {
+        $msgs = \Illuminate\Support\Facades\Http::timeout(20)->get($url.'/v1/receive/'.$number)->json();
+        foreach ((array) $msgs as $m) {
+            $env = $m['envelope'] ?? [];
+            $text = trim((string) data_get($env, 'dataMessage.message', ''));
+            $source = (string) ($env['sourceNumber'] ?? $env['source'] ?? '');
+            if ($text !== '' && $source !== '') {
+                \App\Pai\Chat\GenericChannelReplyJob::dispatch('signal', $source, $text);
+            }
+        }
+    } catch (\Throwable) {
+    }
+})->everyMinute()->name('pai:signal-poll')->withoutOverlapping();
+
+// 早晨通勤守衛：上班時刻到了人還沒到公司 → 估車程 → 問是否傳訊息跟主管說會遲到
+Schedule::call(fn () => app(\App\Pai\Commute\CommuteGuard::class)->tick())
+    ->everyMinute()->name('pai:commute-guard')->withoutOverlapping();
+
 // 主動提醒：行事曆事件快開始（lead 分鐘內）→ 自動提醒一次
 Schedule::call(function () {
     $cal = app(\App\Pai\Integrations\Calendar::class);

@@ -25,11 +25,16 @@ class McpTool implements Tool
 
     public function description(): string
     {
-        $desc = $this->def['description'] ?? '（無說明）';
+        // 外部 MCP 工具描述「預設不信任」：消毒後才進 prompt（供應鏈防禦）
+        $r = app(\App\Pai\Security\ToolDescriptionSanitizer::class)
+            ->sanitize((string) ($this->def['description'] ?? '（無說明）'));
+        if ($r->isSuspicious()) {
+            \Illuminate\Support\Facades\Log::warning('MCP 工具描述含可疑內容，已中和', ['tool' => $this->name(), 'flags' => $r->flags]);
+        }
         $props = $this->def['inputSchema']['properties'] ?? [];
         $args = $props ? '；參數：'.implode('、', array_keys($props)) : '';
 
-        return "[MCP:{$this->server->name}] {$desc}{$args}";
+        return "[MCP:{$this->server->name}] {$r->clean}{$args}";
     }
 
     public function run(array $input, AgentContext $ctx): ToolResult

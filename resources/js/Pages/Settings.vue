@@ -11,8 +11,12 @@ const props = defineProps({
 const page = usePage();
 const flash = computed(() => page.props.flash || {});
 
-const groups = computed(() => [...new Set(props.fields.map((f) => f.group))]);
 const fieldsIn = (g) => props.fields.filter((f) => f.group === g);
+// 大分類（設定分區）→ 分頁；每個分類底下再列各 group
+const categories = computed(() => [...new Set(props.fields.map((f) => f.category || '其他'))]);
+const groupsIn = (cat) => [...new Set(props.fields.filter((f) => (f.category || '其他') === cat).map((f) => f.group))];
+const activeCat = ref('');
+const currentCat = computed(() => activeCat.value || categories.value[0] || '');
 
 const form = useForm({
     settings: Object.fromEntries(props.fields.map((f) => [f.key, f.value])),
@@ -71,7 +75,12 @@ function chLabel(c) {
                     <h1 class="text-2xl font-bold tracking-tight text-white">⚙ 後台設定</h1>
                     <p class="text-sm text-slate-400">所有參數即時生效（覆寫預設，不必重啟）</p>
                 </div>
-                <Link href="/" class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:text-white">← 回中控台</Link>
+                <div class="flex items-center gap-2">
+                    <Link href="/agent/profiles" class="rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1.5 text-sm text-fuchsia-300 hover:bg-fuchsia-500/20">🎭 人格/模式</Link>
+                    <Link href="/agent/mcp" class="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-sm text-sky-300 hover:bg-sky-500/20">🔌 MCP</Link>
+                    <Link v-if="page.props.auth?.user?.is_admin" href="/admin/accounts" class="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 text-sm text-amber-300 hover:bg-amber-500/20">👥 帳號管理</Link>
+                    <Link href="/" class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-300 hover:text-white">← 回中控台</Link>
+                </div>
             </header>
 
             <transition name="fade">
@@ -152,7 +161,16 @@ function chLabel(c) {
             </section>
 
             <form class="space-y-6" @submit.prevent="save">
-                <section v-for="g in groups" :key="g" class="glass p-5">
+                <!-- 設定分類分頁 -->
+                <div class="flex flex-wrap gap-2">
+                    <button v-for="c in categories" :key="c" type="button" @click="activeCat = c"
+                            class="rounded-full px-4 py-1.5 text-sm transition"
+                            :class="currentCat === c ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'">
+                        {{ c }}
+                    </button>
+                </div>
+
+                <section v-for="g in groupsIn(currentCat)" :key="g" class="glass p-5">
                     <h2 class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-300">{{ g }}</h2>
                     <div class="space-y-4">
                         <div v-for="f in fieldsIn(g)" :key="f.key" class="flex items-center justify-between gap-4">
@@ -176,7 +194,7 @@ function chLabel(c) {
                     </div>
                 </section>
 
-                <section class="glass p-5">
+                <section v-if="currentCat === '🧠 核心 AI'" class="glass p-5">
                     <h2 class="mb-1 text-sm font-semibold uppercase tracking-wider text-slate-300">各領域自治階段 (Autonomy)</h2>
                     <p class="mb-4 text-xs text-slate-500">copilot：一切待核准 · supervisor：僅高風險待核准 · autopilot：邊界內全自主</p>
                     <div class="space-y-3">

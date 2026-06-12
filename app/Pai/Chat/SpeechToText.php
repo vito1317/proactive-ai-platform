@@ -25,8 +25,9 @@ class SpeechToText
 
                 return $text !== '' ? $text : null;
             }
-        } catch (Throwable) {
-            // ignore
+            \Illuminate\Support\Facades\Log::warning('STT 服務回應失敗', ['status' => $resp->status()]);
+        } catch (Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('STT 服務連線失敗', ['error' => $e->getMessage()]);
         }
 
         return null;

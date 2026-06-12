@@ -17,6 +17,7 @@ const props = defineProps({
     messages: { type: Array, default: () => [] },
     conversations: { type: Array, default: () => [] },
     voice: { type: Object, default: () => ({ enabled: false }) },
+    slashCommands: { type: Array, default: () => [] },
 });
 
 /* ---------- 全雙工語音 ---------- */
@@ -48,6 +49,21 @@ function toggleVoice() {
 onUnmounted(() => voice.stop());
 
 const input = ref('');
+
+/* ---------- 斜線指令提示（含自訂）；放在 input 宣告之後避免 TDZ ---------- */
+const cmdHints = computed(() => {
+    const v = input.value;
+    if (!v.startsWith('/') || /\s/.test(v)) return [];   // 已打空格(帶參數) → 不提示
+    const q = v.slice(1).toLowerCase();
+    return props.slashCommands.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, 8);
+});
+const hintIndex = ref(0);
+watch(cmdHints, () => { hintIndex.value = 0; });
+function pickHint(cmd) {
+    input.value = '/' + cmd.name + ' ';
+    // /new /clear 無參數 → 直接執行
+    if (['new', 'clear', 'start', 'reset'].includes(cmd.name)) { input.value = '/' + cmd.name; send(); }
+}
 const sending = ref(false);
 const status = ref('');           // 思考中… / 處理中…
 const steps = ref([]);            // AI 活動軌跡（每步在幹嘛）
@@ -56,6 +72,8 @@ const streamed = ref('');         // 正在串流的 AI 回覆
 const lastSent = ref('');
 const errorText = ref('');
 const scroller = ref(null);
+const pendingImage = ref('');     // 待送圖片（data URI）
+const fileInput = ref(null);
 
 /* ---------- 真實進度追蹤 ---------- */
 const eventStatuses = ref({}); // { event_id: { status, runs, percent } }
@@ -136,7 +154,56 @@ const catLabel = (m) => ({ task: '已觸發任務', new_domain: '已新增領域
 function onEnter(e) {
     if (e.isComposing || e.keyCode === 229) return;
     e.preventDefault();
+    // 指令提示開啟時，Enter = 選中目前那筆
+    if (cmdHints.value.length) { pickHint(cmdHints.value[hintIndex.value] || cmdHints.value[0]); return; }
     send();
+}
+function onHintNav(dir) {
+    if (!cmdHints.value.length) return;
+    const n = cmdHints.value.length;
+    hintIndex.value = (hintIndex.value + dir + n) % n;
+}
+
+// 選圖 → 縮圖成 data URI 暫存（送出時一起帶）
+function onPickImage(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+            const max = 1280;
+            const scale = Math.min(1, max / img.width);
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            pendingImage.value = canvas.toDataURL('image/jpeg', 0.8);
+        };
+        img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';   // 允許再次選同一張
+}
+
+// 帶圖訊息：走非串流 /api/chat/send（多模態看圖），完成後重載訊息
+async function sendWithImage(msg, image) {
+    sending.value = true;
+    status.value = '看圖中…';
+    try {
+        const resp = await fetch('/api/chat/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken() },
+            body: JSON.stringify({ conversation_id: props.conversation.id, message: msg, image }),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    } catch (e) {
+        errorText.value = e.message || '送出圖片失敗';
+    } finally {
+        sending.value = false;
+        status.value = '';
+        router.reload({ only: ['messages', 'conversations', 'conversation'], preserveScroll: true });
+    }
 }
 
 const formattedStep = (txt) => {
@@ -193,11 +260,33 @@ async function stopAwaiting() {
 
 async function send() {
     const msg = input.value.trim();
-    if (!msg) return;
+    if (!msg && !pendingImage.value) return;
+
+    // 斜線指令：/new 開新對話、/clear 清空目前對話
+    const slash = msg.replace(/^\/+/, '').toLowerCase();
+    if (!pendingImage.value && (slash === 'new' || slash === 'start')) {
+        input.value = '';
+        newChat();
+        return;
+    }
+    if (!pendingImage.value && (slash === 'clear' || slash === 'reset')) {
+        input.value = '';
+        router.post('/chat/clear', { c: props.conversation.id }, { preserveScroll: true });
+        return;
+    }
 
     if (sending.value) {
         await stopReply();
         await new Promise((r) => setTimeout(r, 250));
+    }
+
+    // 有附圖 → 走非串流多模態路徑
+    if (pendingImage.value) {
+        const image = pendingImage.value;
+        pendingImage.value = '';
+        input.value = '';
+        await sendWithImage(msg, image);
+        return;
     }
 
     lastSent.value = msg;
@@ -356,7 +445,8 @@ function newChat() { router.post('/chat/new'); }
                                         </div>
                                         <div class="mb-2 border-b border-white/5"></div>
                                     </div>
-                                    <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content }}</div>
+                                    <img v-if="m.meta?.image" :src="m.meta.image" class="mb-2 max-h-64 rounded-lg" alt="圖片" />
+                                    <div v-if="m.role === 'user'" class="whitespace-pre-wrap">{{ m.content === '（圖片）' && m.meta?.image ? '' : m.content }}</div>
                                     <div v-else class="md" v-html="renderMd(m.content)"></div>
                                     
                                     <!-- 操作進度與動畫 (歷史項目) -->
@@ -444,12 +534,38 @@ function newChat() { router.post('/chat/new'); }
                         </span>
                         <span>{{ voice.speaking.value ? 'AI 說話中…' : (voice.status.value || '聆聽中…') }}</span>
                         <span v-if="voiceTranscript" class="truncate text-slate-400">你：{{ voiceTranscript }}</span>
+                        <span class="flex-1"></span>
+                        <!-- 即時畫面：讓 AI 邊聽邊看螢幕/鏡頭 -->
+                        <button type="button" class="rounded px-1.5 py-0.5 text-[11px]"
+                            :class="voice.liveVision.value === 'screen' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
+                            title="即時把螢幕畫面給 AI 看" @click="voice.setLiveVision(voice.liveVision.value === 'screen' ? 'off' : 'screen')">🖥 螢幕</button>
+                        <button type="button" class="rounded px-1.5 py-0.5 text-[11px]"
+                            :class="voice.liveVision.value === 'camera' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 text-slate-300 hover:bg-white/10'"
+                            title="即時把鏡頭畫面給 AI 看" @click="voice.setLiveVision(voice.liveVision.value === 'camera' ? 'off' : 'camera')">📷 鏡頭</button>
+                    </div>
+                    <!-- 待送圖片預覽 -->
+                    <div v-if="pendingImage" class="mb-2 flex items-center gap-2">
+                        <img :src="pendingImage" class="h-14 w-14 rounded-lg object-cover" alt="待送圖片" />
+                        <span class="text-xs text-slate-400">圖片已附上</span>
+                        <button type="button" class="text-xs text-red-300 hover:text-red-200" @click="pendingImage = ''">✕ 移除</button>
+                    </div>
+                    <!-- 斜線指令提示（含自訂指令） -->
+                    <div v-if="cmdHints.length" class="mb-2 overflow-hidden rounded-lg border border-white/10 bg-slate-900/95 text-sm">
+                        <button v-for="(c, i) in cmdHints" :key="c.name" type="button"
+                            class="flex w-full items-center gap-2 px-3 py-1.5 text-left"
+                            :class="i === hintIndex ? 'bg-indigo-600/40' : 'hover:bg-white/5'"
+                            @mouseenter="hintIndex = i" @click="pickHint(c)">
+                            <span class="font-mono text-indigo-300">/{{ c.name }}</span>
+                            <span class="truncate text-xs text-slate-400">{{ c.description }}</span>
+                        </button>
                     </div>
                     <form class="flex items-end gap-2" @submit.prevent="send">
-                        <textarea v-model="input" rows="1" :placeholder="sending ? '生成中也可直接打字插話…' : '跟 AI 說一句話…'" class="inp flex-1 resize-none" @keydown.enter="onEnter"></textarea>
+                        <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onPickImage" />
+                        <button type="button" class="btn-send !bg-slate-700 hover:!bg-slate-600" title="附加圖片" @click="$refs.fileInput.click()">🖼</button>
+                        <textarea v-model="input" rows="1" :placeholder="sending ? '生成中也可直接打字插話…' : '跟 AI 說一句話…（輸入 / 看指令）'" class="inp flex-1 resize-none" @keydown.enter="onEnter" @keydown.down.prevent="onHintNav(1)" @keydown.up.prevent="onHintNav(-1)"></textarea>
                         <button v-if="props.voice.enabled" type="button" class="btn-send" :class="voice.active.value ? '!bg-emerald-600 hover:!bg-emerald-500' : '!bg-slate-700 hover:!bg-slate-600'" :title="voice.active.value ? '關閉全雙工語音' : '開啟全雙工語音（即時對話＋可操控系統）'" @click="toggleVoice">{{ voice.active.value ? '🎙■' : '🎙' }}</button>
                         <button v-if="sending" type="button" class="btn-send !bg-red-600 hover:!bg-red-500" @click="stopReply">■</button>
-                        <button type="submit" :disabled="!input.trim()" class="btn-send">{{ sending ? '插話' : '送出' }}</button>
+                        <button type="submit" :disabled="!input.trim() && !pendingImage" class="btn-send">{{ sending ? '插話' : '送出' }}</button>
                     </form>
                 </div>
             </main>

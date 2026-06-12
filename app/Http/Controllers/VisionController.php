@@ -19,12 +19,11 @@ class VisionController extends Controller
 
     public function analyze(Request $request): JsonResponse
     {
-        // 驗證：登入 session（web）或語音共用密鑰（手機/gateway）
+        // 驗證：登入 session（web）/ 語音共用密鑰 / gateway 憑證（共用 secret 或 per-device token）
         $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
-        $regSecret = GatewayController::registerSecret();
         $authed = $request->user() !== null
             || ($secret !== '' && hash_equals($secret, (string) $request->header('X-Voice-Secret')))
-            || ($regSecret !== '' && hash_equals($regSecret, (string) $request->header('X-Register-Secret')));
+            || GatewayController::ownerFromRequest($request) !== null;
         if (! $authed) {
             return response()->json(['error' => 'unauthorized'], 401);
         }
@@ -96,19 +95,25 @@ class VisionController extends Controller
         $secret = (string) $this->settings->get('voice.agent_secret', config('services.voice.agent_secret'));
         $authed = $request->user() !== null
             || ($secret !== '' && hash_equals($secret, (string) $request->header('X-Voice-Secret')))
-            || hash_equals(GatewayController::registerSecret(), (string) $request->header('X-Register-Secret'));
+            || GatewayController::ownerFromRequest($request) !== null;
         if (! $authed) {
             return response()->json(['error' => 'unauthorized'], 401);
         }
         $data = $request->validate([
             'image' => ['required', 'string'],
             'session' => ['required', 'string', 'max:128'],
+            'ttl' => ['nullable', 'integer'],   // live 投影模式：短 TTL（停止推送後自動過期、恢復普通對話）
         ]);
         $image = $this->normalizeImage($data['image']);
         if ($image === '') {
             return response()->json(['error' => '圖片格式不正確'], 422);
         }
-        \Illuminate\Support\Facades\Cache::put('vision:pending:'.$data['session'], $image, 900);
+        $ttl = isset($data['ttl']) ? max(5, min(900, (int) $data['ttl'])) : 900;
+        \Illuminate\Support\Facades\Cache::put('vision:pending:'.$data['session'], $image, $ttl);
+        // 短 TTL = 即時投影/鏡頭 → 標記 live，讓回答只看當前畫面、不帶歷史（避免一直複述第一張）
+        if ($ttl <= 60) {
+            \Illuminate\Support\Facades\Cache::put('vision:live:'.$data['session'], true, $ttl);
+        }
 
         return response()->json(['ok' => true, 'message' => '照片已附上，直接用語音問就會看著它回答']);
     }

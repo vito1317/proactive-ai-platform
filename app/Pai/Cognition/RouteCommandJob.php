@@ -77,14 +77,14 @@ class RouteCommandJob implements ShouldQueue
             // 把真正的回覆寫回對話（SSE 端對 action 類只串了暫態、未存訊息）；前端輪詢帶出。
             // 若是 task，respond 內已建立帶 domain 的事件並 dispatch 協調者，最終結果由 RunCoordinatorJob 再回貼。
             $conv->addMessage('assistant', $replyWithLink, $r['meta']);
-            $this->notice($replyWithLink);
+            $this->notice($replyWithLink, 'info', $conv->user_id);
             // 來源是語音 → 若該 /voice 仍連線中，把結果念回去
             if (($event->source ?? '') === 'voice') {
                 $this->pushVoice((int) ($event->payload['conversation_id'] ?? 0), $r['reply']);
             }
         } catch (Throwable $e) {
             $event->update(['status' => EventStatus::Failed, 'note' => '處理失敗：'.$e->getMessage()]);
-            $this->notice('指令處理失敗：'.$e->getMessage(), 'error');
+            $this->notice('指令處理失敗：'.$e->getMessage(), 'error', $conv->user_id ?? null);
         }
     }
 
@@ -162,14 +162,21 @@ class RouteCommandJob implements ShouldQueue
         }
     }
 
-    private function notice(string $message, string $kind = 'info'): void
+    private function notice(string $message, string $kind = 'info', ?int $ownerId = null): void
     {
-        // 中控台鈴鐺
-        $users = User::all();
-        if ($users->isNotEmpty()) {
-            Notification::send($users, new PlatformNotice($message, $kind));
+        $owner = $ownerId ? User::find($ownerId) : null;
+        if ($owner) {
+            // 完全獨立租戶：中控台鈴鐺 + 外部頻道只送給「任務擁有者」自己
+            Notification::send($owner, new PlatformNotice($message, $kind));
+            app(Notifier::class)->sendToUser($owner, $message);
+
+            return;
         }
-        // 同步推到已設定的外部平台（Telegram/LINE/webhook）
+        // 無擁有者（系統層級事件）→ 全域（admin 鈴鐺 + 全域頻道）
+        $admins = User::where('role', 'admin')->get();
+        if ($admins->isNotEmpty()) {
+            Notification::send($admins, new PlatformNotice($message, $kind));
+        }
         app(Notifier::class)->send($message);
     }
 }

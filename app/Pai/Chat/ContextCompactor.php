@@ -12,37 +12,54 @@ use Throwable;
  */
 class ContextCompactor
 {
-    /** 未壓縮訊息超過此數即觸發壓縮。 */
+    /** 未壓縮訊息超過此數即觸發壓縮（預設值；實際讀 pai.chat.compact_threshold）。 */
     public const THRESHOLD = 24;
 
-    /** 壓縮時保留最近 N 則不動（維持語氣與即時脈絡）。 */
+    /** 壓縮時保留最近 N 則不動（預設值；實際讀 pai.chat.keep_recent）。 */
     public const KEEP_RECENT = 8;
 
     public function __construct(private readonly LlmClient $llm) {}
 
+    /** 觸發門檻（可由 PAI_CHAT_COMPACT_THRESHOLD 調整）。 */
+    public static function threshold(): int
+    {
+        return max(2, (int) config('pai.chat.compact_threshold', self::THRESHOLD));
+    }
+
+    /** 保留最近幾則不壓縮（可由 PAI_CHAT_KEEP_RECENT 調整）。 */
+    public static function keepRecent(): int
+    {
+        return max(1, (int) config('pai.chat.keep_recent', self::KEEP_RECENT));
+    }
+
     public function shouldCompact(Conversation $conv): bool
     {
-        return $conv->activeMessages()->count() > self::THRESHOLD;
+        return $conv->activeMessages()->count() > self::threshold();
     }
 
     /** 執行一次壓縮（冪等：失敗不影響對話，下次再試）。 */
     public function compact(Conversation $conv): void
     {
         $active = $conv->activeMessages()->get();
-        if ($active->count() <= self::KEEP_RECENT) {
+        if ($active->count() <= self::keepRecent()) {
             return;
         }
-        $old = $active->slice(0, $active->count() - self::KEEP_RECENT)->values();
+        $old = $active->slice(0, $active->count() - self::keepRecent())->values();
         $transcript = $old->map(fn ($m) => "{$m->role}: {$m->content}")->implode("\n");
         $prev = $conv->summary ? "（先前摘要）\n{$conv->summary}\n\n" : '';
 
         try {
             $summary = trim($this->llm->chat([[
                 'role' => 'user',
-                'content' => "把以下對話濃縮成一段精簡摘要（繁體中文、條列重點：使用者的目標/偏好、已完成的事、未完成的承諾、關鍵參數）。只輸出摘要本身。\n\n{$prev}{$transcript}",
-            ]], ['max_tokens' => 2048]));
-        } catch (Throwable) {
-            return; // 壓縮失敗不影響對話，之後再試
+                'content' => \App\Pai\Cognition\Prompts::render('compact-conversation', ['prev' => $prev, 'transcript' => $transcript]),
+            ]], ['max_tokens' => 2048, 'tier' => 'small']));
+        } catch (Throwable $e) {
+            // 壓縮失敗不影響對話，之後再試；但要留下紀錄，長期失敗才看得見
+            \Illuminate\Support\Facades\Log::warning('對話壓縮失敗', [
+                'conversation_id' => $conv->id, 'error' => $e->getMessage(),
+            ]);
+
+            return;
         }
 
         if ($summary !== '') {

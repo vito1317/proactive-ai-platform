@@ -18,6 +18,7 @@ use App\Pai\Memory\MemoryStore;
 use App\Pai\Notify\PushNotifier;
 use App\Pai\Perception\PaiEvent;
 use App\Pai\Settings\Settings;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -126,7 +127,18 @@ class CognitiveEngine
                 $res = $this->llm->complete($messages);
                 $tokens += (int) ($res['usage']['total_tokens'] ?? 0);
 
-                $decision = LlmClient::extractJson($res['content']);
+                try {
+                    $decision = LlmClient::extractJson($res['content']);
+                } catch (LlmException) {
+                    // 單步輸出解析失敗 → 回饋模型重出一次，避免整個 run 直接失敗
+                    $res = $this->llm->complete([
+                        ...$messages,
+                        ['role' => 'assistant', 'content' => $res['content']],
+                        ['role' => 'user', 'content' => '上面的輸出無法解析成 JSON。請重新回答：只輸出「一個」合法的 JSON 物件，不要 code fence、不要任何說明文字。'],
+                    ]);
+                    $tokens += (int) ($res['usage']['total_tokens'] ?? 0);
+                    $decision = LlmClient::extractJson($res['content']);
+                }
                 $action = (string) ($decision['action'] ?? '');
                 $input = is_array($decision['action_input'] ?? null) ? $decision['action_input'] : [];
 
@@ -177,10 +189,21 @@ class CognitiveEngine
             // L2：把本次處置寫入領域記憶，供未來事件語意檢索（去重，重放安全）
             $this->rememberRun($run, $event, $pack, $ctx);
 
-            // L5：有待核准動作 → 推播給人類（去重，重放安全）
+            // L5：有待核准動作 → 推播給人類（去重，重放安全）。
+            // 打擾治理：安靜時段/頻率上限/干擾度公式只擋「外部推播」，中控台鈴鐺照常
+            //（動作仍留在 console 等核准，不會無聲消失）。
             if ($needHitl) {
-                app(PushNotifier::class)->hitlNeeded($run);
+                $policy = app(\App\Pai\Governance\ProactivityPolicy::class);
+                $conf = max(array_map(fn ($a) => (float) ($a['confidence'] ?? 0.7), $actions) ?: [0.7]);
+                $push = $policy->allowInterruption(self::urgencyOf($event), $conf);
+                if (! $push['allowed']) {
+                    Log::info('治理層抑制外部推播', ['run_id' => $run->id, 'reason' => $push['reason']]);
+                }
+                app(PushNotifier::class)->hitlNeeded($run, externalPush: $push['allowed']);
             }
+
+            // PAI Protocol v1.1：每次運行輸出一份標準紀錄（可與 pai-framework 互通）
+            \App\Pai\Governance\PaiProtocolRecord::write($run->refresh());
         } catch (StopStreaming) {
             // 使用者中止（連進行中的 LLM 呼叫都被打斷）
             $run->update(['status' => RunStatus::Cancelled, 'steps' => $steps, 'summary' => '已由使用者中止', 'tokens' => $tokens]);
@@ -329,21 +352,46 @@ class CognitiveEngine
     private function gateActions(AgentContext $ctx, DomainPack $pack): array
     {
         $autonomy = $this->settings->domainAutonomy($pack->domain, $pack->autonomy);
+        $policy = app(\App\Pai\Governance\ProactivityPolicy::class);
+        $urgency = self::urgencyOf($ctx->event);
         $needHitl = false;
         $actions = [];
         foreach ($ctx->actions as $a) {
-            $requires = $this->requiresApproval($autonomy, $a['action'], $a['risk'], $pack);
-            if ($requires) {
-                $needHitl = true;
-                $actions[] = [...$a, 'status' => 'awaiting_approval'];
-            } else {
-                // 低風險自動放行 → 真實執行
+            // 既有自治規則（copilot/supervisor/autopilot + hitl_required）→ 請求等級
+            $requested = $this->requiresApproval($autonomy, $a['action'], $a['risk'], $pack)
+                ? \App\Pai\Governance\ProactivityPolicy::ASK
+                : \App\Pai\Governance\ProactivityPolicy::ACT;
+
+            // 治理閘（信心門檻 / 動作上限 / 回饋降級）只會降級不會升級；預設設定下 = 請求等級
+            $gate = $policy->gate($pack->domain, $a['action'], (float) ($a['confidence'] ?? 0.7), $urgency, $requested);
+            $a = [...$a, 'granted_level' => $gate['level'], 'gate_reason' => $gate['reason']];
+
+            if ($gate['level'] === \App\Pai\Governance\ProactivityPolicy::ACT) {
+                // 自動放行 → 真實執行
                 $res = $this->executor->execute($a, $pack->domain);
                 $actions[] = [...$a, 'status' => 'executed', 'result' => $res['output']];
+            } elseif ($gate['level'] === \App\Pai\Governance\ProactivityPolicy::ASK) {
+                $needHitl = true;
+                $actions[] = [...$a, 'status' => 'awaiting_approval'];
+            } elseif ($gate['level'] === \App\Pai\Governance\ProactivityPolicy::SUGGEST) {
+                $actions[] = [...$a, 'status' => 'suggested'];   // 只建議，不執行
+            } else {
+                $actions[] = [...$a, 'status' => 'observed'];    // 只記錄
             }
         }
 
         return [$actions, $needHitl];
+    }
+
+    /** 事件嚴重性 → 緊急度（0~1），供治理閘與 PAI Protocol 紀錄。 */
+    public static function urgencyOf(PaiEvent $event): float
+    {
+        return match ($event->severity?->value ?? 'medium') {
+            'critical' => 0.95,
+            'high' => 0.8,
+            'medium' => 0.55,
+            default => 0.3,
+        };
     }
 
     private function requiresApproval(string $autonomy, string $action, string $risk, DomainPack $pack): bool
@@ -403,24 +451,17 @@ class CognitiveEngine
         $capabilities = implode(', ', array_map(static fn ($t) => $t['uri'], $pack->tools));
         $hitl = $pack->hitlRequired === [] ? '（無）' : implode(', ', $pack->hitlRequired);
 
-        return <<<PROMPT
-        你是主動式 AI 平台的領域協調者「{$pack->coordinator}」，負責「{$pack->domain}」領域：{$pack->description}
-        你的子智能體：
-        {$roster}
-
-        本領域可用工具/能力：{$capabilities}
-        高風險（需人類核准）的動作：{$hitl}
-        目前自治階段：{$pack->autonomy}
-
-        你採用 ReAct 模式。每一步「只」輸出一個 JSON 物件，禁止任何其他文字。格式：
-        {"thought": "你的推理", "action": "工具名", "action_input": { ... }}
-
-        可用工具：
-        {$toolDocs}
-
-        流程建議：get_event_context 了解事件 →（必要時 recall_memory 查歷史）→ record_finding 記錄關鍵發現 → propose_action 提出處置 → finish 總結。
-        最多 {$maxSteps} 步。提出處置時，action 盡量使用上述領域能力/動作鍵。
-        PROMPT;
+        return Prompts::render('cognitive-system', [
+            'coordinator' => $pack->coordinator,
+            'domain' => $pack->domain,
+            'description' => $pack->description,
+            'roster' => $roster,
+            'capabilities' => $capabilities,
+            'hitl' => $hitl,
+            'autonomy' => $pack->autonomy,
+            'tool_docs' => $toolDocs,
+            'max_steps' => $maxSteps,
+        ]);
     }
 
     private function taskPrompt(PaiEvent $event): string

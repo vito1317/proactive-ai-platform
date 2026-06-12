@@ -32,23 +32,13 @@ class IntentClassifier
         }
         $catalogText = implode("\n", $catalog);
 
-        $prompt = <<<PROMPT
-        你是主動式 AI 平台的意圖分類器。使用者用自然語言下指令，請把它對應到最合適的「領域」與「事件主題」。
-
-        可用領域與主題：
-        {$catalogText}
-
-        使用者指令：「{$message}」
-
-        只輸出一個 JSON 物件（不要其他文字）：
-        {"domain":"領域鍵或null","topic":"該領域的某個主題或null","severity":"low|medium|high|critical","rationale":"一句話說明"}
-        若沒有任何領域適合，domain 與 topic 皆為 null。
-        PROMPT;
+        $prompt = Prompts::render('intent-classifier', ['catalog' => $catalogText, 'message' => $message]);
 
         try {
-            $out = LlmClient::extractJson($this->llm->chat([
+            // 分類屬輕量任務：走小模型（若有設定）+ temperature 0 求穩定
+            $out = $this->llm->chatJson([
                 ['role' => 'user', 'content' => $prompt],
-            ]));
+            ], ['tier' => 'small', 'temperature' => 0]);
         } catch (Throwable $e) {
             return ['domain' => null, 'topic' => null, 'severity' => 'low', 'rationale' => '分類失敗：'.$e->getMessage()];
         }

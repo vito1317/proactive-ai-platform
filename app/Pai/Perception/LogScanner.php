@@ -80,6 +80,10 @@ class LogScanner
     {
         $sev = preg_match('/CRITICAL|EMERGENCY|ALERT|Fatal/i', $line) ? 'critical' : 'high';
 
+        // 日誌內容是「攻擊者可寫入」的不可信輸入（例如 User-Agent 被記進 log）→
+        // 進事件 payload 前先消毒，避免注入語句經 get_event_context 進到協調者 prompt
+        $sanitizer = app(\App\Pai\Security\ToolDescriptionSanitizer::class);
+
         $event = PaiEvent::create([
             'source' => 'log',
             'topic' => 'log.error',
@@ -87,8 +91,8 @@ class LogScanner
                 'file' => basename($path),
                 'path' => $path,
                 'severity' => $sev,
-                'line' => trim($line),
-                'excerpt' => $excerpt,
+                'line' => $sanitizer->sanitize(trim($line))->clean,
+                'excerpt' => $sanitizer->sanitize($excerpt)->clean,
             ],
             'status' => EventStatus::Received,
         ]);
