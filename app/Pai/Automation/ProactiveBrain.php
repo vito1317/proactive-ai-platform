@@ -186,7 +186,12 @@ TXT;
   "conditions":[{"type":"location_outside|location_inside","place":"地址或公司","radius_m":400}|{"type":"weekday","days":[..]}|{"type":"time_after","time":"HH:MM"}|{"type":"always"}],
   "actions":[{"type":"notify","text":"…"}|{"type":"speak","text":"…"}|{"type":"open_map","place":"…"}|{"type":"ask","question":"…","yes":[…],"no":[]}]
 }}
-文字可用變數 {name}{km}{drive}{eta}{late}{time}{place}。不要和「已存在的自動化」重複。沒有值得新增的就輸出 []。
+文字可用變數 {name}{km}{drive}{eta}{late}{time}{place}。沒有值得新增的就輸出 []。
+
+【重要：以下功能「平台已內建」，絕對不要再設計類似的】
+- 上班通勤遲到提醒（上班時間到還沒到公司→提醒、傳訊息給主管）— 已內建，不要重做。
+- 行程出發提醒（行事曆有地點的事件→該出發時提醒、開導航、通知對方）— 已內建，不要重做。
+也不要和下面「已存在的自動化」重複。請設計「這兩項以外、真正新的」工作流（例如：固定回家提醒、每週採買、繳費/吃藥提醒、運動、特定行事曆關鍵字的準備清單…）。若想不到新的就輸出 []。
 SYS;
         $ctx = "現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}）。\n\n【長期記憶】\n{$mem}\n\n【近期行事曆】\n".($cal ?: '（無）')."\n\n【已存在的自動化】\n{$existing}";
 
