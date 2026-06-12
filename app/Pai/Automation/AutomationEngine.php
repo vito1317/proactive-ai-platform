@@ -245,7 +245,15 @@ class AutomationEngine
             }
             $conv->addMessage('user', $instruction, ['source' => 'automation']);
             $r = app(ChatResponder::class)->respond($conv, $instruction);
-            $conv->addMessage('assistant', (string) ($r['reply'] ?? ''), ['source' => 'automation']);
+            $reply = trim((string) ($r['reply'] ?? ''));
+            $conv->addMessage('assistant', $reply, ['source' => 'automation']);
+            // 完成後用 agent 的 TTS 念出結果回報使用者
+            if ($reply !== '' && $node) {
+                try {
+                    ReverseBus::fire($node, 'phone_speak', ['text' => $reply]);
+                } catch (\Throwable) {
+                }
+            }
         } catch (\Throwable) {
         }
     }

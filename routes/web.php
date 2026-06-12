@@ -134,6 +134,8 @@ Route::post('/api/commute/wake', [\App\Http\Controllers\CommuteController::class
 // 通用自動化流程：ask 動作的按鈕 + 解鎖觸發
 Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationController::class, 'decide'])->name('automation.decide');
 Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
+// 取消操作：中止進行中的 agent（浮框「取消操作」鈕）
+Route::post('/api/agent/abort', [\App\Http\Controllers\AutomationController::class, 'abort'])->name('agent.abort');
 // 自動化列表 + AI 思考記錄（手機/原生端 JSON；session 或 device token 認證）
 Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::class, 'data'])->name('automations.data');
 Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');

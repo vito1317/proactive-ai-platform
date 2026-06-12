@@ -302,9 +302,11 @@ class CommuteGuard
             }
             $conv->addMessage('user', "（通勤助手）請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}", ['source' => 'commute']);
             $r = app(ChatResponder::class)->respond($conv, "請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}");
-            $conv->addMessage('assistant', (string) ($r['reply'] ?? ''), ['source' => 'commute']);
+            $reply = trim((string) ($r['reply'] ?? ''));
+            $conv->addMessage('assistant', $reply, ['source' => 'commute']);
 
-            return "已請 AI {$verb}傳給{$manager}：{$text}";
+            // 完成後念出 agent 的實際結果（沒有就用預設）
+            return $reply !== '' ? $reply : "已請 AI {$verb}傳給{$manager}：{$text}";
         } catch (\Throwable $e) {
             return '請 AI 傳送時失敗：'.$e->getMessage();
         }
