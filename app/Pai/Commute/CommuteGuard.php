@@ -284,14 +284,32 @@ class CommuteGuard
             }
         }
 
-        // 沒設 ID → 交給 agent，用主管姓名自動發送（agent 會操作手機 LINE 找到人傳）
+        // 沒設 ID → 先查「名稱對應簿」：有對應就直接用該平台/目標送
+        $hit = app(ContactBook::class)->resolve($uid, $manager);
+        if ($hit !== null && $hit['target'] !== '' && in_array($hit['platform'], ['line', 'telegram', 'sms'], true)) {
+            try {
+                match ($hit['platform']) {
+                    'telegram' => $this->sendTelegram($uid, $hit['target'], $text),
+                    'sms' => $this->sendSms($uid, $hit['target'], $text),
+                    default => $this->sendLine($uid, $hit['target'], $text),
+                };
+
+                return "已透過 {$hit['platform']} 傳訊息給{$manager}：{$text}";
+            } catch (\Throwable $e) {
+                return '傳送失敗：'.$e->getMessage();
+            }
+        }
+
+        // 對應簿沒有 → 交給 agent，用主管姓名 + 預設平台自動發送（agent 操作手機 LINE 找到人傳）
         $user = User::find($uid);
         if ($user === null) {
             return '找不到帳號，無法傳送。';
         }
-        $verb = match ($via) {
+        $platform = $via ?: app(ContactBook::class)->defaultPlatform($uid);
+        $verb = match ($platform) {
             'sms' => '用簡訊',
             'telegram' => '用 Telegram',
+            'agent' => '',
             default => '用 LINE',
         };
         try {

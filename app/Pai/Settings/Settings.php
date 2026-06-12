@@ -133,6 +133,13 @@ class Settings
         ]],
         'commute.manager_to' => ['label' => '主管聯絡 ID（LINE userId / TG chat_id / 手機號碼）', 'type' => 'string', 'group' => '通勤提醒'],
         'commute.manager_name' => ['label' => '主管稱呼（如「王經理」；留空=「主管」或長期記憶）', 'type' => 'string', 'group' => '通勤提醒'],
+        'notify.default_platform' => ['label' => '預設發送平台（傳訊息給人時用）', 'type' => 'select', 'group' => '通勤提醒', 'options' => [
+            ['value' => 'agent', 'label' => '交給 AI 決定（操作手機 LINE 等）'],
+            ['value' => 'line', 'label' => 'LINE'],
+            ['value' => 'telegram', 'label' => 'Telegram'],
+            ['value' => 'sms', 'label' => 'SMS（Twilio）'],
+        ]],
+        'contacts.map' => ['label' => '名稱對應簿（每行「名稱=平台:目標」，平台 line/telegram/sms）', 'type' => 'string', 'group' => '通勤提醒'],
         'commute.message_template' => ['label' => '遲到訊息範本（可用 {manager} 主管稱呼、{late} 分鐘、{eta} 到達時間）', 'type' => 'string', 'group' => '通勤提醒'],
         // 通勤地理服務端點（免金鑰，可改自架）
         'commute.geocode_url' => ['label' => '地理編碼端點 (Nominatim)', 'type' => 'string', 'group' => '通勤提醒'],
@@ -258,6 +265,7 @@ class Settings
         // 通勤遲到提醒：每帳號自己的公司/主管/上班時間
         'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.work_days', 'commute.nav_app', 'commute.lead_min', 'commute.radius_m',
         'commute.manager_via', 'commute.manager_to', 'commute.manager_name', 'commute.message_template',
+        'notify.default_platform', 'contacts.map',
         // 行程出發提醒 + 主動思考：每帳號自己決定要不要開、頻率、安靜時段
         'event_guard.enabled', 'event_guard.lead_min',
         'proactive.enabled', 'proactive.every_min', 'proactive.quiet',
