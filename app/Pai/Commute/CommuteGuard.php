@@ -20,7 +20,11 @@ use Illuminate\Support\Facades\Http;
  */
 class CommuteGuard
 {
-    public function __construct(private readonly Settings $settings, private readonly Notifier $notifier) {}
+    public function __construct(
+        private readonly Settings $settings,
+        private readonly Notifier $notifier,
+        private readonly \App\Pai\Automation\Geo $geo,
+    ) {}
 
     /** 排程每分鐘呼叫：判斷是否到了某帳號的上班時刻、是否該檢查。 */
     public function tick(): void
@@ -117,7 +121,7 @@ class CommuteGuard
         $here = [(float) $m[1], (float) $m[2]];
 
         $placeStr = $this->workPlaceStr($uid);
-        $work = $placeStr === '' ? null : $this->resolvePlace($placeStr);
+        $work = $placeStr === '' ? null : $this->geo->resolve($placeStr);
         if ($work === null) {
             return;
         }
@@ -125,7 +129,7 @@ class CommuteGuard
         $now = now('Asia/Taipei');
         $date = $now->format('Y-m-d');
         $radius = (int) ($this->settings->get('commute.radius_m', 400, $uid) ?: 400);
-        $dist = $this->haversine($here[0], $here[1], $work[0], $work[1]);
+        $dist = $this->geo->meters($here[0], $here[1], $work[0], $work[1]);
         if ($dist <= $radius) {
             Cache::put("commute:settled:{$uid}:{$date}", 1, 86400); // 已到公司，整天不再打擾
 
@@ -133,7 +137,7 @@ class CommuteGuard
         }
 
         // 估車程（OSRM；用當下定位即時算，不需設定/記憶）
-        $mins = $this->driveMinutes($here, $work);
+        $mins = $this->geo->driveMinutes($here, $work);
         $start = $this->workStart($uid);
         if ($startAt === null) {
             [$h, $i] = array_pad(explode(':', $start), 2, '0');

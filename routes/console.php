@@ -80,6 +80,10 @@ Schedule::call(function () {
 Schedule::call(fn () => app(\App\Pai\Commute\CommuteGuard::class)->tick())
     ->everyMinute()->name('pai:commute-guard')->withoutOverlapping();
 
+// 通用自動化引擎：跑使用者/AI 建立的「觸發→條件→動作」流程
+Schedule::call(fn () => app(\App\Pai\Automation\AutomationEngine::class)->tick())
+    ->everyMinute()->name('pai:automation')->withoutOverlapping();
+
 // 主動提醒：行事曆事件快開始（lead 分鐘內）→ 自動提醒一次
 Schedule::call(function () {
     $cal = app(\App\Pai\Integrations\Calendar::class);

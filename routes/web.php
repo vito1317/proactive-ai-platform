@@ -128,6 +128,9 @@ Route::post('/api/hitl/decide', [\App\Http\Controllers\HitlController::class, 'd
 Route::post('/api/commute/decide', [\App\Http\Controllers\CommuteController::class, 'decide'])->name('commute.decide');
 // 手機解鎖時觸發早晨通勤檢查（醒來即提醒）
 Route::post('/api/commute/wake', [\App\Http\Controllers\CommuteController::class, 'wake'])->name('commute.wake');
+// 通用自動化流程：ask 動作的按鈕 + 解鎖觸發
+Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationController::class, 'decide'])->name('automation.decide');
+Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
 
 Route::post("/api/gateway/pair", [GatewayController::class, "pair"])->name("gateway.pair");          // 兌換配對碼→長期 per-device 憑證
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
