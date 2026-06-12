@@ -4,6 +4,7 @@ namespace App\Pai\Commute;
 
 use App\Models\User;
 use App\Pai\Mcp\ReverseBus;
+use App\Pai\Memory\UserMemory;
 use App\Pai\Notify\Notifier;
 use App\Pai\Settings\Settings;
 use Illuminate\Support\Facades\Cache;
@@ -27,11 +28,11 @@ class CommuteGuard
             if (! (bool) $this->settings->get('commute.enabled', false, $uid)) {
                 continue;
             }
-            $start = trim((string) $this->settings->get('commute.work_start', '09:00', $uid));
             $now = now('Asia/Taipei');
-            if ((int) $now->isoWeekday() > 5) {
-                continue; // 只在工作日（一~五）
+            if (! in_array($now->isoWeekday(), $this->workDays($uid), true)) {
+                continue; // 非上班日
             }
+            $start = $this->workStart($uid);
             [$h, $i] = array_pad(explode(':', $start), 2, '0');
             $startAt = $now->copy()->setTime((int) $h, (int) $i);
             $date = $now->format('Y-m-d');
@@ -59,8 +60,45 @@ class CommuteGuard
     }
 
     /**
+     * 解鎖手機觸發：你一醒來/開手機那刻立刻檢查（時間輪詢可能你還沒醒就發了沒用）。
+     * 只在早晨窗內、當天還沒抵達、且 3 分鐘內沒查過時才做。
+     */
+    public function wake(User $user): void
+    {
+        $uid = $user->id;
+        if (! (bool) $this->settings->get('commute.enabled', false, $uid)) {
+            return;
+        }
+        $now = now('Asia/Taipei');
+        if (! in_array($now->isoWeekday(), $this->workDays($uid), true)) {
+            return;
+        }
+        $start = $this->workStart($uid);
+        [$h, $i] = array_pad(explode(':', $start), 2, '0');
+        $startAt = $now->copy()->setTime((int) $h, (int) $i);
+        $leadCap = (int) ($this->settings->get('commute.lead_min', 90, $uid) ?: 90);
+        // 早晨窗：上班前 leadCap 分鐘 ~ 上班後 60 分鐘
+        if ($now->lt($startAt->copy()->subMinutes($leadCap)) || $now->gt($startAt->copy()->addMinutes(60))) {
+            return;
+        }
+        $date = $now->format('Y-m-d');
+        if (Cache::has("commute:settled:{$uid}:{$date}")) {
+            return;
+        }
+        // 連續解鎖防抖：3 分鐘內只查一次定位
+        if (! Cache::add("commute:wakelock:{$uid}", 1, 180)) {
+            return;
+        }
+        try {
+            $this->checkUser($user, $now->gte($startAt) ? 'at' : 'wake', $startAt);
+        } catch (\Throwable) {
+        }
+    }
+
+    /**
      * 對單一帳號做地點檢查 + 詢問。
-     * $phase='pre'：監看窗內，只在「該出發時刻（上班時間−車程）」到了才提醒；'at'：上班時刻仍未到公司就提醒。
+     * $phase='wake'：剛解鎖→醒來簡報或（已過該出發時刻）該出發提醒；
+     * 'pre'：監看窗內，只在「上班時間−車程」到了才提醒；'at'：上班時刻仍未到公司就提醒。
      */
     public function checkUser(User $user, string $phase = 'at', ?\Carbon\Carbon $startAt = null): void
     {
@@ -76,7 +114,8 @@ class CommuteGuard
         }
         $here = [(float) $m[1], (float) $m[2]];
 
-        $work = $this->resolvePlace((string) $this->settings->get('commute.work_place', '', $uid));
+        $placeStr = $this->workPlaceStr($uid);
+        $work = $placeStr === '' ? null : $this->resolvePlace($placeStr);
         if ($work === null) {
             return;
         }
@@ -91,12 +130,36 @@ class CommuteGuard
             return;
         }
 
-        // 估車程（OSRM）
+        // 估車程（OSRM；用當下定位即時算，不需設定/記憶）
         $mins = $this->driveMinutes($here, $work);
-        $start = trim((string) $this->settings->get('commute.work_start', '09:00', $uid));
+        $start = $this->workStart($uid);
         if ($startAt === null) {
             [$h, $i] = array_pad(explode(':', $start), 2, '0');
             $startAt = $now->copy()->setTime((int) $h, (int) $i);
+        }
+        $kmTxt = number_format($dist / 1000, 1);
+        $leaveAt = $mins === null ? null : $startAt->copy()->subMinutes($mins); // 該出發時刻 = 上班 − 車程
+
+        // wake：剛解鎖手機 → 若已過該出發時刻就當作「該出發」提醒；否則給一次「醒來簡報」
+        if ($phase === 'wake') {
+            if ($leaveAt !== null && $now->gte($leaveAt)) {
+                $phase = 'pre';
+            } else {
+                if (! Cache::add("commute:checked:{$uid}:{$date}:wake", 1, 86400)) {
+                    return; // 今天醒來簡報已給過
+                }
+                $leaveTxt = $leaveAt ? '，建議 '.$leaveAt->format('H:i').' 出發' : '';
+                $name = trim((string) ($user->name ?? ''));
+                $hi = $name !== '' ? "早安，{$name}！" : '早安！';
+                $brief = "🚗 {$hi}今天 {$start} 上班，你在公司 {$kmTxt} 公里外，車程約 ".($mins ?? '?')." 分鐘{$leaveTxt}。到該出發時我會再提醒你。";
+                try {
+                    ReverseBus::fire($node, 'phone_speak', ['text' => $brief]);
+                } catch (\Throwable) {
+                }
+                $this->notifier->send($brief);
+
+                return;
+            }
         }
 
         if ($phase === 'pre') {
@@ -104,7 +167,7 @@ class CommuteGuard
             if ($mins === null) {
                 return; // 不知車程 → 等 at 階段
             }
-            if ($now->lt($startAt->copy()->subMinutes($mins))) {
+            if ($now->lt($leaveAt)) {
                 return; // 還有餘裕，時間還沒到
             }
             if (! Cache::add("commute:checked:{$uid}:{$date}:pre", 1, 86400)) {
@@ -119,7 +182,6 @@ class CommuteGuard
         // 預計到達 / 遲到分鐘
         $eta = $now->copy()->addMinutes($mins ?? 0);
         $late = $mins === null ? null : max(0, (int) $startAt->diffInMinutes($eta, false));
-        $kmTxt = number_format($dist / 1000, 1);
         $driveTxt = $mins === null ? '未知' : "約 {$mins} 分鐘";
         $lateTxt = $late === null ? '' : ($late > 0 ? "，預計遲到約 {$late} 分鐘" : '，現在出發剛好趕得上');
 
@@ -147,7 +209,7 @@ class CommuteGuard
             ['label' => '✖ 不用', 'path' => '/api/commute/decide', 'body' => ['decision' => 'skip']],
         ];
         // 記住公司地點，按「開導航」時用
-        Cache::put("commute:dest:{$uid}", (string) $this->settings->get('commute.work_place', '', $uid), 3600);
+        Cache::put("commute:dest:{$uid}", $placeStr, 3600);
         // 用說的：手機 TTS 念出來（不依賴全雙工語音是否開著）
         try {
             ReverseBus::fire($node, 'phone_speak', ['text' => $question.'可以的話點通知上的「傳給主管」。']);
@@ -172,13 +234,14 @@ class CommuteGuard
     /** 在手機 Google 地圖開「目前位置 → 公司」的導航（開導航按鈕的後端）。 */
     public function openMap(int $uid): string
     {
-        $dest = (string) (Cache::get("commute:dest:{$uid}") ?: $this->settings->get('commute.work_place', '', $uid));
+        $dest = (string) (Cache::get("commute:dest:{$uid}") ?: $this->workPlaceStr($uid));
         $node = $this->ownerPhoneNode($uid);
         if ($dest === '' || $node === null) {
             return '無法開導航（未設定公司地點或手機離線）。';
         }
         try {
-            ReverseBus::fire($node, 'maps_route', ['destination' => $dest, 'origin' => '', 'mode' => 'driving']);
+            $app = (string) $this->settings->get('commute.nav_app', '', $uid);
+            ReverseBus::fire($node, 'maps_route', ['destination' => $dest, 'origin' => '', 'mode' => 'driving', 'app' => $app]);
 
             return '已在手機開啟往公司的導航。';
         } catch (\Throwable $e) {
@@ -231,6 +294,129 @@ class CommuteGuard
         Http::timeout(12)->asForm()->withBasicAuth($sid, $tok)
             ->post("https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json", ['From' => $from, 'To' => $to, 'Body' => $text])
             ->throw();
+    }
+
+    /** 公司地點：設定優先，沒填→從長期記憶找（你只要跟 AI 說「我公司在…」即可）。 */
+    private function workPlaceStr(int $uid): string
+    {
+        $p = trim((string) $this->settings->get('commute.work_place', '', $uid));
+
+        return $p !== '' ? $p : ($this->placeFromMemory($uid) ?? '');
+    }
+
+    private function placeFromMemory(int $uid): ?string
+    {
+        try {
+            $rows = UserMemory::where('user_id', $uid)
+                ->where(fn ($q) => $q->where('content', 'like', '%公司%')
+                    ->orWhere('content', 'like', '%辦公室%')->orWhere('content', 'like', '%上班地點%')->orWhere('content', 'like', '%公司地址%'))
+                ->get();
+            foreach ($rows as $r) {
+                $c = (string) $r->content;
+                if (preg_match('/(市|縣|区|區|鄉|鎮|路|街|號|号|巷|弄|段|大道)/u', $c)) {
+                    // 去掉「我公司在/地址是」之類前綴，留地址讓 Nominatim 命中率高
+                    return trim((string) preg_replace('/^.*?(在|位於|地址[:：是]?|是)/u', '', $c)) ?: $c;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
+    }
+
+    /** 上班日：設定（如 1,2,3,4,5）優先 → 長期記憶（如「週一到週五上班」）→ 預設週一~週五。回 ISO 日(1=一…7=日)。 */
+    private function workDays(int $uid): array
+    {
+        $d = $this->parseDays(trim((string) $this->settings->get('commute.work_days', '', $uid)), true);
+        if ($d) {
+            return $d;
+        }
+        try {
+            foreach (UserMemory::where('user_id', $uid)->where('content', 'like', '%上班%')->get() as $r) {
+                $d = $this->parseDays((string) $r->content, false);
+                if ($d) {
+                    return $d;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return [1, 2, 3, 4, 5];
+    }
+
+    /** @return int[] ISO 日清單 */
+    private function parseDays(string $s, bool $allowNumeric): array
+    {
+        if ($s === '') {
+            return [];
+        }
+        if ($allowNumeric && preg_match('/^\s*[1-7](\s*,\s*[1-7])*\s*$/', $s)) {
+            return array_values(array_unique(array_map('intval', preg_split('/\s*,\s*/', trim($s)))));
+        }
+        $map = ['一' => 1, '二' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '日' => 7, '天' => 7];
+        // 範圍：週一到週五 / 禮拜一~五
+        if (preg_match('/(?:週|周|禮拜|拜|星期)\s*([一二三四五六日天])\s*(?:到|至|~|-|－|—)\s*(?:週|周|禮拜|拜|星期)?\s*([一二三四五六日天])/u', $s, $m)) {
+            $a = $map[$m[1]];
+            $b = $map[$m[2]];
+            if ($a <= $b) {
+                return range($a, $b);
+            }
+        }
+        // 列舉：週一、週三、週五
+        if (preg_match_all('/(?:週|周|禮拜|拜|星期)\s*([一二三四五六日天])/u', $s, $mm) && $mm[1]) {
+            return array_values(array_unique(array_map(fn ($c) => $map[$c], $mm[1])));
+        }
+
+        return [];
+    }
+
+    /** 上班時間：設定優先，沒填→從長期記憶解析（如「我九點上班」）；都沒有→09:00。 */
+    private function workStart(int $uid): string
+    {
+        $s = trim((string) $this->settings->get('commute.work_start', '', $uid));
+        if (preg_match('/^\d{1,2}:\d{2}$/', $s)) {
+            return $s;
+        }
+
+        return $this->workStartFromMemory($uid) ?? '09:00';
+    }
+
+    private function workStartFromMemory(int $uid): ?string
+    {
+        try {
+            $rows = UserMemory::where('user_id', $uid)->where('content', 'like', '%上班%')->get();
+            foreach ($rows as $r) {
+                $t = $this->parseTime((string) $r->content);
+                if ($t !== null) {
+                    return $t;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
+        return null;
+    }
+
+    /** 從一句話抽出時間 → HH:MM（支援 9:00 / 九點 / 早上九點半 / 下午…）。 */
+    private function parseTime(string $c): ?string
+    {
+        if (preg_match('/(\d{1,2})[:：](\d{2})/u', $c, $m)) {
+            return sprintf('%02d:%02d', (int) $m[1], (int) $m[2]);
+        }
+        $cn = ['零' => 0, '一' => 1, '二' => 2, '兩' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '七' => 7, '八' => 8, '九' => 9, '十' => 10, '十一' => 11, '十二' => 12];
+        if (preg_match('/([0-9]{1,2}|十一|十二|[一二兩三四五六七八九十])\s*點(半)?/u', $c, $m)) {
+            $h = is_numeric($m[1]) ? (int) $m[1] : ($cn[$m[1]] ?? null);
+            if ($h !== null) {
+                $min = ! empty($m[2]) ? 30 : 0;
+                if (preg_match('/(下午|晚上|傍晚|pm)/iu', $c) && $h < 12) {
+                    $h += 12;
+                }
+
+                return sprintf('%02d:%02d', $h, $min);
+            }
+        }
+
+        return null;
     }
 
     /** 地址或「緯度,經度」→ [lat, lng]。 */

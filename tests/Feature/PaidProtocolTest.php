@@ -6,12 +6,12 @@ use App\Models\User;
 use App\Pai\Cognition\AgentRun;
 use App\Pai\Cognition\RunStatus;
 use App\Pai\Governance\ActionFeedback;
-use App\Pai\Governance\PaiProtocolRecord;
+use App\Pai\Governance\PaidProtocolRecord;
 use App\Pai\Perception\PaiEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class PaiProtocolTest extends TestCase
+class PaidProtocolTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -35,14 +35,17 @@ class PaiProtocolTest extends TestCase
                 'confidence' => 0.9, 'granted_level' => 2, 'gate_reason' => '依自治規則', 'status' => 'awaiting_approval'],
         ]);
 
-        $rec = PaiProtocolRecord::build($run);
+        $rec = PaidProtocolRecord::build($run);
 
-        // pai-framework load_pai() 的必要鍵——缺一不可（互通契約）
-        foreach (['pai_protocol_version', 'record_id', 'timestamp', '1_perception',
-            '2_context', '3_anticipation', '4_execution', '5_delivery', '6_adaptation'] as $key) {
+        // PAID Protocol 必要鍵 + 向後相容鏡像（pai_protocol_version）——缺一不可（互通契約）
+        foreach (['paid_protocol_version', 'pai_protocol_version', 'protocol', 'record_id', 'timestamp',
+            '1_perception', '2_context', '3_anticipation', '4_execution', '5_delivery', '6_adaptation'] as $key) {
             $this->assertArrayHasKey($key, $rec);
         }
-        $this->assertSame('1.1', $rec['pai_protocol_version']);
+        $this->assertSame('PAID', $rec['protocol']);
+        $this->assertSame('1.2', $rec['paid_protocol_version']);
+        $this->assertSame($rec['paid_protocol_version'], $rec['pai_protocol_version']);  // 鏡像一致
+        $this->assertStringStartsWith('paid_', $rec['record_id']);
         $this->assertSame('log', $rec['1_perception']['trigger_source']);
         $this->assertSame(0.8, $rec['3_anticipation']['urgency_score']);   // high → 0.8
         $this->assertSame('level_2_approval', $rec['5_delivery']['delivery_mode']);
@@ -52,7 +55,7 @@ class PaiProtocolTest extends TestCase
 
     public function test_record_file_written_and_updated_after_decision(): void
     {
-        config(['pai.governance.records_path' => storage_path('app/test_pai_records')]);
+        config(['pai.governance.records_path' => storage_path('app/test_paid_records')]);
         $this->actingAs(User::create(['name' => 'T', 'email' => 't@pai.test', 'password' => bcrypt('x')]));
 
         $run = $this->makeRun([
@@ -60,7 +63,7 @@ class PaiProtocolTest extends TestCase
                 'confidence' => 0.9, 'granted_level' => 2, 'status' => 'awaiting_approval'],
         ]);
 
-        $path = PaiProtocolRecord::write($run);
+        $path = PaidProtocolRecord::write($run);
         $this->assertNotNull($path);
         $this->assertFileExists($path);
 
@@ -72,8 +75,8 @@ class PaiProtocolTest extends TestCase
         $this->assertSame('rejected', $rec['6_adaptation']['user_feedback']);
         $this->assertSame(1, ActionFeedback::where('action', 'contain-host')->where('positive', false)->count());
 
-        array_map('unlink', glob(storage_path('app/test_pai_records/*.pai.json')) ?: []);
-        @rmdir(storage_path('app/test_pai_records'));
+        array_map('unlink', glob(storage_path('app/test_paid_records/*.paid.json')) ?: []);
+        @rmdir(storage_path('app/test_paid_records'));
     }
 
     public function test_suggested_and_observed_statuses_map_to_delivery_modes(): void
@@ -84,7 +87,7 @@ class PaiProtocolTest extends TestCase
         ], 'low');
         $run->status = RunStatus::Completed;
 
-        $rec = PaiProtocolRecord::build($run);
+        $rec = PaidProtocolRecord::build($run);
         $this->assertSame('level_1_soft_nudge', $rec['5_delivery']['delivery_mode']);
         $this->assertFalse($rec['5_delivery']['requires_human_approval']);
         $this->assertSame('not_executed', $rec['4_execution']['status']);

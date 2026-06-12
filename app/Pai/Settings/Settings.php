@@ -112,8 +112,18 @@ class Settings
         'signal.number' => ['label' => 'Signal 已註冊號碼 (+886…)', 'type' => 'string', 'group' => 'Signal'],
         // 早晨通勤遲到提醒（每帳號自己的公司/主管）
         'commute.enabled' => ['label' => '啟用早晨通勤遲到提醒', 'type' => 'bool', 'group' => '通勤提醒'],
-        'commute.work_place' => ['label' => '公司地點（地址，或「緯度,經度」）', 'type' => 'string', 'group' => '通勤提醒'],
-        'commute.work_start' => ['label' => '上班時間 (HH:MM)', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.work_place' => ['label' => '公司地點（地址或「緯度,經度」；留空則用長期記憶裡的公司地址）', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.work_start' => ['label' => '上班時間 (HH:MM；留空則用長期記憶，如「我九點上班」)', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.work_days' => ['label' => '上班日 (如 1,2,3,4,5；1=一…7=日；留空=週一~週五或長期記憶)', 'type' => 'string', 'group' => '通勤提醒'],
+        'commute.nav_app' => ['label' => '導航 App', 'type' => 'select', 'group' => '通勤提醒', 'options' => [
+            ['value' => '', 'label' => '每次讓我選'],
+            ['value' => 'google', 'label' => 'Google 地圖'],
+            ['value' => '導航王', 'label' => '導航王'],
+            ['value' => 'waze', 'label' => 'Waze'],
+            ['value' => 'papago', 'label' => 'PaPaGO!'],
+            ['value' => 'here', 'label' => 'HERE WeGo'],
+            ['value' => 'osmand', 'label' => 'OsmAnd'],
+        ]],
         'commute.lead_min' => ['label' => '提前監看分鐘數（在此區間內，到「上班時間−車程」就提醒該出發）', 'type' => 'int', 'group' => '通勤提醒', 'min' => 10, 'max' => 180],
         'commute.radius_m' => ['label' => '公司範圍半徑（公尺，超出才算還沒到）', 'type' => 'int', 'group' => '通勤提醒', 'min' => 50, 'max' => 5000],
         'commute.manager_via' => ['label' => '通知主管的管道', 'type' => 'select', 'group' => '通勤提醒', 'options' => [
@@ -237,7 +247,7 @@ class Settings
         'image.api_url', 'image.api_key', 'image.model',
         'firecrawl.api_key', 'fal.api_key',
         // 通勤遲到提醒：每帳號自己的公司/主管/上班時間
-        'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.lead_min', 'commute.radius_m',
+        'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.work_days', 'commute.nav_app', 'commute.lead_min', 'commute.radius_m',
         'commute.manager_via', 'commute.manager_to', 'commute.message_template',
     ];
 

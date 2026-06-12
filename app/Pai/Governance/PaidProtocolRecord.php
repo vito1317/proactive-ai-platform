@@ -9,15 +9,20 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * PAI Protocol v1.1 紀錄輸出（與 pai-framework 的 protocol.py 互通）。
+ * PAID Protocol 紀錄輸出（Proactive Agent Infrastructure with Dynamic-finetuning）。
  *
  * 每次 AgentRun 完成（或 HITL 決定後）輸出一份 6 層 JSON 到
- * pai.governance.records_path（檔名以 run id 命名，重放/更新冪等覆寫），
- * 可被 pai-framework 的 load_pai() 直接讀取驗證。
+ * pai.governance.records_path（路徑由 config 決定，未寫死；檔名以 run id 命名，
+ * 重放/更新冪等覆寫）。與 pai-framework 的 protocol.py 互通：寫出 paid_protocol_version，
+ * 同時保留舊 pai_protocol_version 鏡像欄位讓舊讀取器（pai-framework < 0.1.3）仍可驗證。
  */
-class PaiProtocolRecord
+class PaidProtocolRecord
 {
-    public const VERSION = '1.1';
+    /** 協定版本（協定更名為 PAID 後 bump 至 1.2）。 */
+    public const VERSION = '1.2';
+
+    /** 協定全名（寫進紀錄供他人系統識別）。 */
+    public const PROTOCOL = 'PAID';
 
     /** 自主等級 → 交付模式（與 framework LEVEL_TO_DELIVERY 一致）。 */
     private const LEVEL_TO_DELIVERY = [
@@ -38,18 +43,18 @@ class PaiProtocolRecord
             if (! is_dir($dir) && ! @mkdir($dir, 0775, true)) {
                 return null;
             }
-            $path = $dir.'/'.sprintf('pai_run_%06d.pai.json', $run->id);
+            $path = $dir.'/'.sprintf('paid_run_%06d.paid.json', $run->id);
             file_put_contents($path, json_encode(self::build($run), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
 
             return $path;
         } catch (Throwable $e) {
-            Log::warning('PAI Protocol 紀錄輸出失敗', ['run_id' => $run->id, 'error' => $e->getMessage()]);
+            Log::warning('PAID Protocol 紀錄輸出失敗', ['run_id' => $run->id, 'error' => $e->getMessage()]);
 
             return null;
         }
     }
 
-    /** @return array<string, mixed> 6 層 PAI Protocol 紀錄 */
+    /** @return array<string, mixed> 6 層 PAID Protocol 紀錄 */
     public static function build(AgentRun $run): array
     {
         $event = $run->event;
@@ -68,8 +73,10 @@ class PaiProtocolRecord
         }
 
         return [
-            'pai_protocol_version' => self::VERSION,
-            'record_id' => sprintf('pai_%s_run%06d', $run->created_at?->format('Ymd') ?? now()->format('Ymd'), $run->id),
+            'paid_protocol_version' => self::VERSION,
+            'pai_protocol_version' => self::VERSION,   // 向後相容鏡像：舊讀取器仍可驗證
+            'protocol' => self::PROTOCOL,
+            'record_id' => sprintf('paid_%s_run%06d', $run->created_at?->format('Ymd') ?? now()->format('Ymd'), $run->id),
             'timestamp' => now('UTC')->toIso8601String(),
 
             '1_perception' => [
@@ -116,7 +123,7 @@ class PaiProtocolRecord
                 'requires_human_approval' => $awaiting,
             ],
             '6_adaptation' => [
-                'user_feedback' => $feedback,   // accepted | rejected | modified | pending
+                'user_feedback' => $feedback,
                 'learning_adjustment' => null,
             ],
         ];

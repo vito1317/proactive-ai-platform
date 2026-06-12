@@ -11,6 +11,18 @@ use Illuminate\Http\Request;
  */
 class CommuteController extends Controller
 {
+    /** 手機解鎖時呼叫：立刻做一次早晨通勤檢查（你醒了才提醒，避免睡死沒看到）。 */
+    public function wake(Request $request, CommuteGuard $guard): JsonResponse
+    {
+        $user = GatewayController::ownerFromRequest($request);
+        if ($user === null) {
+            return response()->json(['error' => '未授權'], 403);
+        }
+        $guard->wake($user);
+
+        return response()->json(['ok' => true]);
+    }
+
     public function decide(Request $request, CommuteGuard $guard): JsonResponse
     {
         $user = GatewayController::ownerFromRequest($request);

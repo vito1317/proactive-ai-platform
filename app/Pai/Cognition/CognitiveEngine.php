@@ -203,7 +203,7 @@ class CognitiveEngine
             }
 
             // PAI Protocol v1.1：每次運行輸出一份標準紀錄（可與 pai-framework 互通）
-            \App\Pai\Governance\PaiProtocolRecord::write($run->refresh());
+            \App\Pai\Governance\PaidProtocolRecord::write($run->refresh());
         } catch (StopStreaming) {
             // 使用者中止（連進行中的 LLM 呼叫都被打斷）
             $run->update(['status' => RunStatus::Cancelled, 'steps' => $steps, 'summary' => '已由使用者中止', 'tokens' => $tokens]);

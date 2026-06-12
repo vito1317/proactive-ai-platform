@@ -52,7 +52,11 @@ class Hitl
         $run->status = $stillPending ? RunStatus::AwaitingHitl : RunStatus::Completed;
         $run->save();
 
-        PaiProtocolRecord::write($run);
+        PaidProtocolRecord::write($run);
+
+        // PAID 第 1 層：若來源事件來自 paigent 節點（payload 自報 feedback_url），
+        // 把人類定論回送該節點的 ReflectiveMemory（非節點來源會安靜略過）。
+        GuardianFeedback::fromRun($run, $decision === 'approve');
 
         $verb = $decision === 'approve' ? '已核准並執行' : '已駁回';
 
