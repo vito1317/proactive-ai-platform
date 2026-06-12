@@ -1562,16 +1562,20 @@ class VoiceAgentController extends Controller
             return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'commute', 'direct' => true], 'step' => '🚗 通勤回覆'];
         }
         if (($pq['kind'] ?? '') === 'event') {
+            $eg = app(\App\Pai\Commute\EventGuard::class);
+            $willLate = (int) ($pq['late'] ?? 0) > 0;
             if ($no && ! $wantSend && ! $wantMap) {
                 $msg = '好，知道了。';
             } else {
                 $parts = [];
-                if ($wantSend) {
-                    $parts[] = app(\App\Pai\Commute\EventGuard::class)->notifyAttendee($uid, (string) $node);
+                // 預設（單純說「好」）：會遲到→傳訊息給對方；準時→開導航。明確講就照講的（可複合）。
+                $doSend = $wantSend || (! $wantMap && $willLate);
+                $doMap = $wantMap || (! $wantSend && ! $willLate);
+                if ($doSend) {
+                    $parts[] = $eg->notifyAttendee($uid, (string) $node);
                 }
-                // 預設（單純說「好」）或明確說導航 → 開導航
-                if ($wantMap || ! $wantSend) {
-                    $parts[] = app(\App\Pai\Commute\EventGuard::class)->openMap($uid, (string) $node);
+                if ($doMap) {
+                    $parts[] = $eg->openMap($uid, (string) $node);
                 }
                 $msg = implode('；', array_filter($parts)) ?: '好的。';
             }

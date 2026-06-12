@@ -87,16 +87,26 @@ class EventGuard
             $eta = $now->copy()->addMinutes($mins);
             $late = max(0, (int) $begin->diffInMinutes($eta, false));
             $km = number_format($this->geo->meters($here[0], $here[1], $there[0], $there[1]) / 1000, 1);
-            $lateTxt = $late > 0 ? "，預計遲到約 {$late} 分鐘" : '，現在出發來得及';
-            $q = "🗓️ 該出發去「{$title}」了！{$begin->format('H:i')} 開始，地點在 {$km} 公里外，車程約 {$mins} 分鐘{$lateTxt}。要開導航嗎？";
+            $head = "🗓️ 該出發去「{$title}」了！{$begin->format('H:i')} 開始，地點在 {$km} 公里外，車程約 {$mins} 分鐘";
+            // 會遲到 → 主動問「要不要傳訊息跟對方說會晚到」（像通勤）；準時 → 問要不要開導航
+            if ($late > 0) {
+                $q = "{$head}，預計遲到約 {$late} 分鐘。要我幫你傳訊息跟對方說會晚到嗎？（也可以開導航）";
+                $actions = [
+                    ['label' => '✉️ 傳訊息說會遲到', 'path' => '/api/event/decide', 'body' => ['decision' => 'notify']],
+                    ['label' => '🗺️ 開導航', 'path' => '/api/event/decide', 'body' => ['decision' => 'map']],
+                    ['label' => '✖ 不用', 'path' => '/api/event/decide', 'body' => ['decision' => 'skip']],
+                ];
+            } else {
+                $q = "{$head}，現在出發來得及。要開導航嗎？";
+                $actions = [
+                    ['label' => '🗺️ 開導航', 'path' => '/api/event/decide', 'body' => ['decision' => 'map']],
+                    ['label' => '✉️ 還是先跟對方說一聲', 'path' => '/api/event/decide', 'body' => ['decision' => 'notify']],
+                    ['label' => '✖ 知道了', 'path' => '/api/event/decide', 'body' => ['decision' => 'skip']],
+                ];
+            }
 
             Cache::put("event:pending:{$uid}", ['dest' => $loc, 'title' => $title, 'late' => $late], 3600);
-            Cache::put("voice:pendingq:{$uid}", ['kind' => 'event'], 1800);
-            $actions = [
-                ['label' => '🗺️ 開導航', 'path' => '/api/event/decide', 'body' => ['decision' => 'map']],
-                ['label' => '✉️ 通知對方會遲到', 'path' => '/api/event/decide', 'body' => ['decision' => 'notify']],
-                ['label' => '✖ 知道了', 'path' => '/api/event/decide', 'body' => ['decision' => 'skip']],
-            ];
+            Cache::put("voice:pendingq:{$uid}", ['kind' => 'event', 'late' => $late], 1800);
             try {
                 ReverseBus::fire($node, 'voice_start', []);
                 ReverseBus::fire($node, 'phone_speak', ['text' => $q.'可以直接跟我說「好」開導航，或點通知按鈕。']);
