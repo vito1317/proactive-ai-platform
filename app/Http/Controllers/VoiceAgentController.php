@@ -125,13 +125,40 @@ class VoiceAgentController extends Controller
         ] + $this->ttsMeta());
     }
 
-    /** 該帳號選的 TTS 引擎/音色 → 帶給 voice_server 套用（每輪回應都附）。 */
+    /** 該帳號選的 TTS 引擎/音色 + 從長期記憶抽出的語音字典 → 帶給 voice_server（每輪回應都附）。 */
     private function ttsMeta(): array
     {
         return [
             'tts_engine' => (string) ($this->settings->get('voice.tts_engine', 'edge', $this->turnOwnerId) ?: 'edge'),
             'tts_speaker' => (string) ($this->settings->get('voice.tts_speaker', 'Vivian', $this->turnOwnerId) ?: 'Vivian'),
+            'vocab' => $this->speechVocab(),
         ];
+    }
+
+    /** 從長期記憶抽出關鍵詞（英文名/聯絡人/稱呼/地點）給 Whisper 當辨識字典，提升專有名詞正確率。 */
+    private function speechVocab(): string
+    {
+        $uid = $this->turnOwnerId;
+        if ($uid === null) {
+            return '';
+        }
+        try {
+            $mems = (string) \App\Pai\Memory\UserMemory::where('user_id', $uid)->limit(80)->pluck('content')->implode(' ');
+        } catch (\Throwable) {
+            return '';
+        }
+        $terms = [];
+        // 英文/數字詞（Ian、Vivian、LINE、Rex Chang…）
+        if (preg_match_all('/[A-Za-z][A-Za-z0-9]{1,}(?:\s[A-Z][A-Za-z]+)?/u', $mems, $m)) {
+            $terms = array_merge($terms, $m[0]);
+        }
+        // 引號內的名字/稱呼（「蔡サイ」「王經理」…）
+        if (preg_match_all('/[「『]([^」』]{1,10})[」』]/u', $mems, $mm)) {
+            $terms = array_merge($terms, $mm[1]);
+        }
+        $terms = array_values(array_unique(array_filter(array_map('trim', $terms), fn ($t) => mb_strlen($t) >= 2)));
+
+        return implode('、', array_slice($terms, 0, 40));
     }
 
     /** 天氣問答：解析地點+時間範圍 → open-meteo 預報 → 口語摘要。無法判斷回 null（交給 LLM）。 */
