@@ -55,6 +55,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/agent/profiles', [\App\Http\Controllers\AgentProfilesController::class, 'save'])->name('agent.profiles.save');
     Route::post('/agent/profiles/activate', [\App\Http\Controllers\AgentProfilesController::class, 'activate'])->name('agent.profiles.activate');
 
+    // 自動化流程 + AI 主動思考記錄（web 頁）
+    Route::get('/automations', [\App\Http\Controllers\AutomationsController::class, 'page'])->name('automations');
+
     // MCP 伺服器管理（per-account）
     Route::get('/agent/mcp', [\App\Http\Controllers\McpController::class, 'index'])->name('agent.mcp');
     Route::post('/agent/mcp', [\App\Http\Controllers\McpController::class, 'store'])->name('agent.mcp.store');
@@ -131,6 +134,9 @@ Route::post('/api/commute/wake', [\App\Http\Controllers\CommuteController::class
 // 通用自動化流程：ask 動作的按鈕 + 解鎖觸發
 Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationController::class, 'decide'])->name('automation.decide');
 Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
+// 自動化列表 + AI 思考記錄（手機/原生端 JSON；session 或 device token 認證）
+Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::class, 'data'])->name('automations.data');
+Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');
 
 Route::post("/api/gateway/pair", [GatewayController::class, "pair"])->name("gateway.pair");          // 兌換配對碼→長期 per-device 憑證
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");

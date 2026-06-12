@@ -23,6 +23,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/vision*',   // 視覺端點（session 或共用密鑰驗證）
             'api/chat/*',    // 手機訊息對話端點（session 或共用密鑰驗證）
             'api/gateway/*', // 語音橋接（voice_server）以共用密鑰驗證，非 session
+            'api/hitl/*',    // HITL 核准（手機通知按鈕，device token 驗證）
+            'api/commute/*', // 通勤遲到提醒按鈕（device token 驗證）
+            'api/automation/*', // 自動化流程按鈕 / 解鎖觸發
+            'api/automations*', // 自動化列表 JSON（device token 驗證）
         ]);
 
         $middleware->web(append: [

@@ -78,7 +78,8 @@ class Geo
     {
         try {
             $base = rtrim((string) ($this->settings->get('commute.geocode_url') ?: 'https://nominatim.openstreetmap.org'), '/');
-            $r = Http::timeout(12)->withHeaders(['User-Agent' => 'PAI-Automation/1.0'])
+            $r = Http::timeout(15)->withHeaders(['User-Agent' => 'PAI-Automation/1.0'])
+                ->withOptions(['force_ip_resolve' => 'v4']) // 修 PHP-FPM IPv6 DNS 解析逾時
                 ->get($base.'/search', ['q' => $q, 'format' => 'json', 'limit' => 1, 'countrycodes' => 'tw'])->json();
             if (! empty($r[0]['lat'])) {
                 return [(float) $r[0]['lat'], (float) $r[0]['lon']];
@@ -95,7 +96,8 @@ class Geo
         try {
             $base = rtrim((string) ($this->settings->get('commute.osrm_url') ?: 'https://router.project-osrm.org'), '/');
             $path = "{$from[1]},{$from[0]};{$to[1]},{$to[0]}"; // OSRM 是 lon,lat
-            $sec = data_get(Http::timeout(12)->get("{$base}/route/v1/driving/{$path}", ['overview' => 'false'])->json(), 'routes.0.duration');
+            $sec = data_get(Http::timeout(15)->withOptions(['force_ip_resolve' => 'v4'])
+                ->get("{$base}/route/v1/driving/{$path}", ['overview' => 'false'])->json(), 'routes.0.duration');
 
             return $sec === null ? null : (int) ceil($sec / 60);
         } catch (\Throwable) {

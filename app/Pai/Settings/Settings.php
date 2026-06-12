@@ -137,6 +137,10 @@ class Settings
         // 通勤地理服務端點（免金鑰，可改自架）
         'commute.geocode_url' => ['label' => '地理編碼端點 (Nominatim)', 'type' => 'string', 'group' => '通勤提醒'],
         'commute.osrm_url' => ['label' => '車程估算端點 (OSRM)', 'type' => 'string', 'group' => '通勤提醒'],
+        // 主動思考：AI 自己定期判斷要不要主動做事
+        'proactive.enabled' => ['label' => '啟用 AI 主動思考（自己想要不要提醒/建自動化）', 'type' => 'bool', 'group' => '主動思考'],
+        'proactive.every_min' => ['label' => '思考頻率（分鐘，越小越頻繁）', 'type' => 'int', 'group' => '主動思考', 'min' => 5, 'max' => 240],
+        'proactive.quiet' => ['label' => '安靜時段（如 22:00-07:00，此區間不主動打擾）', 'type' => 'string', 'group' => '主動思考'],
     ];
 
     /**
@@ -191,6 +195,7 @@ class Settings
         '🧠 核心 AI' => ['LLM', 'ReAct', '技能'],
         '🎙️ 語音助理' => ['語音'],
         '📅 行事曆 / 郵件' => ['行事曆/郵件', '通勤提醒'],
+        '🤖 自動化 / 主動' => ['主動思考'],
         '🔔 通知' => ['通知', '通知（此帳號專屬）'],
         '💬 通訊管道' => ['Discord', 'Slack', 'Feishu', 'DingTalk', 'Mattermost', 'SMS/Twilio', 'QQ/OneBot', 'BlueBubbles', 'Signal'],
         '🔌 供應商 / 工具' => ['供應商', '生圖'],
@@ -250,6 +255,8 @@ class Settings
         // 通勤遲到提醒：每帳號自己的公司/主管/上班時間
         'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.work_days', 'commute.nav_app', 'commute.lead_min', 'commute.radius_m',
         'commute.manager_via', 'commute.manager_to', 'commute.manager_name', 'commute.message_template',
+        // 主動思考：每帳號自己決定要不要開、頻率、安靜時段
+        'proactive.enabled', 'proactive.every_min', 'proactive.quiet',
     ];
 
     /** 只讀「該帳號自己設的」值（不 fallback 全域）；userId=null 才回全域。 */

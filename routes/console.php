@@ -84,6 +84,10 @@ Schedule::call(fn () => app(\App\Pai\Commute\CommuteGuard::class)->tick())
 Schedule::call(fn () => app(\App\Pai\Automation\AutomationEngine::class)->tick())
     ->everyMinute()->name('pai:automation')->withoutOverlapping();
 
+// 主動思考大腦：AI「自己想」現在該不該主動做點什麼（每帳號依 proactive.every_min 節奏）
+Schedule::call(fn () => app(\App\Pai\Automation\ProactiveBrain::class)->tick())
+    ->everyFiveMinutes()->name('pai:proactive-brain')->withoutOverlapping();
+
 // 主動提醒：行事曆事件快開始（lead 分鐘內）→ 自動提醒一次
 Schedule::call(function () {
     $cal = app(\App\Pai\Integrations\Calendar::class);

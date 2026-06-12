@@ -260,6 +260,7 @@ const actionStatusClass = (x) => ({
 
                     <Link href="/voice" class="rounded-full border border-sky-500/40 bg-sky-500/15 px-3 py-1 text-xs text-sky-200 hover:text-white">🎙️ 語音連線</Link>
                     <Link href="/chat" class="rounded-full border border-indigo-500/40 bg-indigo-500/15 px-3 py-1 text-xs text-indigo-200 hover:text-white">💬 對話</Link>
+                    <Link href="/automations" class="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/15 px-3 py-1 text-xs text-fuchsia-200 hover:text-white">🤖 自動化</Link>
                     <Link href="/packs" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">🧩 領域包</Link>
                     <Link href="/settings" class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300 hover:text-white">⚙ 設定</Link>
                     <button class="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:text-white" :title="auth.user?.email" @click="logout">登出</button>

@@ -295,6 +295,11 @@ class CommuteGuard
         try {
             $conv = Conversation::where('voice_sid', "commute:{$uid}")->latest('id')->first()
                 ?? Conversation::create(['voice_sid' => "commute:{$uid}", 'user_id' => $uid, 'title' => '通勤遲到通知']);
+            // 把這個對話的執行節點指到使用者手機，agent 才會在手機上開 LINE 操作
+            $node = $this->ownerPhoneNode($uid);
+            if ($node) {
+                Cache::put("pai:device:{$conv->id}", $node, 3600);
+            }
             $conv->addMessage('user', "（通勤助手）請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}", ['source' => 'commute']);
             $r = app(ChatResponder::class)->respond($conv, "請幫我{$verb}傳訊息給「{$manager}」，內容就是：{$text}");
             $conv->addMessage('assistant', (string) ($r['reply'] ?? ''), ['source' => 'commute']);
@@ -368,8 +373,8 @@ class CommuteGuard
             foreach (UserMemory::where('user_id', $uid)
                 ->where(fn ($q) => $q->where('content', 'like', '%主管%')->orWhere('content', 'like', '%經理%')->orWhere('content', 'like', '%老闆%'))
                 ->get() as $r) {
-                // 「主管叫王經理」「我的主管是李大明」「老闆 陳總」
-                if (preg_match('/(?:主管|經理|老闆|上司|主任)\s*(?:叫|是|為|：|:)?\s*([\x{4e00}-\x{9fff}]{2,5}(?:經理|總|主任|協理|副總|課長|組長)?)/u', (string) $r->content, $m)) {
+                // 「主管叫王經理」「我的主管是李大明」「老闆 陳總」「主管是 Rex Chang」（中英文皆可）
+                if (preg_match('/(?:主管|經理|老闆|上司|主任)\s*(?:叫做|叫|是|為|名字|：|:)?\s*([A-Za-z][A-Za-z .]{1,24}[A-Za-z]|[\x{4e00}-\x{9fff}]{2,5}(?:經理|總|主任|協理|副總|課長|組長)?)/u', (string) $r->content, $m)) {
                     return trim($m[1]);
                 }
             }
