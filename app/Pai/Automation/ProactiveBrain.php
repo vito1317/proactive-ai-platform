@@ -39,7 +39,8 @@ class ProactiveBrain
                 continue; // 還沒到下一次思考時間
             }
             try {
-                $this->think($user);
+                $this->think($user);            // 即時提醒
+                $this->designWorkflows($user);  // 自己設計新的自動化工作流（每天最多一次）
             } catch (\Throwable) {
             }
         }
@@ -150,6 +151,83 @@ TXT;
             $conv->addMessage('assistant', $acted ? $out : 'NOOP（這次沒事可做）', [
                 'source' => 'proactive', 'acted' => $acted, 'at' => $now->format('Y-m-d H:i'),
             ]);
+        } catch (\Throwable) {
+        }
+    }
+
+    /**
+     * 自動化設計師：讓 AI 依使用者情境「自己設計新的工作流」並建成 Automation。每天最多一次、不重複。
+     * 由 think() 呼叫。
+     */
+    public function designWorkflows(User $user): void
+    {
+        $uid = $user->id;
+        if (! \Illuminate\Support\Facades\Cache::add("proactive:designed:{$uid}", 1, 20 * 3600)) {
+            return; // 一天最多設計一次
+        }
+        $now = now('Asia/Taipei');
+        $mem = UserMemory::where('user_id', $uid)->orderByDesc('pinned')->limit(40)->get()
+            ->map(fn ($m) => '・'.$m->content)->implode("\n") ?: '（沒有記憶）';
+        $existing = Automation::where('user_id', $uid)->get()->map(fn ($a) => '・'.$a->name)->implode("\n") ?: '（還沒有）';
+        $node = $this->ownerPhoneNode($uid);
+        $cal = '';
+        if ($node) {
+            try {
+                $cal = trim((string) (\App\Pai\Mcp\ReverseBus::call($node, 'calendar_read', ['days' => 3], 20)['text'] ?? ''));
+            } catch (\Throwable) {
+            }
+        }
+
+        $sys = <<<'SYS'
+你是自動化工作流設計師。根據使用者的長期記憶、近期行事曆與「已存在的自動化」，設計 0~2 條「全新、實際會幫到他」的自動化工作流。
+嚴格只輸出 JSON 陣列（不要解釋、不要 markdown）。每個元素：
+{"name":"流程名稱","spec":{
+  "trigger":{"type":"daily|interval|unlock","at":"HH:MM","every_min":N,"window":["07:00","09:30"],"days":[1,2,3,4,5]},
+  "conditions":[{"type":"location_outside|location_inside","place":"地址或公司","radius_m":400}|{"type":"weekday","days":[..]}|{"type":"time_after","time":"HH:MM"}|{"type":"always"}],
+  "actions":[{"type":"notify","text":"…"}|{"type":"speak","text":"…"}|{"type":"open_map","place":"…"}|{"type":"ask","question":"…","yes":[…],"no":[]}]
+}}
+文字可用變數 {name}{km}{drive}{eta}{late}{time}{place}。不要和「已存在的自動化」重複。沒有值得新增的就輸出 []。
+SYS;
+        $ctx = "現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}）。\n\n【長期記憶】\n{$mem}\n\n【近期行事曆】\n".($cal ?: '（無）')."\n\n【已存在的自動化】\n{$existing}";
+
+        try {
+            \App\Pai\Agent\Tenant::set($uid);
+            $raw = (string) app(\App\Pai\Cognition\LlmClient::class)->chat(
+                [['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => $ctx]],
+                ['max_tokens' => 800]
+            );
+            // 抽出 JSON 陣列
+            if (preg_match('/\[.*\]/su', $raw, $mm)) {
+                $raw = $mm[0];
+            }
+            $specs = json_decode($raw, true);
+            if (! is_array($specs)) {
+                return;
+            }
+            $existingNames = Automation::where('user_id', $uid)->pluck('name')->map(fn ($n) => mb_strtolower($n))->all();
+            $created = [];
+            foreach (array_slice($specs, 0, 2) as $row) {
+                $name = trim((string) ($row['name'] ?? ''));
+                $spec = $row['spec'] ?? null;
+                if ($name === '' || ! is_array($spec) || empty($spec['trigger']) || empty($spec['actions'])) {
+                    continue;
+                }
+                if (in_array(mb_strtolower($name), $existingNames, true)) {
+                    continue; // 不重複
+                }
+                Automation::create(['user_id' => $uid, 'name' => $name, 'enabled' => true, 'spec' => $spec, 'state' => [], 'source' => 'ai']);
+                $created[] = $name;
+            }
+            if (! empty($created)) {
+                $msg = '🤖 我幫你建立了自動化流程：'.implode('、', $created).'。可到「自動化」頁查看或停用。';
+                try {
+                    app(\App\Pai\Notify\Notifier::class)->send($msg);
+                } catch (\Throwable) {
+                }
+                $conv = Conversation::where('voice_sid', "proactive:{$uid}")->latest('id')->first()
+                    ?? Conversation::create(['voice_sid' => "proactive:{$uid}", 'user_id' => $uid, 'title' => '主動思考']);
+                $conv->addMessage('assistant', $msg, ['source' => 'proactive', 'acted' => true, 'at' => $now->format('Y-m-d H:i')]);
+            }
         } catch (\Throwable) {
         }
     }
