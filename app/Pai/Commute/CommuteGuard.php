@@ -218,8 +218,8 @@ class CommuteGuard
         Cache::put("commute:dest:{$uid}", $placeStr, 3600);
         // 待回答提問：讓使用者可用語音直接回「好/不用」
         Cache::put("voice:pendingq:{$uid}", ['kind' => 'commute'], 1800);
-        // 用說的：手機 TTS 念出來（不依賴全雙工語音是否開著）
         try {
+            ReverseBus::fire($node, 'voice_start', []); // 自動喚醒全雙工語音聆聽你的回答
             ReverseBus::fire($node, 'phone_speak', ['text' => $question.'可以的話直接跟我說「好」或「不用」，或點通知上的按鈕。']);
         } catch (\Throwable) {
         }

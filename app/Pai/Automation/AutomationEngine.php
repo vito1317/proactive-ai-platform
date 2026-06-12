@@ -208,6 +208,7 @@ class AutomationEngine
         ];
         if ($node) {
             try {
+                ReverseBus::fire($node, 'voice_start', []); // 自動喚醒全雙工語音聆聽回答
                 ReverseBus::fire($node, 'phone_speak', ['text' => $question]);
             } catch (\Throwable) {
             }
