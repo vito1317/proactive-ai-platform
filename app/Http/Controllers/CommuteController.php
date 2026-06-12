@@ -37,6 +37,7 @@ class CommuteController extends Controller
 
         if ($decision === 'map') {
             $msg = $guard->openMap($user->id);
+            $guard->speak($user->id, $msg);
 
             return response()->json(['ok' => true, 'message' => $msg]);
         }

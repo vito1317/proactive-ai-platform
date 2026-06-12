@@ -236,25 +236,27 @@ class AutomationEngine
         if (trim($instruction) === '') {
             return;
         }
+        $node = $node ?: $this->ownerPhoneNode($uid);
+        $report = '';
         try {
             $conv = Conversation::where('voice_sid', "automation:{$uid}")->latest('id')->first()
                 ?? Conversation::create(['voice_sid' => "automation:{$uid}", 'user_id' => $uid, 'title' => '自動化流程']);
-            $node = $node ?: $this->ownerPhoneNode($uid);
             if ($node) {
                 Cache::put("pai:device:{$conv->id}", $node, 3600); // agent 在手機上操作
             }
             $conv->addMessage('user', $instruction, ['source' => 'automation']);
             $r = app(ChatResponder::class)->respond($conv, $instruction);
-            $reply = trim((string) ($r['reply'] ?? ''));
-            $conv->addMessage('assistant', $reply, ['source' => 'automation']);
-            // 完成後用 agent 的 TTS 念出結果回報使用者
-            if ($reply !== '' && $node) {
-                try {
-                    ReverseBus::fire($node, 'phone_speak', ['text' => $reply]);
-                } catch (\Throwable) {
-                }
+            $report = trim((string) ($r['reply'] ?? '')) ?: '我處理完了。';
+            $conv->addMessage('assistant', $report, ['source' => 'automation']);
+        } catch (\Throwable $e) {
+            $report = '剛剛那件事處理時出了點問題：'.$e->getMessage();
+        }
+        // 不論成功失敗都用 agent TTS 念出回報
+        if ($node) {
+            try {
+                ReverseBus::fire($node, 'phone_speak', ['text' => $report]);
+            } catch (\Throwable) {
             }
-        } catch (\Throwable) {
         }
     }
 
