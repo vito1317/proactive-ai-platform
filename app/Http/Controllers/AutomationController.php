@@ -18,7 +18,7 @@ class AutomationController extends Controller
         if ($user === null) {
             return response()->json(['error' => '未授權'], 403);
         }
-        $msg = $engine->decide($user->id, (int) $request->input('id', 0), (string) $request->input('branch', 'no'));
+        $msg = $engine->decide($user->id, (int) $request->input('id', 0), (string) $request->input('branch', 'no'), (string) $request->input('node', ''));
 
         return response()->json(['ok' => true, 'message' => $msg]);
     }

@@ -181,7 +181,7 @@ class AutomationEngine
                     }
                     break;
                 case 'agent':
-                    $this->runAgent($uid, $text);
+                    $this->runAgent($uid, $text, $node);
                     break;
                 case 'ask':
                     $this->runAsk($uid, $text, $a, $ctx, $node, $auto);
@@ -214,7 +214,7 @@ class AutomationEngine
     }
 
     /** 按鈕被按下：跑 yes/no 分支的動作。 */
-    public function decide(int $uid, int $autoId, string $branch): string
+    public function decide(int $uid, int $autoId, string $branch, string $preferNode = ''): string
     {
         $p = Cache::pull("automation:ask:{$uid}:{$autoId}");
         if (! is_array($p)) {
@@ -224,14 +224,14 @@ class AutomationEngine
         if (empty($actions)) {
             return $branch === 'no' ? '好，不執行。' : '好的。';
         }
-        $node = $this->ownerPhoneNode($uid);
+        $node = $preferNode !== '' ? $preferNode : $this->ownerPhoneNode($uid);
         $this->runActions($uid, $actions, (array) ($p['ctx'] ?? []), $node);
 
         return '已執行你的選擇。';
     }
 
     /** 交對話大腦執行一句自然語言指令（可傳 LINE/開 App/查資料…，與你平常用法相同）。 */
-    private function runAgent(int $uid, string $instruction): void
+    private function runAgent(int $uid, string $instruction, ?string $node = null): void
     {
         if (trim($instruction) === '') {
             return;
@@ -239,6 +239,10 @@ class AutomationEngine
         try {
             $conv = Conversation::where('voice_sid', "automation:{$uid}")->latest('id')->first()
                 ?? Conversation::create(['voice_sid' => "automation:{$uid}", 'user_id' => $uid, 'title' => '自動化流程']);
+            $node = $node ?: $this->ownerPhoneNode($uid);
+            if ($node) {
+                Cache::put("pai:device:{$conv->id}", $node, 3600); // agent 在手機上操作
+            }
             $conv->addMessage('user', $instruction, ['source' => 'automation']);
             $r = app(ChatResponder::class)->respond($conv, $instruction);
             $conv->addMessage('assistant', (string) ($r['reply'] ?? ''), ['source' => 'automation']);
@@ -261,11 +265,10 @@ class AutomationEngine
     {
         try {
             $owned = McpServer::where('user_id', $uid)->where('url', 'like', 'reverse://%')->pluck('name')->all();
-            foreach (ReverseBus::onlineNodes() as $n) {
-                if (in_array($n, $owned, true)) {
-                    return $n;
-                }
-            }
+            $online = array_values(array_filter(ReverseBus::onlineNodes(), fn ($n) => in_array($n, $owned, true)));
+            $phones = array_values(array_filter($online, fn ($n) => ! preg_match('/mac|macbook|imac|air|pc|desktop|windows|linux|laptop/i', $n)));
+
+            return $phones[0] ?? $online[0] ?? null;
         } catch (\Throwable) {
         }
 

@@ -256,7 +256,7 @@ class CommuteGuard
     }
 
     /** 接受後把訊息送給主管。有設明確收件 ID→直接 API 送；否則走 agent（用主管姓名自動發送，像你平常叫它傳 LINE 給某人）。 */
-    public function sendToManager(int $uid): string
+    public function sendToManager(int $uid, string $preferNode = ''): string
     {
         $p = Cache::pull("commute:pending:{$uid}");
         if (! is_array($p)) {
@@ -295,8 +295,8 @@ class CommuteGuard
         try {
             $conv = Conversation::where('voice_sid', "commute:{$uid}")->latest('id')->first()
                 ?? Conversation::create(['voice_sid' => "commute:{$uid}", 'user_id' => $uid, 'title' => '通勤遲到通知']);
-            // 把這個對話的執行節點指到使用者手機，agent 才會在手機上開 LINE 操作
-            $node = $this->ownerPhoneNode($uid);
+            // 把這個對話的執行節點指到「按按鈕的那台手機」，agent 才會在手機上開 LINE 操作
+            $node = $preferNode !== '' ? $preferNode : $this->ownerPhoneNode($uid);
             if ($node) {
                 Cache::put("pai:device:{$conv->id}", $node, 3600);
             }
@@ -533,11 +533,12 @@ class CommuteGuard
         try {
             $owned = \App\Pai\Mcp\McpServer::where('user_id', $uid)
                 ->where('url', 'like', 'reverse://%')->pluck('name')->all();
-            foreach (ReverseBus::onlineNodes() as $n) {
-                if (in_array($n, $owned, true)) {
-                    return $n;
-                }
-            }
+            $online = array_values(array_filter(ReverseBus::onlineNodes(), fn ($n) => in_array($n, $owned, true)));
+            // 偏好「手機」節點（排除 Mac/PC/桌機名），開 LINE 等操作要在手機上
+            $desktop = '/mac|macbook|imac|air|pc|desktop|windows|linux|laptop/i';
+            $phones = array_values(array_filter($online, fn ($n) => ! preg_match($desktop, $n)));
+
+            return $phones[0] ?? $online[0] ?? null;
         } catch (\Throwable) {
         }
 

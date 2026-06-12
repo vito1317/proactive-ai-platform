@@ -48,7 +48,7 @@ class CommuteController extends Controller
             return response()->json(['ok' => true, 'message' => '好，這次不傳訊息給主管。']);
         }
 
-        $msg = $guard->sendToManager($user->id);
+        $msg = $guard->sendToManager($user->id, (string) $request->input('node', ''));
         $guard->speak($user->id, $msg);
 
         return response()->json(['ok' => true, 'message' => $msg]);
