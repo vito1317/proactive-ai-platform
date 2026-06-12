@@ -58,6 +58,21 @@ class Settings
         'voice.fullduplex_path' => ['label' => '全雙工語音 Socket.IO path', 'type' => 'string', 'group' => '語音'],
         'voice.agent_secret' => ['label' => '語音橋接共用密鑰（voice_server → 平台）', 'type' => 'secret', 'group' => '語音'],
         'voice.system_prompt' => ['label' => '語音助理人格 (system prompt)', 'type' => 'string', 'group' => '語音'],
+        'voice.tts_engine' => ['label' => '語音念回引擎', 'type' => 'select', 'group' => '語音', 'options' => [
+            ['value' => 'edge', 'label' => 'Edge-TTS（線上，最自然）'],
+            ['value' => 'f5', 'label' => 'F5-TTS（離線，可克隆）'],
+            ['value' => 'minicpm', 'label' => 'MiniCPM 原生（最低延遲）'],
+        ]],
+        'voice.tts_speaker' => ['label' => '語音音色（Edge 引擎時可選）', 'type' => 'select', 'group' => '語音', 'options' => [
+            ['value' => 'Vivian', 'label' => 'Vivian — 台灣女聲'],
+            ['value' => 'Maple', 'label' => 'Maple — 台灣男聲'],
+            ['value' => 'Luna', 'label' => 'Luna — 中國女聲'],
+            ['value' => 'Leo', 'label' => 'Leo — 中國男聲'],
+            ['value' => 'Kai', 'label' => 'Kai — 中國男聲(渾厚)'],
+            ['value' => 'Mia', 'label' => 'Mia — 英文女聲'],
+            ['value' => 'Aria', 'label' => 'Aria — 英文女聲'],
+            ['value' => 'Ryan', 'label' => 'Ryan — 英文男聲'],
+        ]],
         'voice.default_gateway' => ['label' => '預設操作節點（開/關程式預設在哪台）', 'type' => 'select', 'group' => '語音'],
         'notify.webhook_url' => ['label' => 'Webhook URL (Slack/Discord)', 'type' => 'string', 'group' => '通知'],
         'notify.telegram.token' => ['label' => 'Telegram Bot Token', 'type' => 'secret', 'group' => '通知'],
@@ -266,6 +281,8 @@ class Settings
         'commute.enabled', 'commute.work_place', 'commute.work_start', 'commute.work_days', 'commute.nav_app', 'commute.lead_min', 'commute.radius_m',
         'commute.manager_via', 'commute.manager_to', 'commute.manager_name', 'commute.message_template',
         'notify.default_platform', 'contacts.map',
+        // 語音音色：每帳號自己選引擎/音色
+        'voice.tts_engine', 'voice.tts_speaker',
         // 行程出發提醒 + 主動思考：每帳號自己決定要不要開、頻率、安靜時段
         'event_guard.enabled', 'event_guard.lead_min',
         'proactive.enabled', 'proactive.every_min', 'proactive.quiet',

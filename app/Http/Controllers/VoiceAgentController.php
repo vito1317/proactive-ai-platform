@@ -67,7 +67,7 @@ class VoiceAgentController extends Controller
                 'steps' => $direct['steps'] ?? [$direct['step'] ?? '⚡ 直接執行'],
                 'meta' => $direct['meta'],
                 'conversation_id' => $conv->id,
-            ]);
+            ] + $this->ttsMeta());
         }
 
         // 重型多步任務（比價/研究/分析/規劃…）→ 在背景連續操作，語音先回快ack，完成後通知
@@ -122,7 +122,16 @@ class VoiceAgentController extends Controller
             'steps' => array_map(fn ($s) => $this->utf8($s), $steps),
             'meta' => $meta,
             'conversation_id' => $conv->id,
-        ]);
+        ] + $this->ttsMeta());
+    }
+
+    /** 該帳號選的 TTS 引擎/音色 → 帶給 voice_server 套用（每輪回應都附）。 */
+    private function ttsMeta(): array
+    {
+        return [
+            'tts_engine' => (string) ($this->settings->get('voice.tts_engine', 'edge', $this->turnOwnerId) ?: 'edge'),
+            'tts_speaker' => (string) ($this->settings->get('voice.tts_speaker', 'Vivian', $this->turnOwnerId) ?: 'Vivian'),
+        ];
     }
 
     /** 天氣問答：解析地點+時間範圍 → open-meteo 預報 → 口語摘要。無法判斷回 null（交給 LLM）。 */
@@ -584,6 +593,43 @@ class VoiceAgentController extends Controller
             $names = collect($svc->all($conv->user_id))->pluck('name')->implode('、');
             return ['reply' => "找不到「{$name}」這個人格。目前有：{$names}", 'speech' => "找不到那個人格喔，目前有 {$names}。",
                 'meta' => ['category' => 'skill', 'skill' => 'persona', 'direct' => true], 'step' => '🎭 人格切換失敗'];
+        }
+
+        // ── 切換語音音色 / 引擎（AI 調整聲音）──────────────────────────────────
+        if ($conv && preg_match('/(語音|聲音|嗓音|音色|voice)/iu', $t) && preg_match('/(換|改|切換|切到|變成|用|設成)/u', $t)) {
+            $uid = $conv->user_id;
+            $speaker = null;
+            $engine = null;
+            $map = ['Vivian' => '/vivian|薇薇安|台灣女|台湾女|女聲|女生|女的/iu', 'Maple' => '/maple|楓|台灣男|台湾男|男聲|男生|男的/iu',
+                'Luna' => '/luna|露娜/iu', 'Leo' => '/leo/iu', 'Kai' => '/kai|渾厚|浑厚/iu', 'Mia' => '/mia/iu', 'Aria' => '/aria/iu', 'Ryan' => '/ryan/iu'];
+            foreach ($map as $sp => $re) {
+                if (preg_match($re, $t)) {
+                    $speaker = $sp;
+                    break;
+                }
+            }
+            if (preg_match('/f5/iu', $t)) {
+                $engine = 'f5';
+            } elseif (preg_match('/edge/iu', $t)) {
+                $engine = 'edge';
+            } elseif (preg_match('/minicpm|原生/iu', $t)) {
+                $engine = 'minicpm';
+            }
+            if ($speaker !== null || $engine !== null) {
+                if ($speaker !== null) {
+                    $this->settings->set('voice.tts_speaker', $speaker, $uid);
+                    if ($engine === null) {
+                        $this->settings->set('voice.tts_engine', 'edge', $uid); // 選音色預設用 edge（多音色）
+                    }
+                }
+                if ($engine !== null) {
+                    $this->settings->set('voice.tts_engine', $engine, $uid);
+                }
+                $label = $speaker ?? $engine;
+
+                return ['reply' => "好，已把聲音換成「{$label}」。", 'speech' => "好的，已經換成{$label}的聲音了。",
+                    'meta' => ['category' => 'skill', 'skill' => 'voice', 'direct' => true, 'action' => 'switch_voice'], 'step' => "🔊 切換語音：{$label}"];
+            }
         }
 
         // ── 圖片對話：語音對話已掛了照片 → 這一輪帶圖回答（可多輪追問同一張）────────
