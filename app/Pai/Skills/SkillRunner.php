@@ -512,6 +512,12 @@ class SkillRunner
         if ($planNote !== '') {
             $forceNote .= '⚠️ '.$planNote."\n";
         }
+        // 訊息類任務（開 LINE/傳訊息給某人）：找聯絡人的正確步驟
+        if (preg_match('/(傳|傳送|私訊|訊息|消息|line|賴|聯絡人|联系人|傳給|傳 line|發訊息|发消息)/iu', $message)) {
+            $forceNote .= "📱 在 App 內找聯絡人時：①先用 screen_snapshot 看目前畫面上有沒有那個聯絡人/對話，有就直接點進去；"
+                ."②畫面上沒有，才點 App 內的「搜尋」框、輸入對方名稱（可用長期記憶裡的對方 LINE 名稱）找出來再點進去。"
+                ."【絕對不要用網頁瀏覽器(browser_/open_url)去搜尋聯絡人】——要在 App 內找。\n";
+        }
 
         $nowTw = now('Asia/Taipei');
         $nowLine = $nowTw->format('Y-m-d H:i').'（週'.['日', '一', '二', '三', '四', '五', '六'][$nowTw->dayOfWeek].'，台灣時間）';
