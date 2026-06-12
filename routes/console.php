@@ -88,6 +88,10 @@ Schedule::call(fn () => app(\App\Pai\Automation\AutomationEngine::class)->tick()
 Schedule::call(fn () => app(\App\Pai\Automation\ProactiveBrain::class)->tick())
     ->everyFiveMinutes()->name('pai:proactive-brain')->withoutOverlapping();
 
+// 行程出發提醒：讀手機行事曆有地址的事件，到「開始−車程」就提醒該出發
+Schedule::call(fn () => app(\App\Pai\Commute\EventGuard::class)->tick())
+    ->everyThreeMinutes()->name('pai:event-guard')->withoutOverlapping();
+
 // 主動提醒：行事曆事件快開始（lead 分鐘內）→ 自動提醒一次
 Schedule::call(function () {
     $cal = app(\App\Pai\Integrations\Calendar::class);

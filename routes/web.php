@@ -136,9 +136,12 @@ Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationControlle
 Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
 // 取消操作：中止進行中的 agent（浮框「取消操作」鈕）
 Route::post('/api/agent/abort', [\App\Http\Controllers\AutomationController::class, 'abort'])->name('agent.abort');
+// 行程出發提醒按鈕（開導航/通知對方/知道了）
+Route::post('/api/event/decide', [\App\Http\Controllers\EventController::class, 'decide'])->name('event.decide');
 // 自動化列表 + AI 思考記錄（手機/原生端 JSON；session 或 device token 認證）
 Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::class, 'data'])->name('automations.data');
 Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');
+Route::post('/api/automations/builtin', [\App\Http\Controllers\AutomationsController::class, 'builtin'])->name('automations.builtin');
 
 Route::post("/api/gateway/pair", [GatewayController::class, "pair"])->name("gateway.pair");          // 兌換配對碼→長期 per-device 憑證
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");

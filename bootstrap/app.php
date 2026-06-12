@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/automation/*', // 自動化流程按鈕 / 解鎖觸發
             'api/automations*', // 自動化列表 JSON（device token 驗證）
             'api/agent/*',   // 取消操作等 agent 控制
+            'api/event/*',   // 行程出發提醒按鈕
         ]);
 
         $middleware->web(append: [

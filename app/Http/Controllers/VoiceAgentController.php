@@ -1532,23 +1532,51 @@ class VoiceAgentController extends Controller
         if (! is_array($pq)) {
             return null;
         }
-        $yes = (bool) preg_match('/(好|是|對|对|可以|麻煩|麻烦|幫我|帮我|傳|传|要|沒問題|没问题|ok|yes|請|请)/iu', $t);
-        $no = (bool) preg_match('/(不用|不要|別|别|算了|沒事|没事|取消|不需要|no)/iu', $t);
-        if (! $yes && ! $no) {
-            return null; // 聽不出是/否 → 不攔截，照常處理
+        // 意圖解析：可複合（如「發送並打開導航」＝通知＋導航）
+        $no = (bool) preg_match('/(不用|不要|別|别|算了|沒事|没事|不需要|\bno\b)/iu', $t);
+        $wantMap = (bool) preg_match('/(導航|导航|地圖|地图|帶我去|带我去|路線|路线|開地圖|开地图|出發|出发)/u', $t);
+        $wantSend = (bool) preg_match('/(傳|传|發送|发送|通知|訊息|讯息|跟他說|跟他说|告訴|告诉|說一聲|说一声|傳給|传给)/u', $t);
+        $yes = (bool) preg_match('/(好|是|對|对|可以|麻煩|麻烦|幫我|帮我|要|沒問題|没问题|\bok\b|\byes\b|請|请)/iu', $t);
+        if (! $yes && ! $no && ! $wantMap && ! $wantSend) {
+            return null; // 聽不出意圖 → 不攔截，照常處理
         }
         \Illuminate\Support\Facades\Cache::forget("voice:pendingq:{$uid}");
         $node = $this->turnDeviceNode;
 
         if (($pq['kind'] ?? '') === 'commute') {
-            if ($no) {
+            if ($no && ! $wantSend && ! $wantMap) {
                 \Illuminate\Support\Facades\Cache::forget("commute:pending:{$uid}");
                 $msg = '好，這次不傳訊息給主管。';
             } else {
-                $msg = app(\App\Pai\Commute\CommuteGuard::class)->sendToManager($uid, (string) $node);
+                $parts = [];
+                // 預設（單純說「好」）＝傳給主管；明確只說導航則不傳
+                if (! $no && ($wantSend || ! $wantMap)) {
+                    $parts[] = app(\App\Pai\Commute\CommuteGuard::class)->sendToManager($uid, (string) $node);
+                }
+                if ($wantMap) {
+                    $parts[] = app(\App\Pai\Commute\CommuteGuard::class)->openMap($uid);
+                }
+                $msg = implode('；', array_filter($parts)) ?: '好的。';
             }
 
             return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'commute', 'direct' => true], 'step' => '🚗 通勤回覆'];
+        }
+        if (($pq['kind'] ?? '') === 'event') {
+            if ($no && ! $wantSend && ! $wantMap) {
+                $msg = '好，知道了。';
+            } else {
+                $parts = [];
+                if ($wantSend) {
+                    $parts[] = app(\App\Pai\Commute\EventGuard::class)->notifyAttendee($uid, (string) $node);
+                }
+                // 預設（單純說「好」）或明確說導航 → 開導航
+                if ($wantMap || ! $wantSend) {
+                    $parts[] = app(\App\Pai\Commute\EventGuard::class)->openMap($uid, (string) $node);
+                }
+                $msg = implode('；', array_filter($parts)) ?: '好的。';
+            }
+
+            return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'event', 'direct' => true], 'step' => '🗓️ 行程回覆'];
         }
         if (($pq['kind'] ?? '') === 'automation') {
             $msg = app(\App\Pai\Automation\AutomationEngine::class)->decide($uid, (int) ($pq['autoId'] ?? 0), $no ? 'no' : 'yes', (string) $node);
