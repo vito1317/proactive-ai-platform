@@ -55,38 +55,115 @@ class ProactiveBrain
         $autos = Automation::where('user_id', $uid)->get()
             ->map(fn ($a) => "#{$a->id} {$a->name}".($a->enabled ? '' : '（已停用）'))->implode("\n") ?: '（還沒有自動化）';
 
+        // 時段
+        $h = (int) $now->format('H');
+        $part = $h < 6 ? '凌晨' : ($h < 11 ? '早上' : ($h < 14 ? '中午' : ($h < 18 ? '下午' : ($h < 22 ? '晚上' : '深夜'))));
+
+        // 今日行事曆（讀手機，best-effort）
+        $cal = '（讀不到行事曆）';
+        $node = $this->ownerPhoneNode($uid);
+        if ($node !== null) {
+            try {
+                $r = \App\Pai\Mcp\ReverseBus::call($node, 'calendar_read', ['days' => 1], 20);
+                $cal = trim((string) ($r['text'] ?? '')) ?: '（今天沒有行事曆事件）';
+            } catch (\Throwable) {
+            }
+        }
+
+        // 最近做過的主動行為（避免重複）
+        $convPrev = Conversation::where('voice_sid', "proactive:{$uid}")->latest('id')->first();
+        $recent = $convPrev ? $convPrev->messages()->where('role', 'assistant')->where('meta->acted', true)
+            ->latest('id')->limit(5)->get()->map(fn ($m) => '・'.mb_substr($m->content, 0, 60))->implode("\n") : '';
+        $recent = $recent ?: '（最近沒有主動行為）';
+
         $prompt = <<<TXT
-（這是你的「主動思考」時刻：系統每隔一段時間自動喚醒你，使用者現在並沒有在跟你說話。）
-現在時間：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}）。
+（這是你的「主動思考」時刻：系統定期喚醒你，使用者現在沒在跟你說話。）
+現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}，{$part}）。
 
-你的任務：根據下面關於使用者的長期記憶與已建立的自動化，判斷「此刻」有沒有什麼你該主動為他做的事——
-例如：快到上班/行程時間提醒、發現他有例行需求但還沒建自動化就主動建一條、或一句貼心而有用的提醒。
+任務：主動找出「此刻」一件對使用者真正有用、且這個時間點剛好合適的事去做。可參考的時機：
+- 早上：給今日重點（行事曆有什麼、提醒帶東西/天氣）。
+- 接下來幾小時有行程：提醒準備、或確認交通。
+- 晚上：預告明天的行程。
+- 發現使用者有重複性需求卻還沒有對應自動化 → 用 create-automation 幫他建一條。
+- 任何貼心又不打擾的小提醒。
 
-原則（很重要）：
-- 多數時候應該「什麼都不做」。只有在明確有幫助、且現在這個時間點剛好需要、又不會打擾時才行動。
-- 不要重複提醒已經提醒過或已有自動化在處理的事。
-- 若沒事可做：只回覆「NOOP」，不要呼叫任何工具、不要發任何通知。
-- 若要行動：用你的工具（create-automation 建立自動化、phone_notify 發通知、phone_speak 念出、或實際幫忙）。
-  例如使用者記憶顯示固定上班時間但沒有通勤提醒自動化 → 可主動用 create-automation 建一條。
+規則：
+- **這次請務必挑一件「現在最有用」的事，實際用工具做出來**（phone_notify 發通知是最常用的；或 phone_speak 念出 / create-automation 建自動化），並用一句話說明你做了什麼。
+- 例如：上面行事曆若有「今天稍後」或「明天」的行程 → 發一則 phone_notify 幫他預告＋提醒要帶的東西/交通；早上 → 發今日重點。
+- **唯一可以回「NOOP」的情況：行事曆與記憶完全沒有任何可參考資訊。** 只要有任何行程或記憶，就不要 NOOP。
+- 不要重複「最近已做過」清單裡完全一樣的事；通勤遲到、行程出發已有專門功能處理，不用你重做。
+
+【現在時段】{$part}
+【今日行事曆】
+{$cal}
 
 【使用者長期記憶】
 {$mem}
 
 【已建立的自動化】
 {$autos}
+
+【你最近已主動做過的事（別重複）】
+{$recent}
 TXT;
 
         try {
             $conv = Conversation::where('voice_sid', "proactive:{$uid}")->latest('id')->first()
                 ?? Conversation::create(['voice_sid' => "proactive:{$uid}", 'user_id' => $uid, 'title' => '主動思考']);
-            $r = app(ChatResponder::class)->respond($conv, $prompt);
-            $reply = trim((string) ($r['reply'] ?? ''));
-            $acted = $reply !== '' && ! str_contains(mb_strtoupper($reply), 'NOOP');
-            // 每次思考都留一筆（供「思考記錄」頁顯示）：有行動記內容，沒事記 NOOP
-            $conv->addMessage('assistant', $acted ? $reply : 'NOOP（這次沒事可做）', [
+
+            // 由 PHP 決定「該不該主動」（模型給 NOOP 選項就會偷懶）：有行事曆內容 + 距上次簡報夠久才發。
+            $hasMaterial = str_contains($cal, '・') || $mem !== '（沒有記憶）';
+            $throttled = ! \Illuminate\Support\Facades\Cache::add("proactive:briefed:{$uid}", 1, 4 * 3600); // 4 小時最多一則
+            $acted = false;
+            $out = '';
+            if ($hasMaterial && ! $throttled) {
+                // LLM 只負責把情境寫成一則貼心提醒（不給 NOOP 選項，避免偷懶）
+                \App\Pai\Agent\Tenant::set($uid);
+                $sys = '你是主動貼心的個人助理。把下面情境整理成「一則」要主動傳給使用者的提醒訊息：繁體中文、最多兩三句、可帶 emoji、聚焦今天/接下來最該知道的事與提醒。'
+                    .'直接輸出那則訊息本身，不要給多個選項、不要任何解釋或前言。';
+                // 只給乾淨情境（不含 NOOP 規則，否則模型會偷懶選 NOOP）
+                $context = "現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}，{$part}）。\n\n"
+                    ."【今日/明日行事曆】\n{$cal}\n\n【關於使用者的長期記憶】\n{$mem}\n\n"
+                    ."【你最近已提醒過（不要重複）】\n{$recent}";
+                $out = trim((string) app(\App\Pai\Cognition\LlmClient::class)->chat(
+                    [['role' => 'system', 'content' => $sys], ['role' => 'user', 'content' => $context]],
+                    ['max_tokens' => 220]
+                ));
+                // 只去掉「選項X：」「**標題**」這類前言/標題行；刪完若變空就保留原文（避免把訊息刪光）
+                $clean = preg_replace('/^\s*#{1,6}\s.*$/mu', '', (string) $out);           // markdown 標題
+                $clean = preg_replace('/^\s*\*{0,2}\s*(選項|方案|版本)\s*[一二三四五六\d].*$/mu', '', (string) $clean); // 「選項三：…」
+                $clean = trim((string) $clean);
+                $out = $clean !== '' ? $clean : trim((string) $out);
+                $acted = $out !== '' && ! str_contains(mb_strtoupper($out), 'NOOP');
+            }
+
+            if ($acted) {
+                // 真的發出去：通知 + 手機念出
+                try {
+                    app(\App\Pai\Notify\Notifier::class)->send('🧠 '.$out);
+                    if ($node) {
+                        \App\Pai\Mcp\ReverseBus::fire($node, 'phone_speak', ['text' => $out]);
+                    }
+                } catch (\Throwable) {
+                }
+            }
+            $conv->addMessage('assistant', $acted ? $out : 'NOOP（這次沒事可做）', [
                 'source' => 'proactive', 'acted' => $acted, 'at' => $now->format('Y-m-d H:i'),
             ]);
         } catch (\Throwable) {
+        }
+    }
+
+    private function ownerPhoneNode(int $uid): ?string
+    {
+        try {
+            $owned = \App\Pai\Mcp\McpServer::where('user_id', $uid)->where('url', 'like', 'reverse://%')->pluck('name')->all();
+            $online = array_values(array_filter(\App\Pai\Mcp\ReverseBus::onlineNodes(), fn ($n) => in_array($n, $owned, true)));
+            $phones = array_values(array_filter($online, fn ($n) => ! preg_match('/mac|macbook|imac|air|pc|desktop|windows|linux|laptop/i', $n)));
+
+            return $phones[0] ?? $online[0] ?? null;
+        } catch (\Throwable) {
+            return null;
         }
     }
 
