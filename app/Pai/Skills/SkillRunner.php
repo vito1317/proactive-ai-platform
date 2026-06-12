@@ -419,6 +419,7 @@ class SkillRunner
             'media' => ['kw' => '音樂|音乐|播放|放歌|聽歌|听歌|歌|暫停|暂停|下一首|上一首|music', 'tools' => 'play_music,media_control'],
             'calendar' => ['kw' => '行事曆|行事历|日曆|日历|行程|事件|加到.*曆|接下來|接下来|新增.*行程|建立.*行程|排.*行程', 'tools' => 'add_calendar_event,calendar_read,calendar_add'],
             'vision' => ['kw' => '拍照|看.*畫面|看.*画面|截圖|截图|這是什麼|这是什么|圖片|图片|看圖|看图', 'tools' => 'screen_shot'],
+            'notes' => ['kw' => '筆記|笔记|便箋|便签|備忘|备忘|memo|note', 'tools' => 'notes_read,open_app,screen_shot'],
             'device' => ['kw' => '定位|位置|亮度|音量|手電筒|手电筒|電量|电量|剪貼簿|剪贴板|震動|震动|複製|复制|分享', 'tools' => 'device_location,phone_notify,clipboard_set,clipboard_get,flashlight,set_volume,set_brightness,vibrate,battery_status,share_text,phone_speak,phone_toast,device_info'],
             'system' => ['kw' => '檔案|文件|執行|执行|指令|終端|终端|程式碼|代码|\bcode\b|log|日誌|日志|磁碟|磁盘|記憶體|内存|cpu|部署|安裝|安装|寫入|写入|改檔|讀檔|读取|nginx|docker', 'tools' => 'run-shell,exec,read-file,write-file,edit-file,insert-in-file,tail-logs,list_procs,proc_status,proc_logs,kill,spawn'],
             'platform' => ['kw' => '設定|设置|領域|领域|mcp|斜線|斜杠|重啟worker|重启worker|自我修改|溫度|temperature|模型', 'tools' => 'get-settings,update-setting,list-domains,describe-domain,toggle-domain,merge-domains,restart-workers,stop-task,add-mcp-server,list-mcp-servers,remove-mcp-server,add-command,list-commands,remove-command,generate-install-command'],
