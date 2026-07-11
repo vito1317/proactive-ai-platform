@@ -559,6 +559,43 @@ class VoiceAgentController extends Controller
      *
      * @return array{reply:string,meta:array,step?:string}|null
      */
+    /**
+     * 語音說「盯著畫面/發生X就叫我」→ 建立視覺守望任務（背景週期判讀）。
+     * 即時投影/鏡頭開著就直接吃推送畫面（live:{sid}，5 秒一輪）；否則盯手機螢幕截圖。
+     *
+     * @return array{reply:string,speech:string,meta:array,step:string}
+     */
+    private function startVisionWatch(Conversation $conv, string $t, ?string $sid, bool $live): array
+    {
+        $uid = (int) $conv->user_id;
+        $goal = str_replace(['頂著', '顶着'], '盯著', trim($t)); // STT 同音字還原，留完整句當守望目標
+        if (\App\Pai\Watch\WatchTask::where('user_id', $uid)->where('status', 'active')->count() >= 3) {
+            $reply = '同時最多盯 3 個畫面，先說「取消守望」停掉一些再來。';
+        } else {
+            $interval = $live ? 5 : 20;
+            $w = \App\Pai\Watch\WatchTask::create([
+                'user_id' => $uid,
+                'node' => \App\Pai\Watch\WatchTask::phoneNode($uid),
+                'source' => ($live && $sid) ? 'live:'.$sid : 'screen',
+                'goal' => $goal,
+                'interval_sec' => $interval,
+                'expires_at' => now()->addMinutes(30),
+            ]);
+            \App\Pai\Watch\WatchTickJob::dispatch($w->id, $w->issueTickToken());
+            $reply = "👀 好，我真的開始盯了（#{$w->id}）：{$goal}。每 {$interval} 秒看一次"
+                .($live ? '你投影上來的即時畫面' : '手機畫面')
+                .'，最多 30 分鐘，看到就通知你＋念出來；說「取消守望」可停止。';
+            if (preg_match('/(撞|危險|危险|跌倒|摔|安全|小偷|火|瓦斯)/u', $goal)) {
+                $reply .= "\n⚠️ 老實說：我每一輪要好幾秒才判讀一次，秒級的碰撞/危險警示我來不及，"
+                    .'請不要把行車安全交給我；適合等紅綠燈變化、東西煮好、有人出現這類幾十秒級的事。';
+            }
+        }
+        $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'watch']);
+
+        return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+            'meta' => ['category' => 'skill', 'skill' => 'watch-screen', 'direct' => true], 'step' => '👀 啟動守望'];
+    }
+
     /** 帶圖回答（Gemma 4 看圖）：附近期對話脈絡 + 這張圖。 */
     private function visionReply(Conversation $conv, string $question, string $image, bool $live = false): string
     {
@@ -568,6 +605,8 @@ class VoiceAgentController extends Controller
             ->map(fn ($m) => ['role' => $m->role, 'content' => mb_substr((string) $m->content, 0, 500)])->values()->all();
         $sys = $live
             ? '你是「由 Vito 開發的助理」，看得懂圖片。這是使用者「目前螢幕/鏡頭的即時畫面」。只根據這張當前畫面回答，用台灣正體（繁體）中文、簡短，禁簡體。'
+                .'你只看得到這一張，沒有持續監看能力——絕對不可以承諾「我會幫你盯著/有狀況叫你」；'
+                .'若使用者想要持續監看，請他說「幫我盯著（要等的狀況）」來啟動守望模式。'
             : '你是「由 Vito 開發的助理」，看得懂圖片。用台灣正體（繁體）中文回答，禁簡體。依對話脈絡針對這張圖回答或追問。';
         $messages = [
             ['role' => 'system', 'content' => $sys],
@@ -672,6 +711,15 @@ class VoiceAgentController extends Controller
             $img = \Illuminate\Support\Facades\Cache::get($pkey);
             if (is_string($img) && $img !== '') {
                 $live = (bool) \Illuminate\Support\Facades\Cache::get('vision:live:'.$sid);
+                // 「持續盯著/發生X就叫我」→ 建立真正的視覺守望（背景週期判讀），
+                // 不能讓單次看圖回答把它吃掉、口頭答應卻沒人在盯（含 STT 同音：盯著→頂著）
+                $watchIntent = (preg_match('/(盯著|盯着|頂著|顶着|盯住|盯緊|盯紧|守望|監看|监看|持續看|持续看)/u', $t)
+                        || (preg_match('/(叫我|提醒我|通知我|告訴我|告诉我|警告我)/u', $t)
+                            && preg_match('/(如果|要是|快要?|等到|出現|出现|變|变|就)/u', $t)))
+                    && ! preg_match('/(取消|停止|不用|別再|别再)/u', $t);
+                if ($watchIntent && $conv) {
+                    return $this->startVisionWatch($conv, $t, $sid, $live);
+                }
                 // 視覺意圖 vs 明確動作指令：避免「去公司/打開X/傳訊息」被殘留圖片綁架成看圖
                 $visionIntent = (bool) preg_match('/(看到|看見|看见|看的|這是|这是|這張|这张|這個|这个|什麼|甚麼|什么|畫面|画面|螢幕|屏幕|圖片|图片|誰|谁|讀|读|介紹|介绍|描述|顏色|颜色|寫什麼|写什么|幾個|几个|哪一|是不是)/u', $t);
                 $otherCmd = (bool) preg_match('/(導航|导航|帶我去|带我去|去[\x{4e00}-\x{9fff}]{1,10}|打開|打开|開啟|开启|啟動|启动|傳|传|訊息|讯息|播放|放歌|放音樂|取消|刪除|删除|記住|记住|記得|记得|提醒|排程|定時|打電話|打电话)/u', $t);

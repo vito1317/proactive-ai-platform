@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $id
  * @property int $user_id
  * @property string|null $node
+ * @property string $source screen＝截手機螢幕；live:{session}＝吃即時投影/鏡頭推送的畫面
  * @property string $goal
  * @property int $interval_sec
  * @property \Illuminate\Support\Carbon $expires_at
@@ -28,7 +29,7 @@ use Illuminate\Database\Eloquent\Model;
 class WatchTask extends Model
 {
     protected $fillable = [
-        'user_id', 'node', 'goal', 'interval_sec', 'expires_at', 'status',
+        'user_id', 'node', 'source', 'goal', 'interval_sec', 'expires_at', 'status',
         'last_desc', 'last_hash', 'tick_token', 'fail_count', 'run_count', 'last_run_at', 'result',
     ];
 

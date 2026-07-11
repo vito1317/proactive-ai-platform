@@ -65,7 +65,11 @@ class WatchScreenSkill implements Skill
         ]);
         WatchTickJob::dispatch($w->id, $w->issueTickToken());
 
+        $warn = preg_match('/(撞|危險|危险|跌倒|摔|安全|小偷|火|瓦斯)/u', $goal)
+            ? "\n⚠️ 老實說：我每一輪要好幾秒才判讀一次，秒級的碰撞/危險警示我來不及，請不要把人身安全交給我；適合進度條、開賣、有人出現這類幾十秒級的事。"
+            : '';
+
         return "👀 開始守望（#{$w->id}）：{$goal}。我會每 {$interval} 秒看一次「{$node}」的畫面，"
-            ."最多盯 {$minutes} 分鐘，看到就通知你＋用手機念出來。請把要盯的畫面留在手機前景；說「取消守望」可停止。";
+            ."最多盯 {$minutes} 分鐘，看到就通知你＋用手機念出來。請把要盯的畫面留在手機前景；說「取消守望」可停止。{$warn}";
     }
 }

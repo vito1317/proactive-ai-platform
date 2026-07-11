@@ -47,23 +47,33 @@ class WatchTickJob implements ShouldQueue
             return;
         }
 
-        // 節點掉線 → 換一台在線手機續盯
-        $node = ($w->node !== null && ReverseBus::lastSeen($w->node) !== null)
-            ? $w->node
-            : WatchTask::phoneNode($w->user_id);
-        if ($node !== null && $node !== $w->node) {
-            $w->node = $node;
-        }
-
         $img = '';
-        if ($node !== null) {
-            $shot = ReverseBus::call($node, 'screen_shot', [], 60);
-            $img = ! empty($shot['ok']) ? $this->extractImage((string) ($shot['text'] ?? '')) : '';
-        }
-        if ($img === '') {
-            $this->softFail($w, $notifier, '截不到手機畫面（手機可能離線或螢幕鎖定）');
+        if (str_starts_with((string) $w->source, 'live:')) {
+            // 即時投影/鏡頭來源：直接吃手機/網頁持續推送的當前畫面（不用叫手機截圖）
+            $sid = substr((string) $w->source, 5);
+            $img = (string) \Illuminate\Support\Facades\Cache::get('vision:pending:'.$sid, '');
+            if ($img === '') {
+                $this->softFail($w, $notifier, '即時畫面已停止推送（投影/鏡頭關掉了）');
 
-            return;
+                return;
+            }
+        } else {
+            // 節點掉線 → 換一台在線手機續盯
+            $node = ($w->node !== null && ReverseBus::lastSeen($w->node) !== null)
+                ? $w->node
+                : WatchTask::phoneNode($w->user_id);
+            if ($node !== null && $node !== $w->node) {
+                $w->node = $node;
+            }
+            if ($node !== null) {
+                $shot = ReverseBus::call($node, 'screen_shot', [], 60);
+                $img = ! empty($shot['ok']) ? $this->extractImage((string) ($shot['text'] ?? '')) : '';
+            }
+            if ($img === '') {
+                $this->softFail($w, $notifier, '截不到手機畫面（手機可能離線或螢幕鎖定）');
+
+                return;
+            }
         }
 
         // 畫面跟上一輪完全相同 → 不必問 LLM，直接等下一輪
@@ -145,7 +155,9 @@ class WatchTickJob implements ShouldQueue
 
     private function reschedule(WatchTask $w): void
     {
-        self::dispatch($w->id, $this->token)->delay(now()->addSeconds(max(10, (int) $w->interval_sec)));
+        // 即時來源畫面是推上來的（不必叫手機截圖），允許更密的節奏
+        $min = str_starts_with((string) $w->source, 'live:') ? 5 : 10;
+        self::dispatch($w->id, $this->token)->delay(now()->addSeconds(max($min, (int) $w->interval_sec)));
     }
 
     /** 收尾：更新狀態、推通知；命中時再讓手機直接念出來。 */
