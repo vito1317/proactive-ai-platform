@@ -57,6 +57,7 @@ class SkillRegistry
         \App\Pai\Skills\Builtin\ToggleAutomationSkill::class,
         \App\Pai\Skills\Builtin\WatchScreenSkill::class,
         \App\Pai\Skills\Builtin\CancelWatchSkill::class,
+        \App\Pai\Skills\Builtin\PlaceCallSkill::class,
         GenerateImageSkill::class,
         FirecrawlScrapeSkill::class,
         FalGenerateSkill::class,

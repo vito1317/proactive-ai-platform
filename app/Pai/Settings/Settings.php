@@ -115,6 +115,7 @@ class Settings
         'twilio.account_sid' => ['label' => 'Twilio Account SID', 'type' => 'string', 'group' => 'SMS/Twilio'],
         'twilio.auth_token' => ['label' => 'Twilio Auth Token', 'type' => 'secret', 'group' => 'SMS/Twilio'],
         'twilio.from' => ['label' => 'Twilio 發送號碼 (+1…)', 'type' => 'string', 'group' => 'SMS/Twilio'],
+        'call.tts_voice' => ['label' => 'AI 外撥語音音色（Twilio <Say> voice，預設 Google.zh-TW-Wavenet-A）', 'type' => 'string', 'group' => 'SMS/Twilio'],
         // QQ（OneBot v11 / go-cqhttp / NapCat：事件 POST 進來，HTTP API 回覆）
         'onebot.secret' => ['label' => 'OneBot/QQ 簽章 Secret（HMAC 驗證，可空）', 'type' => 'secret', 'group' => 'QQ/OneBot'],
         'onebot.api_url' => ['label' => 'OneBot HTTP API URL（如 http://127.0.0.1:5700，回覆用）', 'type' => 'string', 'group' => 'QQ/OneBot'],

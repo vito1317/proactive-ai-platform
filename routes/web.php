@@ -107,6 +107,8 @@ Route::post('/webhooks/feishu', [\App\Http\Controllers\FeishuWebhookController::
 Route::post('/webhooks/dingtalk', [\App\Http\Controllers\DingTalkWebhookController::class, 'handle'])->name('webhooks.dingtalk'); // DingTalk bot
 Route::post('/webhooks/mattermost', [\App\Http\Controllers\MattermostWebhookController::class, 'handle'])->name('webhooks.mattermost'); // Mattermost outgoing
 Route::post('/webhooks/twilio', [\App\Http\Controllers\TwilioWebhookController::class, 'handle'])->name('webhooks.twilio'); // SMS (Twilio)
+Route::post('/webhooks/call/turn/{token}', [\App\Http\Controllers\OutboundCallController::class, 'turn'])->name('webhooks.call.turn'); // AI 外撥：通話回合 TwiML
+Route::post('/webhooks/call/status/{token}', [\App\Http\Controllers\OutboundCallController::class, 'status'])->name('webhooks.call.status'); // AI 外撥：通話結束回呼
 Route::post('/webhooks/onebot', [\App\Http\Controllers\OneBotWebhookController::class, 'handle'])->name('webhooks.onebot'); // QQ (OneBot)
 Route::post('/webhooks/bluebubbles', [\App\Http\Controllers\BlueBubblesWebhookController::class, 'handle'])->name('webhooks.bluebubbles'); // iMessage (BlueBubbles)
 

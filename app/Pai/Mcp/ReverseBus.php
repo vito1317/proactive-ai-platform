@@ -50,6 +50,21 @@ class ReverseBus
         Cache::put(self::PENDING.$node, $queue, 120);
     }
 
+    /** 找某帳號「在線」的手機反向節點（優先非電腦類名稱），沒有則 null。 */
+    public static function ownerPhoneNode(int $uid): ?string
+    {
+        try {
+            $owned = McpServer::where('user_id', $uid)->where('url', 'like', 'reverse://%')->pluck('name')->all();
+            $online = array_values(array_filter(self::onlineNodes(), fn ($n) => in_array($n, $owned, true)));
+            $phones = array_values(array_filter($online, fn ($n) => ! preg_match('/mac|macbook|imac|air|pc|desktop|windows|linux|laptop/i', $n)));
+
+            return $phones[0] ?? $online[0] ?? null;
+        } catch (\Throwable) {
+        }
+
+        return null;
+    }
+
     /** 列出目前所有「在線」的反向節點名稱（最近 5 分鐘有 poll）。 */
     public static function onlineNodes(): array
     {
