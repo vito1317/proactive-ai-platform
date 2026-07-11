@@ -1,8 +1,7 @@
-<script setup>
-import { computed } from 'vue';
-
+<script>
 // Lucide-style stroke icons（24×24 viewBox，stroke 1.5）
-const ICONS = {
+// 具名匯出：AgentOpsFlow 的 SVG 流程圖直接取 path 資料自己畫
+export const ICONS = {
     bell: ['M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M10.3 21a1.94 1.94 0 0 0 3.4 0'],
     mic: ['M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z', 'M19 10v2a7 7 0 0 1-14 0v-2', 'M12 19v3'],
     message: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
@@ -48,6 +47,10 @@ const ICONS = {
     camera: ['M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z', 'M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'],
     arrowLeft: ['M19 12H5', 'M12 19l-7-7 7-7'],
 };
+</script>
+
+<script setup>
+import { computed } from 'vue';
 
 const props = defineProps({
     name: { type: String, required: true },

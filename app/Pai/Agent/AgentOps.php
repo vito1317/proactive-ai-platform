@@ -28,6 +28,19 @@ class AgentOps
 
         $agents = [];
 
+        // 0) 對話中的 agent（網頁/語音/TG/LINE/通勤/自動化/主動思考）—— SkillRunner 心跳
+        foreach (ChatActivity::active($uid) as $d) {
+            $agents[] = [
+                'id' => 'chat-'.$d['conversation_id'],
+                'kind' => 'chat',
+                'name' => ($d['source'] ?? '對話').' Agent',
+                'status' => 'running',
+                'title' => (string) ($d['goal'] ?? ''),
+                'steps' => array_values(array_map(static fn ($t) => ['text' => (string) $t], (array) ($d['steps'] ?? []))),
+                'elapsed' => isset($d['started_at']) ? max(0, now()->timestamp - (int) $d['started_at']) : null,
+            ];
+        }
+
         // 1) 協調者認知運行（running / awaiting_hitl）—— 完整 ReAct 步驟鏈
         $runs = AgentRun::query()
             ->whereIn('status', [RunStatus::Running, RunStatus::AwaitingHitl])

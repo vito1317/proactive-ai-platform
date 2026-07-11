@@ -164,7 +164,16 @@ class SkillRunner
      */
     private function agentic(Conversation $conv, string $message, ?callable $onStep, array $obs, ?callable $onDelta = null, ?callable $onThought = null): array
     {
-        $step = $onStep ?? fn (string $t) => null;
+        $inner = $onStep ?? fn (string $t) => null;
+        // 即時作業流心跳：讓中控台/手機的 AgentOps 流程圖看到這個對話 agent 正在做的每一步
+        $activity = new \App\Pai\Agent\ChatActivity($conv, $message);
+        $step = function ($t) use ($inner, $activity) {
+            if (is_string($t)) {
+                $activity->tick($t);
+            }
+
+            return $inner($t);
+        };
         // 開跑先清掉殘留的中止旗標 → 只有「本次開跑後」按的停止才算數（避免上一輪的旗標誤殺新任務）
         \Illuminate\Support\Facades\Cache::forget('pai:abort:'.$conv->id);
         \Illuminate\Support\Facades\Cache::forget('pai:chat:abort:'.$conv->id);
