@@ -86,6 +86,37 @@ class ConsoleController extends Controller
         ]);
     }
 
+    /**
+     * 即時作業流 (Agent Ops)：所有「運行中」的 agent 與其當前動作細節。
+     * 彙總三種活體：協調者認知運行（ReAct 步驟鏈）、視覺守望（盯手機畫面）、AI 外撥電話（逐字稿）。
+     * 前端 AgentOpsFlow 每 3 秒輪詢此端點畫即時流程圖。
+     */
+    public function agentOps(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $u = $request->user();
+
+        return response()->json(self::cleanUtf8([
+            'agents' => \App\Pai\Agent\AgentOps::snapshot($u?->id, $u?->isAdmin() ?? false),
+            'at' => now()->toIso8601String(),
+        ]));
+    }
+
+    /**
+     * 手機端同一份即時作業流（gateway per-device token 認證，Android「自動化」分頁輪詢）。
+     */
+    public function agentOpsApi(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $u = $request->user() ?? GatewayController::ownerFromRequest($request);
+        if ($u === null) {
+            return response()->json(['error' => '未授權'], 403);
+        }
+
+        return response()->json(self::cleanUtf8([
+            'agents' => \App\Pai\Agent\AgentOps::snapshot($u->id, $u->isAdmin()),
+            'at' => now()->toIso8601String(),
+        ]));
+    }
+
     /** 遞迴把字串清成合法 UTF-8（丟掉壞位元），避免 STT/LLM 來源的壞編碼害整個 Inertia page JSON 失敗。 */
     private static function cleanUtf8($v)
     {

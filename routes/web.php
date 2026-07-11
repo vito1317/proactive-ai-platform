@@ -38,6 +38,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/voice', fn () => \Inertia\Inertia::render('Voice'))->name('voice');
     Route::get('/vision', fn () => \Inertia\Inertia::render('Vision'))->name('vision.page');
     Route::get('/mcp/health', [ConsoleController::class, 'mcpHealth'])->name('mcp.health'); // 節點連線狀態
+    Route::get('/console/agent-ops', [ConsoleController::class, 'agentOps'])->name('console.agent_ops'); // 即時作業流（AgentOpsFlow 輪詢）
     Route::get('/api/gateway/pair-code', [\App\Http\Controllers\GatewayController::class, 'pairCode'])->name('gateway.paircode'); // Android 一鍵配對碼（/gateway/ 被反代，改用 /api/）
     Route::post('/api/gateway/pair-create', [\App\Http\Controllers\GatewayController::class, 'pairCreate'])->name('gateway.paircreate'); // 一次性配對碼(綁目前帳號)
 
@@ -141,6 +142,7 @@ Route::post('/api/agent/abort', [\App\Http\Controllers\AutomationController::cla
 // 行程出發提醒按鈕（開導航/通知對方/知道了）
 Route::post('/api/event/decide', [\App\Http\Controllers\EventController::class, 'decide'])->name('event.decide');
 // 自動化列表 + AI 思考記錄（手機/原生端 JSON；session 或 device token 認證）
+Route::get('/api/agent-ops', [\App\Http\Controllers\ConsoleController::class, 'agentOpsApi'])->name('agent_ops.api'); // 手機端即時作業流
 Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::class, 'data'])->name('automations.data');
 Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');
 Route::post('/api/automations/builtin', [\App\Http\Controllers\AutomationsController::class, 'builtin'])->name('automations.builtin');

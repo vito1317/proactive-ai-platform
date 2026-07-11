@@ -2,6 +2,7 @@
 import { Head, Link, useForm, usePage, router } from '@inertiajs/vue3';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import PipelineFlow from '../Components/PipelineFlow.vue';
+import AgentOpsFlow from '../Components/AgentOpsFlow.vue';
 import UiIcon from '../Components/UiIcon.vue';
 
 const props = defineProps({
@@ -275,6 +276,11 @@ const actionStatusClass = (x) => ({
                 </div>
                 <PipelineFlow :stages="stages" :intensity="intensity" />
             </section>
+
+            <!-- ░ 即時作業流：每個運行中 agent 在幹嘛 ░ -->
+            <div class="mb-5">
+                <AgentOpsFlow />
+            </div>
 
             <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <!-- 指令 + 領域 -->
