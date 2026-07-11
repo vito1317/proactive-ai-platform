@@ -698,6 +698,22 @@ class VoiceAgentController extends Controller
             }
         }
 
+        // ── 前向警戒開關（直達，不經 LLM）：「開啟/關閉前向警戒」（含 STT 同音：警界/警介）──
+        if ($conv && preg_match('/(前向|防撞|碰撞)\s*(警戒|警界|警介|偵測|侦测|模式)/u', $t)) {
+            // 關/停動詞可在名詞前或後（「關閉前向警戒」「把防撞偵測關掉」都要通）
+            $off = (bool) preg_match('/(關閉|关闭|關掉|关掉|停止|取消|停掉|不要|關了|关了)/u', $t);
+            $node = $this->turnDeviceNode ?: \App\Pai\Mcp\ReverseBus::ownerPhoneNode((int) $conv->user_id);
+            if (! $node) {
+                return ['reply' => '找不到在線的手機節點，開不了前向警戒。', 'speech' => '找不到在線的手機，開不了前向警戒。',
+                    'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
+            }
+            $r = \App\Pai\Mcp\ReverseBus::call($node, 'collision_guard', ['on' => ! $off], 25);
+            $msg = ! empty($r['ok']) ? (string) ($r['text'] ?? '好了。') : '操作失敗：'.(string) ($r['error'] ?? '手機沒回應');
+
+            return ['reply' => $msg, 'speech' => $msg,
+                'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
+        }
+
         // ── 圖片對話：語音對話已掛了照片 → 這一輪帶圖回答（可多輪追問同一張）────────
         $sid = $conv?->voice_sid;
         if ($sid) {
