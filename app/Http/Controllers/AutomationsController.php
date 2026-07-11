@@ -63,6 +63,18 @@ class AutomationsController extends Controller
 
             return response()->json(['ok' => true, 'deleted' => true]);
         }
+        // 設定/清除自動停止條件（截止時間 + 次數上限）
+        if ($action === 'set_limit') {
+            $auto->expires_at = Automation::parseExpiry($request->input('expires_at'));
+            $auto->max_runs = Automation::parseMaxRuns($request->input('max_runs'));
+            // 重新設了上限且尚未跑滿 → 順手把因到期/跑滿而停的流程重新啟用
+            if (! $auto->isAutoStopped() && ($request->boolean('reenable', true))) {
+                $auto->enabled = true;
+            }
+            $auto->save();
+
+            return response()->json(['ok' => true, 'auto_stop' => $auto->autoStopLabel(), 'enabled' => $auto->enabled]);
+        }
         $auto->enabled = $action === 'enable' ? true : ($action === 'disable' ? false : ! $auto->enabled);
         $auto->save();
 
@@ -95,6 +107,10 @@ class AutomationsController extends Controller
                 'id' => $a->id, 'name' => $a->name, 'enabled' => $a->enabled,
                 'trigger' => $trigger, 'actions' => implode('→', array_filter($acts)),
                 'source' => $a->source, 'created' => $a->created_at?->format('Y-m-d H:i'),
+                'expires_at' => $a->expires_at?->format('Y-m-d\TH:i'), // datetime-local 用
+                'max_runs' => $a->max_runs,
+                'run_count' => (int) $a->run_count,
+                'auto_stop' => $a->autoStopLabel(),
             ];
         })->values();
 

@@ -1,5 +1,6 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
+import { ref, reactive } from 'vue';
 
 const props = defineProps({
     automations: { type: Array, default: () => [] },
@@ -27,6 +28,27 @@ function toggle(a) {
 function remove(a) {
     if (!confirm(`刪除自動化「${a.name}」？`)) return;
     apiPost(`/api/automations/${a.id}/toggle`, { action: 'delete' });
+}
+
+// 自動停止編輯器：哪一條正在編輯 + 暫存輸入
+const editing = ref(null);
+const form = reactive({ expires_at: '', max_runs: '' });
+function openLimit(a) {
+    editing.value = editing.value === a.id ? null : a.id;
+    form.expires_at = a.expires_at || '';
+    form.max_runs = a.max_runs ?? '';
+}
+function saveLimit(a) {
+    apiPost(`/api/automations/${a.id}/toggle`, {
+        action: 'set_limit',
+        expires_at: form.expires_at || null,
+        max_runs: form.max_runs === '' ? null : Number(form.max_runs),
+    });
+    editing.value = null;
+}
+function clearLimit(a) {
+    apiPost(`/api/automations/${a.id}/toggle`, { action: 'set_limit', expires_at: null, max_runs: null });
+    editing.value = null;
 }
 </script>
 
@@ -66,20 +88,44 @@ function remove(a) {
                 </p>
                 <ul class="space-y-2">
                     <li v-for="a in automations" :key="a.id"
-                        class="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <span :class="a.enabled ? 'text-emerald-400' : 'text-slate-600'">●</span>
-                                <span class="truncate font-medium">{{ a.name }}</span>
-                                <span v-if="a.source === 'ai'" class="rounded bg-fuchsia-500/20 px-1.5 text-[10px] text-fuchsia-300">AI 建立</span>
+                        class="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span :class="a.enabled ? 'text-emerald-400' : 'text-slate-600'">●</span>
+                                    <span class="truncate font-medium">{{ a.name }}</span>
+                                    <span v-if="a.source === 'ai'" class="rounded bg-fuchsia-500/20 px-1.5 text-[10px] text-fuchsia-300">AI 建立</span>
+                                </div>
+                                <div class="mt-0.5 truncate text-xs text-slate-400">⏱ {{ a.trigger }} · 動作：{{ a.actions || '—' }}</div>
+                                <div v-if="a.auto_stop" class="mt-0.5 truncate text-xs text-amber-300/80">🛑 自動停止：{{ a.auto_stop }}</div>
+                                <div v-else class="mt-0.5 text-xs text-slate-600">♾ 長期執行（未設自動停止）</div>
                             </div>
-                            <div class="mt-0.5 truncate text-xs text-slate-400">⏱ {{ a.trigger }} · 動作：{{ a.actions || '—' }}</div>
+                            <div class="flex shrink-0 gap-2">
+                                <button @click="openLimit(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10">截止</button>
+                                <button @click="toggle(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10">
+                                    {{ a.enabled ? '停用' : '啟用' }}
+                                </button>
+                                <button @click="remove(a)" class="rounded-lg border border-rose-500/30 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/10">刪除</button>
+                            </div>
                         </div>
-                        <div class="flex shrink-0 gap-2">
-                            <button @click="toggle(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10">
-                                {{ a.enabled ? '停用' : '啟用' }}
-                            </button>
-                            <button @click="remove(a)" class="rounded-lg border border-rose-500/30 px-2.5 py-1 text-xs text-rose-300 hover:bg-rose-500/10">刪除</button>
+
+                        <!-- 自動停止設定 -->
+                        <div v-if="editing === a.id" class="mt-3 space-y-2 rounded-lg border border-white/10 bg-slate-950/60 p-3">
+                            <div class="flex flex-wrap items-center gap-2 text-xs">
+                                <label class="text-slate-400">截止時間</label>
+                                <input v-model="form.expires_at" type="datetime-local"
+                                    class="rounded border border-white/10 bg-slate-900 px-2 py-1 text-slate-100" />
+                                <label class="ml-2 text-slate-400">最多執行</label>
+                                <input v-model="form.max_runs" type="number" min="1" placeholder="次數"
+                                    class="w-20 rounded border border-white/10 bg-slate-900 px-2 py-1 text-slate-100" />
+                                <span class="text-slate-500">次</span>
+                            </div>
+                            <p class="text-[11px] text-slate-500">到截止時間、或跑滿次數後會自動停用。兩者皆可留空＝長期執行。</p>
+                            <div class="flex gap-2">
+                                <button @click="saveLimit(a)" class="rounded-lg bg-emerald-500/25 px-3 py-1 text-xs text-emerald-200 hover:bg-emerald-500/35">儲存</button>
+                                <button @click="clearLimit(a)" class="rounded-lg border border-white/10 px-3 py-1 text-xs text-slate-300 hover:bg-white/10">清除（改長期）</button>
+                                <button @click="editing = null" class="rounded-lg border border-white/10 px-3 py-1 text-xs text-slate-400 hover:bg-white/10">取消</button>
+                            </div>
                         </div>
                     </li>
                 </ul>

@@ -181,12 +181,17 @@ TXT;
         $sys = <<<'SYS'
 你是自動化工作流設計師。根據使用者的長期記憶、近期行事曆與「已存在的自動化」，設計 0~2 條「全新、實際會幫到他」的自動化工作流。
 嚴格只輸出 JSON 陣列（不要解釋、不要 markdown）。每個元素：
-{"name":"流程名稱","spec":{
+{"name":"流程名稱","expires_at":"YYYY-MM-DD HH:MM 或 null","max_runs":N 或 null,"spec":{
   "trigger":{"type":"daily|interval|unlock","at":"HH:MM","every_min":N,"window":["07:00","09:30"],"days":[1,2,3,4,5]},
   "conditions":[{"type":"location_outside|location_inside","place":"地址或公司","radius_m":400}|{"type":"weekday","days":[..]}|{"type":"time_after","time":"HH:MM"}|{"type":"always"}],
   "actions":[{"type":"notify","text":"…"}|{"type":"speak","text":"…"}|{"type":"open_map","place":"…"}|{"type":"ask","question":"…","yes":[…],"no":[]}]
 }}
 文字可用變數 {name}{km}{drive}{eta}{late}{time}{place}。沒有值得新增的就輸出 []。
+
+【自動停止（重要）】每條流程都要想清楚「它該跑到什麼時候」，並務必設定停止條件，避免長期殘留打擾使用者：
+- 一次性／短期的事（某天的會議準備、這趟旅行期間、某個截止日前）→ 設 "expires_at" 為合理的到期時間，或設 "max_runs":1（只跑一次）。
+- 長期固定習慣（每天回家提醒、每週採買）→ 可不設（expires_at 與 max_runs 皆為 null），但只在真的是長期需求時才這樣。
+- 不確定時，寧可設一個保守的 expires_at（例如兩週後），讓它到期自動停，而不是無限期跑。
 
 【重要：以下功能「平台已內建」，絕對不要再設計類似的】
 - 上班通勤遲到提醒（上班時間到還沒到公司→提醒、傳訊息給主管）— 已內建，不要重做。
@@ -220,7 +225,11 @@ SYS;
                 if (in_array(mb_strtolower($name), $existingNames, true)) {
                     continue; // 不重複
                 }
-                Automation::create(['user_id' => $uid, 'name' => $name, 'enabled' => true, 'spec' => $spec, 'state' => [], 'source' => 'ai']);
+                Automation::create([
+                    'user_id' => $uid, 'name' => $name, 'enabled' => true, 'spec' => $spec, 'state' => [], 'source' => 'ai',
+                    'expires_at' => Automation::parseExpiry($row['expires_at'] ?? null),
+                    'max_runs' => Automation::parseMaxRuns($row['max_runs'] ?? null),
+                ]);
                 $created[] = $name;
             }
             if (! empty($created)) {

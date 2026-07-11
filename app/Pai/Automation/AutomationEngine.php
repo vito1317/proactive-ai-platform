@@ -42,6 +42,9 @@ class AutomationEngine
     {
         $now = now('Asia/Taipei');
         foreach (Automation::where('enabled', true)->get() as $auto) {
+            if ($this->autoStopIfDue($auto)) {
+                continue; // 已到期/跑滿 → 本輪剛被自動停用
+            }
             $t = (array) ($auto->spec['trigger'] ?? []);
             $fire = match ($t['type'] ?? '') {
                 'daily' => $now->format('H:i') === ($t['at'] ?? '')
@@ -69,6 +72,9 @@ class AutomationEngine
     {
         $now = now('Asia/Taipei');
         foreach (Automation::where('enabled', true)->where('user_id', $user->id)->get() as $auto) {
+            if ($this->autoStopIfDue($auto)) {
+                continue; // 已到期/跑滿 → 本輪剛被自動停用
+            }
             $t = (array) ($auto->spec['trigger'] ?? []);
             if (($t['type'] ?? '') !== 'unlock') {
                 continue;
@@ -106,6 +112,42 @@ class AutomationEngine
             }
         }
         $this->runActions($uid, (array) ($auto->spec['actions'] ?? []), $ctx, $node, $auto);
+        $this->recordRun($auto); // 真的執行了 → 計數，跑滿 max_runs 就自動停用
+    }
+
+    /**
+     * 自動停止閘門：到期（expires_at 過了）或跑滿次數（run_count >= max_runs）→ 立刻停用。
+     * 回 true 代表這條剛被停用、本輪不該再跑。AI 自建的臨時流程靠這個不會無限期殘留。
+     */
+    private function autoStopIfDue(Automation $auto): bool
+    {
+        if (! $auto->isAutoStopped()) {
+            return false;
+        }
+        $auto->enabled = false;
+        $auto->save();
+        $reason = ($auto->expires_at !== null && $auto->expires_at->isPast()) ? '已到設定的截止時間' : '已達設定的執行次數上限';
+        try {
+            \App\Pai\Agent\Tenant::set($auto->user_id);
+            $this->notifier->send("🛑 自動化「{$auto->name}」{$reason}，已自動停止。");
+        } catch (\Throwable) {
+        }
+
+        return true;
+    }
+
+    /** 記一次成功執行；若到達 max_runs 就順手自動停用。 */
+    private function recordRun(Automation $auto): void
+    {
+        try {
+            $auto->run_count = (int) $auto->run_count + 1;
+            $auto->last_run_at = now();
+            if ($auto->max_runs !== null && $auto->run_count >= (int) $auto->max_runs) {
+                $auto->enabled = false;
+            }
+            $auto->save();
+        } catch (\Throwable) {
+        }
     }
 
     /** @param  array<string,mixed>  $ctx  by-ref 累積變數 */
