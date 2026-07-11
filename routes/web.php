@@ -135,6 +135,8 @@ Route::post('/api/commute/decide', [\App\Http\Controllers\CommuteController::cla
 // 手機解鎖時觸發早晨通勤檢查（醒來即提醒）
 Route::post('/api/commute/wake', [\App\Http\Controllers\CommuteController::class, 'wake'])->name('commute.wake');
 // 通用自動化流程：ask 動作的按鈕 + 解鎖觸發
+Route::post('/api/sensor/event', [\App\Http\Controllers\SensorEventController::class, 'event'])->name('sensor.event'); // 手機傳感器哨兵（撞擊/跌倒/碰撞警示）
+Route::post('/api/sensor/decide', [\App\Http\Controllers\SensorEventController::class, 'decide'])->name('sensor.decide'); // 「我沒事/需要幫忙」按鈕
 Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationController::class, 'decide'])->name('automation.decide');
 Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
 // 取消操作：中止進行中的 agent（浮框「取消操作」鈕）

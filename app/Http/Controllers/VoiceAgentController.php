@@ -1669,6 +1669,19 @@ class VoiceAgentController extends Controller
         \Illuminate\Support\Facades\Cache::forget("voice:pendingq:{$uid}");
         $node = $this->turnDeviceNode;
 
+        if (($pq['kind'] ?? '') === 'safety') {
+            // 安全確認：「我沒事/還好」→ 解除；「需要幫忙/救命/受傷」→ 立刻求援
+            $help = (bool) preg_match('/(救命|救我|需要|受傷|受伤|快叫|119|110|幫忙|帮忙|求援)/u', $t);
+            $fine = ! $help && (bool) preg_match('/(沒事|没事|還好|还好|我很好|不用|安全|解除|好了|ok|okay)/iu', $t);
+            if (! $help && ! $fine) {
+                \Illuminate\Support\Facades\Cache::put("voice:pendingq:{$uid}", $pq, 900); // 聽不懂 → 保留待答
+
+                return null;
+            }
+            $msg = app(\App\Pai\Safety\SafetyGuard::class)->resolve($uid, $fine);
+
+            return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'safety', 'direct' => true], 'step' => '🚨 安全確認'];
+        }
         if (($pq['kind'] ?? '') === 'commute') {
             if ($no && ! $wantSend && ! $wantMap) {
                 \Illuminate\Support\Facades\Cache::forget("commute:pending:{$uid}");

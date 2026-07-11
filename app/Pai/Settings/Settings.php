@@ -85,6 +85,10 @@ class Settings
         'mail.address' => ['label' => 'Gmail 信箱', 'type' => 'string', 'group' => '行事曆/郵件'],
         'mail.app_password' => ['label' => 'Gmail 應用程式密碼（Google 帳號→安全性→應用程式密碼）', 'type' => 'secret', 'group' => '行事曆/郵件'],
         'briefing.enabled' => ['label' => '啟用每日晨間簡報', 'type' => 'bool', 'group' => '行事曆/郵件'],
+        // 安全守護（手機傳感器哨兵：撞擊/跌倒偵測 → 確認 → 沒回應自動求援）
+        'safety.enabled' => ['label' => '啟用安全守護（撞擊/跌倒自動確認求援）', 'type' => 'bool', 'group' => '安全守護'],
+        'safety.no_response_sec' => ['label' => '沒回應幾秒後自動求援（預設 60）', 'type' => 'string', 'group' => '安全守護'],
+        'safety.emergency_instruction' => ['label' => '求援動作（自然語言，交給 AI 執行，例：用LINE傳訊息給媽媽）', 'type' => 'string', 'group' => '安全守護'],
         'briefing.time' => ['label' => '晨間簡報時間 (HH:MM)', 'type' => 'string', 'group' => '行事曆/郵件'],
         'briefing.place' => ['label' => '簡報天氣地點（預設台北）', 'type' => 'string', 'group' => '行事曆/郵件'],
         'reminder.lead_min' => ['label' => '行事曆事件提前提醒分鐘數', 'type' => 'int', 'group' => '行事曆/郵件', 'min' => 1, 'max' => 120],
