@@ -38,6 +38,22 @@ Schedule::call(function () {
     }
 })->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
 
+// 視覺守望看門狗：Job 鏈斷了（佇列重啟/工作遺失）→ 換發權杖重新拉起；逾期還掛著的補收尾
+Schedule::call(function () {
+    foreach (\App\Pai\Watch\WatchTask::where('status', 'active')->get() as $w) {
+        if ($w->isExpired()) {
+            \App\Pai\Watch\WatchTickJob::dispatch($w->id, $w->tick_token ?? $w->issueTickToken()); // tick 一進門就會走 expired 收尾
+
+            continue;
+        }
+        $lastBeat = $w->last_run_at ?? $w->created_at;
+        $staleAfter = max((int) $w->interval_sec * 3, 180);
+        if ($lastBeat !== null && $lastBeat->diffInSeconds(now()) > $staleAfter) {
+            \App\Pai\Watch\WatchTickJob::dispatch($w->id, $w->issueTickToken()); // 換發權杖：舊鏈自動失效，只留這條新鏈
+        }
+    }
+})->everyMinute()->name('pai:watch-watchdog')->withoutOverlapping();
+
 // 晨間主動簡報：每天 briefing.time（預設 08:00）推天氣+行程+未讀信
 Schedule::call(function () {
     $settings = app(\App\Pai\Settings\Settings::class);
