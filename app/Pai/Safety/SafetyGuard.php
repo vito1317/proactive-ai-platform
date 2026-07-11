@@ -42,6 +42,32 @@ class SafetyGuard
 
             return 'recorded';
         }
+        // 心率異常（手錶→Health Connect→手機哨兵）：軟性提醒，不走求援倒數
+        if (str_starts_with($type, 'heart_rate_')) {
+            if (! (bool) $this->settings->get('safety.enabled', true, $uid)) {
+                return 'disabled';
+            }
+            if (! Cache::add("safety:heart:{$uid}:{$type}", 1, 3600)) {
+                return 'throttled'; // 每小時同類最多提醒一次（手機端也有遲滯）
+            }
+            $bpm = (int) round((float) ($p['magnitude'] ?? 0));
+            $msg = $type === 'heart_rate_low'
+                ? "❤️ 健康守護：心率偏低（{$bpm} bpm）。若有頭暈/不適請坐下休息，需要幫忙跟我說。"
+                : "❤️ 健康守護：你近 15 分鐘平均心率 {$bpm} bpm 且沒有在活動。壓力大或不舒服嗎？記得喝水休息；需要我通知誰跟我說。";
+            try {
+                $this->notifier->send($msg);
+            } catch (Throwable) {
+            }
+            if (empty($p['spoken']) && ($node = ReverseBus::ownerPhoneNode($uid)) !== null) {
+                try {
+                    ReverseBus::fire($node, 'phone_speak', ['text' => $msg]);
+                } catch (Throwable) {
+                }
+            }
+            Log::info('SafetyGuard 心率事件', ['uid' => $uid, 'type' => $type, 'bpm' => $bpm]);
+
+            return 'notified';
+        }
         if (! in_array($type, ['impact', 'fall'], true)) {
             return 'ignored';
         }
