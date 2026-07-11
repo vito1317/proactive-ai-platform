@@ -58,6 +58,17 @@ class CancelWatchSkill implements Skill
         }
 
         WatchTask::whereIn('id', $watches->pluck('id'))->update(['status' => 'cancelled']);
+        foreach ($watches as $w) { // AI 自己開的鏡頭順手關掉
+            if (\Illuminate\Support\Facades\Cache::pull("watch:autocam:{$w->id}")) {
+                $node = $w->node ?? WatchTask::phoneNode($uid);
+                if ($node !== null) {
+                    try {
+                        \App\Pai\Mcp\ReverseBus::fire($node, 'camera_vision', ['on' => false]);
+                    } catch (\Throwable) {
+                    }
+                }
+            }
+        }
 
         return "🗑️ 已取消 {$watches->count()} 個守望：\n{$lines}";
     }

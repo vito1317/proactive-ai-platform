@@ -160,11 +160,20 @@ class WatchTickJob implements ShouldQueue
         self::dispatch($w->id, $this->token)->delay(now()->addSeconds(max($min, (int) $w->interval_sec)));
     }
 
-    /** 收尾：更新狀態、推通知；命中時再讓手機直接念出來。 */
+    /** 收尾：更新狀態、推通知；命中時再讓手機直接念出來；AI 自己開的鏡頭順手關掉。 */
     private function finish(WatchTask $w, string $status, Notifier $notifier, string $message, bool $speak = false): void
     {
         $w->status = $status;
         $w->save();
+        if (\Illuminate\Support\Facades\Cache::pull("watch:autocam:{$w->id}")) {
+            $node = $w->node ?? WatchTask::phoneNode($w->user_id);
+            if ($node !== null) {
+                try {
+                    ReverseBus::fire($node, 'camera_vision', ['on' => false]);
+                } catch (Throwable) {
+                }
+            }
+        }
         try {
             $notifier->send($message);
         } catch (Throwable) {

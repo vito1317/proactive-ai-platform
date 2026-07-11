@@ -565,7 +565,45 @@ class VoiceAgentController extends Controller
      *
      * @return array{reply:string,speech:string,meta:array,step:string}
      */
-    private function startVisionWatch(Conversation $conv, string $t, ?string $sid, bool $live): array
+    /**
+     * 「幫我盯著鏡頭/前面/門口」但投影還沒開 → AI 自己開手機鏡頭（camera_vision 工具），
+     * 等畫面推上來再建立 live 守望；守望結束時會自動把鏡頭關掉（autocam 標記）。
+     */
+    private function startCameraWatch(Conversation $conv, string $t, string $sid): array
+    {
+        if (preg_match('/(撞|障礙|障碍)/u', $t)) {
+            return $this->startVisionWatch($conv, $t, $sid, false); // 秒級危險 → 裡面的前向警戒分支接手
+        }
+        $uid = (int) $conv->user_id;
+        $node = \App\Pai\Watch\WatchTask::phoneNode($uid);
+        $fail = function (string $why) use ($conv): array {
+            $reply = "我想自己打開鏡頭來盯，但失敗了：{$why}。也可以在 App 語音頁手動按「鏡頭投影」再跟我說一次。";
+            $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'watch']);
+
+            return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+                'meta' => ['category' => 'skill', 'skill' => 'watch-screen', 'direct' => true], 'step' => '👀 啟動守望'];
+        };
+        if ($node === null) {
+            return $fail('找不到在線的手機');
+        }
+        $r = \App\Pai\Mcp\ReverseBus::call($node, 'camera_vision', ['on' => true], 25);
+        if (empty($r['ok']) || str_contains((string) ($r['text'] ?? ''), '沒有相機權限')) {
+            return $fail((string) ($r['error'] ?? $r['text'] ?? '手機沒回應（App 可能是舊版）'));
+        }
+        // 以手機實際回報的 session 為準（保險）
+        if (preg_match('/session:([A-Za-z0-9_-]+)/', (string) ($r['text'] ?? ''), $sm)) {
+            $sid = $sm[1];
+        }
+        // 等第一張畫面推上來（每 2 秒推一張 → 最多等 8 秒；沒等到也先建守望，tick 有 3 次失敗緩衝）
+        $deadline = microtime(true) + 8;
+        while (microtime(true) < $deadline && (string) \Illuminate\Support\Facades\Cache::get('vision:pending:'.$sid, '') === '') {
+            usleep(500_000);
+        }
+
+        return $this->startVisionWatch($conv, $t, $sid, true, autoCam: true);
+    }
+
+    private function startVisionWatch(Conversation $conv, string $t, ?string $sid, bool $live, bool $autoCam = false): array
     {
         $uid = (int) $conv->user_id;
         $goal = str_replace(['頂著', '顶着'], '盯著', trim($t)); // STT 同音字還原，留完整句當守望目標
@@ -595,8 +633,11 @@ class VoiceAgentController extends Controller
                 'expires_at' => now()->addMinutes(30),
             ]);
             \App\Pai\Watch\WatchTickJob::dispatch($w->id, $w->issueTickToken());
-            $reply = "👀 好，我真的開始盯了（#{$w->id}）：{$goal}。每 {$interval} 秒看一次"
-                .($live ? '你投影上來的即時畫面' : '手機畫面')
+            if ($autoCam) {
+                \Illuminate\Support\Facades\Cache::put("watch:autocam:{$w->id}", 1, 7200); // 守望收尾時自動關鏡頭
+            }
+            $reply = '👀 好，'.($autoCam ? '我把手機鏡頭打開了，' : '')."我真的開始盯了（#{$w->id}）：{$goal}。每 {$interval} 秒看一次"
+                .($live ? ($autoCam ? '鏡頭畫面（請把手機鏡頭朝向要盯的方向）' : '你投影上來的即時畫面') : '手機畫面')
                 .'，最多 30 分鐘，看到就通知你＋念出來；說「取消守望」可停止。';
             if (preg_match('/(撞|危險|危险|跌倒|摔|安全|小偷|火|瓦斯)/u', $goal)) {
                 $reply .= "\n⚠️ 老實說：我每一輪要好幾秒才判讀一次，秒級的碰撞/危險警示我來不及，"
@@ -711,6 +752,26 @@ class VoiceAgentController extends Controller
             }
         }
 
+        // ── 鏡頭投影開關（直達）：「打開/關閉鏡頭投影」「開鏡頭給你看」→ AI 自己開手機鏡頭 ──
+        if ($conv && preg_match('/(鏡頭|镜头)/u', $t)
+            && preg_match('/(投影|給你看|给你看|讓你看|让你看|打開|打开|開啟|开启|關閉|关闭|關掉|关掉|停止|開|开|關|关)/u', $t)
+            && ! preg_match('/(前向|防撞|碰撞|盯|守望|監看|监看)/u', $t)) {
+            $camOff = (bool) preg_match('/(關閉|关闭|關掉|关掉|停止|取消|不用|收起|關了|关了)/u', $t);
+            $node = $this->turnDeviceNode ?: \App\Pai\Mcp\ReverseBus::ownerPhoneNode((int) $conv->user_id);
+            if (! $node) {
+                return ['reply' => '找不到在線的手機節點，開不了鏡頭。', 'speech' => '找不到在線的手機，開不了鏡頭。',
+                    'meta' => ['category' => 'skill', 'skill' => 'camera-vision', 'direct' => true], 'step' => '📷 鏡頭投影'];
+            }
+            $lens = preg_match('/(前鏡頭|前镜头|自拍)/u', $t) ? 'front' : 'back';
+            $r = \App\Pai\Mcp\ReverseBus::call($node, 'camera_vision', ['on' => ! $camOff, 'lens' => $lens], 25);
+            $msg = ! empty($r['ok'])
+                ? preg_replace('/（session:[^）]*）/u', '', (string) ($r['text'] ?? '好了。'))
+                : '操作失敗：'.(string) ($r['error'] ?? '手機沒回應（App 可能是舊版）');
+
+            return ['reply' => $msg, 'speech' => $msg,
+                'meta' => ['category' => 'skill', 'skill' => 'camera-vision', 'direct' => true], 'step' => '📷 鏡頭投影'];
+        }
+
         // ── 前向警戒開關（直達，不經 LLM）：「開啟/關閉前向警戒」（含 STT 同音：警界/警介）──
         if ($conv && preg_match('/(前向|防撞|碰撞)\s*(警戒|警界|警介|偵測|侦测|模式)/u', $t)) {
             // 關/停動詞可在名詞前或後（「關閉前向警戒」「把防撞偵測關掉」都要通）
@@ -738,14 +799,19 @@ class VoiceAgentController extends Controller
                     'meta' => ['category' => 'skill', 'skill' => 'vision', 'direct' => true], 'step' => '🖼 清除圖片'];
             }
             $img = \Illuminate\Support\Facades\Cache::get($pkey);
+            // 「持續盯著/發生X就叫我」→ 建立真正的視覺守望（背景週期判讀），
+            // 不能讓單次看圖回答把它吃掉、口頭答應卻沒人在盯（含 STT 同音：盯著→頂著）
+            $watchIntent = (preg_match('/(盯著|盯着|頂著|顶着|盯住|盯緊|盯紧|守望|監看|监看|持續看|持续看)/u', $t)
+                    || (preg_match('/(叫我|提醒我|通知我|告訴我|告诉我|警告我)/u', $t)
+                        && preg_match('/(如果|要是|快要?|等到|出現|出现|變|变|就)/u', $t)))
+                && ! preg_match('/(取消|停止|不用|別再|别再)/u', $t);
+            // 要盯「鏡頭/前面/門口」但投影還沒開 → AI 自己開鏡頭，等畫面進來再建守望
+            if ($watchIntent && $conv && (! is_string($img) || $img === '')
+                && preg_match('/(鏡頭|镜头|前面|外面|周圍|周围|門口|门口)/u', $t)) {
+                return $this->startCameraWatch($conv, $t, $sid);
+            }
             if (is_string($img) && $img !== '') {
                 $live = (bool) \Illuminate\Support\Facades\Cache::get('vision:live:'.$sid);
-                // 「持續盯著/發生X就叫我」→ 建立真正的視覺守望（背景週期判讀），
-                // 不能讓單次看圖回答把它吃掉、口頭答應卻沒人在盯（含 STT 同音：盯著→頂著）
-                $watchIntent = (preg_match('/(盯著|盯着|頂著|顶着|盯住|盯緊|盯紧|守望|監看|监看|持續看|持续看)/u', $t)
-                        || (preg_match('/(叫我|提醒我|通知我|告訴我|告诉我|警告我)/u', $t)
-                            && preg_match('/(如果|要是|快要?|等到|出現|出现|變|变|就)/u', $t)))
-                    && ! preg_match('/(取消|停止|不用|別再|别再)/u', $t);
                 if ($watchIntent && $conv) {
                     return $this->startVisionWatch($conv, $t, $sid, $live);
                 }
