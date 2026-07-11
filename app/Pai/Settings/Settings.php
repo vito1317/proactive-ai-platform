@@ -89,6 +89,8 @@ class Settings
         'safety.enabled' => ['label' => '啟用安全守護（撞擊/跌倒自動確認求援）', 'type' => 'bool', 'group' => '安全守護'],
         'safety.no_response_sec' => ['label' => '沒回應幾秒後自動求援（預設 60）', 'type' => 'string', 'group' => '安全守護'],
         'safety.emergency_instruction' => ['label' => '求援動作（自然語言，交給 AI 執行，例：用LINE傳訊息給媽媽）', 'type' => 'string', 'group' => '安全守護'],
+        'safety.hr_high' => ['label' => '心率偏高警戒（bpm，靜止時平均超過就提醒，預設 110）', 'type' => 'string', 'group' => '安全守護'],
+        'safety.hr_low' => ['label' => '心率偏低警戒（bpm，平均低於就提醒，預設 40）', 'type' => 'string', 'group' => '安全守護'],
         'briefing.time' => ['label' => '晨間簡報時間 (HH:MM)', 'type' => 'string', 'group' => '行事曆/郵件'],
         'briefing.place' => ['label' => '簡報天氣地點（預設台北）', 'type' => 'string', 'group' => '行事曆/郵件'],
         'reminder.lead_min' => ['label' => '行事曆事件提前提醒分鐘數', 'type' => 'int', 'group' => '行事曆/郵件', 'min' => 1, 'max' => 120],
