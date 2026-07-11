@@ -49,6 +49,17 @@ class WatchScreenSkill implements Skill
         if ($goal === '') {
             return '要告訴我盯什麼、發生什麼狀況要叫你（goal）。';
         }
+        // 「快撞到/障礙物」＝秒級物理危險 → 雲端輪詢來不及，改開手機本地「前向警戒」（毫秒級）
+        if (preg_match('/(撞|障礙|障碍)/u', $goal)) {
+            $node = WatchTask::phoneNode($uid);
+            $r = $node !== null
+                ? \App\Pai\Mcp\ReverseBus::call($node, 'collision_guard', ['on' => true], 25)
+                : ['ok' => false, 'error' => '找不到在線手機'];
+
+            return ! empty($r['ok'])
+                ? '「快撞到」這種秒級警示，雲端判讀來不及——已改開手機本地的「前向警戒」：請把鏡頭朝向前方，有東西逼近會立刻嗶聲警告。說「關閉前向警戒」可停止。'
+                : '這種秒級警示要用手機本地的「前向警戒」，但開啟失敗：'.((string) ($r['error'] ?? $r['text'] ?? '手機沒回應')).'。請確認 App 已更新到最新版。';
+        }
         if (WatchTask::where('user_id', $uid)->where('status', 'active')->count() >= 3) {
             return '同時最多盯 3 個畫面，先說「取消守望」停掉一些再來。';
         }

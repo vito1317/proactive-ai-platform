@@ -569,6 +569,19 @@ class VoiceAgentController extends Controller
     {
         $uid = (int) $conv->user_id;
         $goal = str_replace(['頂著', '顶着'], '盯著', trim($t)); // STT 同音字還原，留完整句當守望目標
+
+        // 「快撞到/障礙物」＝秒級物理危險 → 雲端 5 秒輪詢註定來不及，改開手機本地「前向警戒」（毫秒級）
+        if (preg_match('/(撞|障礙|障碍)/u', $goal)) {
+            $node = \App\Pai\Watch\WatchTask::phoneNode($uid);
+            $r = $node !== null ? \App\Pai\Mcp\ReverseBus::call($node, 'collision_guard', ['on' => true], 25) : ['ok' => false, 'error' => '找不到在線手機'];
+            $reply = ! empty($r['ok'])
+                ? '「快撞到」這種秒級警示，雲端判讀來不及——我改用手機本地的「前向警戒」幫你盯：已開啟，請把鏡頭朝向前方，有東西逼近會立刻嗶聲警告。說「關閉前向警戒」可停止。'
+                : '這種秒級警示要用手機本地的「前向警戒」才來得及，但開啟失敗：'.((string) ($r['error'] ?? $r['text'] ?? '手機沒回應')).'。請確認 App 已更新到最新版再說一次「開啟前向警戒」。';
+            $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'collision-guard']);
+
+            return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+                'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
+        }
         if (\App\Pai\Watch\WatchTask::where('user_id', $uid)->where('status', 'active')->count() >= 3) {
             $reply = '同時最多盯 3 個畫面，先說「取消守望」停掉一些再來。';
         } else {
