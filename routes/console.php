@@ -44,6 +44,10 @@ Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->scan()
 Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->flushDigests())
     ->hourly()->name('pai:inbox-digest')->withoutOverlapping();
 
+// 通知分流：每小時整點把 normal 通知榨成一則摘要
+Schedule::call(fn () => app(\App\Pai\Notify\NotificationTriage::class)->flushDigests())
+    ->hourly()->name('pai:notify-triage-digest')->withoutOverlapping();
+
 // 每週日 20:00：AI 週報（本週幫你做了什麼＋估計省下的時間）
 Schedule::call(function () {
     $now = now('Asia/Taipei');

@@ -92,6 +92,8 @@ class Settings
         'safety.emergency_instruction' => ['label' => '求援動作（自然語言，交給 AI 執行，例：用LINE傳訊息給媽媽）', 'type' => 'string', 'group' => '安全守護'],
         'safety.hr_high' => ['label' => '心率偏高警戒（bpm，靜止時平均超過就提醒，預設 110）', 'type' => 'string', 'group' => '安全守護'],
         'safety.hr_low' => ['label' => '心率偏低警戒（bpm，平均低於就提醒，預設 40）', 'type' => 'string', 'group' => '安全守護'],
+        // 通知分流（手機 App 通知 → urgent 立刻吵 / normal 每小時摘要 / noise 靜音）
+        'notify_triage.muted_apps' => ['label' => '通知分流：直接靜音的 App（逗號分隔，如 蝦皮,Instagram）', 'type' => 'string', 'group' => '通知'],
         'briefing.time' => ['label' => '晨間簡報時間 (HH:MM)', 'type' => 'string', 'group' => '行事曆/郵件'],
         'briefing.place' => ['label' => '簡報天氣地點（預設台北）', 'type' => 'string', 'group' => '行事曆/郵件'],
         'reminder.lead_min' => ['label' => '行事曆事件提前提醒分鐘數', 'type' => 'int', 'group' => '行事曆/郵件', 'min' => 1, 'max' => 120],
