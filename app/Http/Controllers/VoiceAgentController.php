@@ -844,6 +844,30 @@ class VoiceAgentController extends Controller
                 'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
         }
 
+        // ── 每日 Podcast：「播今天的 podcast/播客/晨間節目」→ 有今天的檔就直接播，沒有就現做 ──
+        if ($conv && preg_match('/(podcast|播客|晨間節目|晨间节目|今日節目|今日节目)/iu', $t)
+            && ! preg_match('/(關閉|关闭|取消|不要|停止)/u', $t)) {
+            $uid = (int) $conv->user_id;
+            $file = 'podcast/'.$uid.'-'.now('Asia/Taipei')->format('Ymd').'.mp3';
+            if (is_file(storage_path('app/public/'.$file))) {
+                $url = rtrim((string) config('app.url'), '/').'/storage/'.$file;
+                if (($node = $this->turnDeviceNode ?: \App\Pai\Mcp\ReverseBus::ownerPhoneNode($uid)) !== null) {
+                    try {
+                        \App\Pai\Mcp\ReverseBus::fire($node, 'open_url', ['url' => $url]);
+                    } catch (Throwable) {
+                    }
+                }
+
+                return ['reply' => "🎙️ 播放今天的 Podcast：{$url}", 'speech' => '好，開始播今天的晨間節目。',
+                    'meta' => ['category' => 'skill', 'skill' => 'podcast', 'direct' => true], 'step' => '🎙️ 播放 Podcast'];
+            }
+            \App\Pai\Schedule\PodcastJob::dispatch($uid);
+
+            return ['reply' => '🎙️ 今天的還沒生成，我現在做（約一兩分鐘），好了會自動播放。',
+                'speech' => '今天的節目還沒做好，我現在生成，大概一兩分鐘，好了會自動幫你播。',
+                'meta' => ['category' => 'skill', 'skill' => 'podcast', 'direct' => true], 'step' => '🎙️ 生成 Podcast'];
+        }
+
         // ── 物品記憶：「記住護照放在這」（有鏡頭畫面→看圖描述位置；口述→直接記）──────
         if ($conv && preg_match('/(記住|记住|幫我記|帮我记)/u', $t)
             && preg_match('/(放在|收在|停在|擺在|摆在|放這|放这|在這|在这|位置)/u', $t)

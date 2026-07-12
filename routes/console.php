@@ -44,6 +44,24 @@ Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->scan()
 Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->flushDigests())
     ->hourly()->name('pai:inbox-digest')->withoutOverlapping();
 
+// 每日晨間 Podcast：podcast.time（預設 07:50）生成雙主持人音檔並推播/自動播放
+Schedule::call(function () {
+    $s = app(\App\Pai\Settings\Settings::class);
+    $now = now('Asia/Taipei');
+    foreach (\App\Models\User::pluck('id') as $uid) {
+        if (! (bool) $s->get('podcast.enabled', false, (int) $uid)) {
+            continue;
+        }
+        $time = (string) ($s->get('podcast.time', null, (int) $uid) ?: '07:50');
+        if ($now->format('H:i') !== $time) {
+            continue;
+        }
+        if (\Illuminate\Support\Facades\Cache::add("pai:podcast:{$uid}:".$now->format('Y-m-d'), 1, 86400)) {
+            \App\Pai\Schedule\PodcastJob::dispatch((int) $uid);
+        }
+    }
+})->everyMinute()->name('pai:daily-podcast')->withoutOverlapping();
+
 // 通知分流：每小時整點把 normal 通知榨成一則摘要
 Schedule::call(fn () => app(\App\Pai\Notify\NotificationTriage::class)->flushDigests())
     ->hourly()->name('pai:notify-triage-digest')->withoutOverlapping();
