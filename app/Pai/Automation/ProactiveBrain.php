@@ -55,6 +55,7 @@ class ProactiveBrain
             ->map(fn ($m) => '・'.$m->content)->implode("\n") ?: '（沒有記憶）';
         $autos = Automation::where('user_id', $uid)->get()
             ->map(fn ($a) => "#{$a->id} {$a->name}".($a->enabled ? '' : '（已停用）'))->implode("\n") ?: '（還沒有自動化）';
+        $habits = HabitMiner::digest($uid) ?: '（資料還不夠）';
 
         // 時段
         $h = (int) $now->format('H');
@@ -100,6 +101,9 @@ class ProactiveBrain
 
 【使用者長期記憶】
 {$mem}
+
+【近30天真實行為統計（重複行為＝真需求，提醒/建自動化優先參考）】
+{$habits}
 
 【已建立的自動化】
 {$autos}
@@ -169,6 +173,7 @@ TXT;
         $mem = UserMemory::where('user_id', $uid)->orderByDesc('pinned')->limit(40)->get()
             ->map(fn ($m) => '・'.$m->content)->implode("\n") ?: '（沒有記憶）';
         $existing = Automation::where('user_id', $uid)->get()->map(fn ($a) => '・'.$a->name)->implode("\n") ?: '（還沒有）';
+        $habits = HabitMiner::digest($uid); // 真實行為統計（重複指令/重複排的定時任務/事件分布）
         $node = $this->ownerPhoneNode($uid);
         $cal = '';
         if ($node) {
@@ -198,7 +203,9 @@ TXT;
 - 行程出發提醒（行事曆有地點的事件→該出發時提醒、開導航、通知對方）— 已內建，不要重做。
 也不要和下面「已存在的自動化」重複。請設計「這兩項以外、真正新的」工作流（例如：固定回家提醒、每週採買、繳費/吃藥提醒、運動、特定行事曆關鍵字的準備清單…）。若想不到新的就輸出 []。
 SYS;
-        $ctx = "現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}）。\n\n【長期記憶】\n{$mem}\n\n【近期行事曆】\n".($cal ?: '（無）')."\n\n【已存在的自動化】\n{$existing}";
+        $ctx = "現在：{$now->format('Y-m-d H:i')}（星期{$now->isoWeekday()}）。\n\n【長期記憶】\n{$mem}\n\n"
+            .($habits !== '' ? "【近30天真實行為統計（優先根據這個設計！重複行為＝真需求，比想像的命中率高。例：某指令總在週五晚上出現→就設計週五晚上的自動化）】\n{$habits}\n\n" : '')
+            ."【近期行事曆】\n".($cal ?: '（無）')."\n\n【已存在的自動化】\n{$existing}";
 
         try {
             \App\Pai\Agent\Tenant::set($uid);
