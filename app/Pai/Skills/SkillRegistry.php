@@ -62,6 +62,7 @@ class SkillRegistry
         \App\Pai\Skills\Builtin\ExpenseReportSkill::class,
         \App\Pai\Skills\Builtin\CreateSceneSkill::class,
         \App\Pai\Skills\Builtin\ListScenesSkill::class,
+        \App\Pai\Skills\Builtin\WatchWebSkill::class,
         GenerateImageSkill::class,
         FirecrawlScrapeSkill::class,
         FalGenerateSkill::class,

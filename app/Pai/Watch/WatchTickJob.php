@@ -47,6 +47,13 @@ class WatchTickJob implements ShouldQueue
             return;
         }
 
+        // ── 網頁來源（web:{url}）：抓頁面文字給 LLM 判斷（價格/有貨/開賣盯梢）──────
+        if (str_starts_with((string) $w->source, 'web:')) {
+            $this->tickWeb($w, $llm, $notifier);
+
+            return;
+        }
+
         $img = '';
         if (str_starts_with((string) $w->source, 'live:')) {
             // 即時投影/鏡頭來源：直接吃手機/網頁持續推送的當前畫面（不用叫手機截圖）
@@ -117,6 +124,67 @@ class WatchTickJob implements ShouldQueue
         $this->reschedule($w);
     }
 
+    /** 網頁盯梢的一輪：抓頁面 → 文字 LLM 判斷（帶上一輪狀態供比較「降價/變化」）。 */
+    private function tickWeb(WatchTask $w, LlmClient $llm, Notifier $notifier): void
+    {
+        $url = substr((string) $w->source, 4);
+        $text = $this->fetchPageText($url);
+        if ($text === '') {
+            $this->softFail($w, $notifier, "抓不到網頁內容（{$url}）");
+
+            return;
+        }
+        $hash = md5($text);
+        if ($hash === $w->last_hash) { // 頁面完全沒變 → 不必問 LLM
+            $this->markRun($w, null, $hash);
+            $this->reschedule($w);
+
+            return;
+        }
+        try {
+            $v = $llm->chatJson([
+                ['role' => 'system', 'content' => '你是「網頁守望員」：使用者要你盯著一個網頁，直到指定狀況發生（降價到門檻、有貨、開賣、出現某資訊）。'
+                    .'根據這輪抓到的頁面文字判斷，輸出 JSON：'
+                    .'{"hit":true|false,"desc":"一句話記下目前關鍵狀態（如：價格 NT$590、缺貨中）","report":"hit 時一句話說明發生了什麼（含關鍵數字）"}。'
+                    .'判斷要嚴格：條件「明確」成立才 hit=true；頁面載入不完整、看不到關鍵資訊一律 hit=false。台灣正體中文。只輸出 JSON。'],
+                ['role' => 'user', 'content' => "守望目標：{$w->goal}\n上一輪狀態：".($w->last_desc ?: '（第一輪）')."\n\n頁面文字：\n{$text}"],
+            ], ['max_tokens' => 300]);
+        } catch (Throwable $e) {
+            Log::warning('網頁守望判讀失敗', ['watch' => $w->id, 'error' => $e->getMessage()]);
+            $this->softFail($w, $notifier, '頁面判讀一直失敗');
+
+            return;
+        }
+        $w->fail_count = 0;
+        if (! empty($v['hit'])) {
+            $report = trim((string) ($v['report'] ?? '')) ?: '你等的狀況出現了';
+            $w->result = $report;
+            $this->finish($w, 'hit', $notifier, "🎯 盯到了「{$w->goal}」：{$report}\n{$url}", speak: true);
+
+            return;
+        }
+        $this->markRun($w, trim((string) ($v['desc'] ?? '')) ?: null, $hash);
+        $this->reschedule($w);
+    }
+
+    /** 抓網頁可讀文字（去 script/style/tag、壓空白、截 6000 字）。 */
+    private function fetchPageText(string $url): string
+    {
+        try {
+            $html = \Illuminate\Support\Facades\Http::withHeaders([
+                'User-Agent' => 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36',
+                'Accept-Language' => 'zh-TW,zh;q=0.9',
+            ])->timeout(25)->get($url)->body();
+        } catch (Throwable) {
+            return '';
+        }
+        $html = (string) preg_replace('/<(script|style|noscript)\b[^>]*>.*?<\/\1>/is', ' ', $html);
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = trim((string) preg_replace('/[ \t]{2,}|\r/', ' ', (string) preg_replace('/\n{2,}/', "\n", $text)));
+
+        return mb_substr($text, 0, 6000);
+    }
+
     /** 從節點回傳文字抽出截圖 data URI（[[IMG]]data:image/... 或整段就是 data URI）。 */
     private function extractImage(string $text): string
     {
@@ -155,8 +223,12 @@ class WatchTickJob implements ShouldQueue
 
     private function reschedule(WatchTask $w): void
     {
-        // 即時來源畫面是推上來的（不必叫手機截圖），允許更密的節奏
-        $min = str_starts_with((string) $w->source, 'live:') ? 5 : 10;
+        // 即時來源畫面是推上來的（不必叫手機截圖），允許更密的節奏；網頁盯梢最密 5 分鐘（別轟炸網站）
+        $min = match (true) {
+            str_starts_with((string) $w->source, 'live:') => 5,
+            str_starts_with((string) $w->source, 'web:') => 300,
+            default => 10,
+        };
         self::dispatch($w->id, $this->token)->delay(now()->addSeconds(max($min, (int) $w->interval_sec)));
     }
 
