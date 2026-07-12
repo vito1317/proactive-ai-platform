@@ -650,6 +650,52 @@ class VoiceAgentController extends Controller
             'meta' => ['category' => 'skill', 'skill' => 'watch-screen', 'direct' => true], 'step' => '👀 啟動守望'];
     }
 
+    /**
+     * 物品記憶：「記住護照放在這」→ 有鏡頭/照片就看圖精確描述位置，沒有就記口述位置，
+     * 存進長期記憶（item-location）。之後問「護照放哪」由記憶注入直接答。
+     *
+     * @return array{reply:string,speech:string,meta:array,step:string}
+     */
+    private function rememberItemLocation(Conversation $conv, string $t, ?string $img): array
+    {
+        $uid = (int) $conv->user_id;
+        // 抽物品名：「記住(護照)放在…」
+        $item = '';
+        if (preg_match('/(?:記住|记住|幫我記|帮我记)[，,、 ]?(.{1,14}?)(?:放在|收在|停在|擺在|摆在|放這|放这|在這|在这|的位置)/u', $t, $m)) {
+            $item = trim(str_replace(['我的', '我把', '我'], '', $m[1]));
+        }
+        $desc = '';
+        if ($img !== null) {
+            // 看圖描述精確位置
+            try {
+                $desc = trim($this->llm->chat([
+                    ['role' => 'system', 'content' => '你是視覺助理。使用者要記住物品的存放位置，請看照片用「一句話」精確描述這個位置（哪個空間/家具/抽屜/層架，旁邊有什麼參照物）。台灣正體中文，只輸出那一句話。'],
+                    ['role' => 'user', 'content' => [
+                        ['type' => 'text', 'text' => '物品：'.($item ?: '（未說品名）').'。描述照片中的存放位置。'],
+                        ['type' => 'image_url', 'image_url' => ['url' => $img]],
+                    ]],
+                ], ['max_tokens' => 200]));
+            } catch (Throwable) {
+            }
+        }
+        if ($desc === '' && preg_match('/(?:放在|收在|停在|擺在|摆在)([^，。,\.!？?]{1,30})/u', $t, $lm)) {
+            $desc = trim($lm[1]); // 口述位置
+        }
+        if ($desc === '') {
+            $reply = '要記在哪裡？把鏡頭對準位置再說一次，或直接說「記住護照放在書桌抽屜」。';
+        } else {
+            $when = now('Asia/Taipei')->format('Y-m-d H:i');
+            app(\App\Pai\Memory\UserMemoryStore::class)->remember(
+                $uid, '物品位置：'.($item ?: '未說品名的物品').' 放在 '.$desc.'（'.$when.' 記錄）', 'item-location'
+            );
+            $reply = '🧠 記住了：'.($item ?: '這個東西')." 放在 {$desc}。之後問我「".($item ?: '它').'放哪」就答得出來。';
+        }
+        $conv->addMessage('assistant', $reply, ['source' => 'voice', 'skill' => 'memory']);
+
+        return ['reply' => $reply, 'speech' => $this->speechClean($reply),
+            'meta' => ['category' => 'skill', 'skill' => 'memory', 'direct' => true], 'step' => '🧠 記物品位置'];
+    }
+
     /** 帶圖回答（Gemma 4 看圖）：附近期對話脈絡 + 這張圖。 */
     private function visionReply(Conversation $conv, string $question, string $image, bool $live = false): string
     {
@@ -786,6 +832,17 @@ class VoiceAgentController extends Controller
 
             return ['reply' => $msg, 'speech' => $msg,
                 'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
+        }
+
+        // ── 物品記憶：「記住護照放在這」（有鏡頭畫面→看圖描述位置；口述→直接記）──────
+        if ($conv && preg_match('/(記住|记住|幫我記|帮我记)/u', $t)
+            && preg_match('/(放在|收在|停在|擺在|摆在|放這|放这|在這|在这|位置)/u', $t)
+            && ! preg_match('/(忘記|忘记|取消)/u', $t)) {
+            $itemImg = $conv->voice_sid
+                ? (string) \Illuminate\Support\Facades\Cache::get('vision:pending:'.$conv->voice_sid, '')
+                : '';
+
+            return $this->rememberItemLocation($conv, $t, $itemImg !== '' ? $itemImg : null);
         }
 
         // ── 圖片對話：語音對話已掛了照片 → 這一輪帶圖回答（可多輪追問同一張）────────
