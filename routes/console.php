@@ -38,6 +38,30 @@ Schedule::call(function () {
     }
 })->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
 
+// 每月 1 號 09:00：上個月消費摘要（有記帳的帳號才推）
+Schedule::call(function () {
+    $now = now('Asia/Taipei');
+    if ($now->day !== 1 || $now->format('H:i') !== '09:00') {
+        return;
+    }
+    if (! \Illuminate\Support\Facades\Cache::add('pai:expense-monthly:'.$now->format('Y-m'), 1, 86400)) {
+        return;
+    }
+    $from = $now->copy()->subMonth()->startOfMonth()->utc();
+    $to = $now->copy()->subMonth()->endOfMonth()->utc();
+    $uids = \Illuminate\Support\Facades\DB::table('expenses')->whereBetween('spent_at', [$from, $to])
+        ->distinct()->pluck('user_id');
+    foreach ($uids as $uid) {
+        try {
+            \App\Pai\Agent\Tenant::set((int) $uid);
+            app(\App\Pai\Notify\Notifier::class)->send(
+                "📊 上個月的消費整理好了：\n".\App\Pai\Skills\Builtin\ExpenseReportSkill::summarize((int) $uid, $from, $to, '上個月')
+            );
+        } catch (\Throwable) {
+        }
+    }
+})->everyMinute()->name('pai:expense-monthly')->withoutOverlapping();
+
 // 視覺守望看門狗：Job 鏈斷了（佇列重啟/工作遺失）→ 換發權杖重新拉起；逾期還掛著的補收尾
 Schedule::call(function () {
     foreach (\App\Pai\Watch\WatchTask::where('status', 'active')->get() as $w) {

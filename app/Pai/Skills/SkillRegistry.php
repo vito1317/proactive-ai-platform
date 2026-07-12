@@ -58,6 +58,8 @@ class SkillRegistry
         \App\Pai\Skills\Builtin\WatchScreenSkill::class,
         \App\Pai\Skills\Builtin\CancelWatchSkill::class,
         \App\Pai\Skills\Builtin\PlaceCallSkill::class,
+        \App\Pai\Skills\Builtin\LogExpenseSkill::class,
+        \App\Pai\Skills\Builtin\ExpenseReportSkill::class,
         GenerateImageSkill::class,
         FirecrawlScrapeSkill::class,
         FalGenerateSkill::class,
