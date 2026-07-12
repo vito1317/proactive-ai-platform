@@ -187,6 +187,55 @@ class AutomationsController extends Controller
         return response()->json(['items' => array_values($items)]);
     }
 
+    /** 匯出一條自動化（分享用 JSON：只含 name/spec，不含個人執行紀錄）。 */
+    public function export(Request $request, int $id): JsonResponse
+    {
+        $uid = $this->uid($request);
+        $auto = Automation::where('user_id', $uid)->find($id);
+        if ($auto === null) {
+            return response()->json(['error' => '找不到'], 404);
+        }
+
+        return response()->json([
+            'pai_automation' => 1, // 格式版本
+            'name' => $auto->name,
+            'spec' => $auto->spec,
+            'exported_at' => now()->toIso8601String(),
+        ], 200, ['Content-Disposition' => 'attachment; filename="automation-'.$id.'.json"'], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    }
+
+    /** 匯入分享來的自動化 JSON（只收 trigger/conditions/actions，預設停用讓使用者先檢視）。 */
+    public function import(Request $request): JsonResponse
+    {
+        $uid = $this->uid($request);
+        if ($uid === null) {
+            return response()->json(['error' => '未授權'], 403);
+        }
+        $raw = (string) $request->input('json', '');
+        $data = json_decode($raw, true);
+        if (! is_array($data) || empty($data['pai_automation']) || ! is_array($data['spec'] ?? null)) {
+            return response()->json(['error' => '不是有效的自動化分享檔（缺 pai_automation/spec）'], 422);
+        }
+        $spec = $data['spec'];
+        if (empty($spec['trigger']) || empty($spec['actions'])) {
+            return response()->json(['error' => 'spec 不完整（要有 trigger 與 actions）'], 422);
+        }
+        // 白名單過濾：只收已知欄位，防夾帶
+        $spec = [
+            'trigger' => (array) $spec['trigger'],
+            'conditions' => array_values((array) ($spec['conditions'] ?? [])),
+            'actions' => array_values((array) $spec['actions']),
+        ];
+        $auto = Automation::create([
+            'user_id' => $uid,
+            'name' => mb_substr(trim((string) ($data['name'] ?? '匯入的自動化')), 0, 60),
+            'enabled' => false, // 預設停用：先看過內容再自己開
+            'spec' => $spec, 'state' => [], 'source' => 'import',
+        ]);
+
+        return response()->json(['ok' => true, 'id' => $auto->id, 'name' => $auto->name]);
+    }
+
     private function uid(Request $request): ?int
     {
         if ($request->user()) {

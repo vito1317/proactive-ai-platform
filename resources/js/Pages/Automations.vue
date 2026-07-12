@@ -51,6 +51,30 @@ function clearLimit(a) {
     editing.value = null;
 }
 
+// 匯出/匯入（市集基礎）：匯出下載 JSON 分享檔；匯入貼上 JSON 一鍵安裝（預設停用）
+function exportAuto(a) {
+    window.open(`/api/automations/${a.id}/export`, '_blank');
+}
+const importText = ref('');
+const importMsg = ref('');
+async function importAuto() {
+    importMsg.value = '';
+    try {
+        const r = await fetch('/api/automations/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ json: importText.value }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+            importText.value = '';
+            importMsg.value = `✅ 已匯入「${d.name}」（預設停用，檢視後再啟用）`;
+            router.reload({ preserveScroll: true });
+        } else importMsg.value = `❌ ${d.error || '匯入失敗'}`;
+    } catch { importMsg.value = '❌ 匯入失敗'; }
+}
+
 // 明天預演：未來 24h 的觸發時間軸（自動化＋定時任務＋簡報＋守望）
 const preview = ref(null);
 onMounted(async () => {
@@ -130,6 +154,7 @@ onMounted(async () => {
                                 <div v-else class="mt-0.5 text-xs text-slate-600">♾ 長期執行（未設自動停止）</div>
                             </div>
                             <div class="flex shrink-0 gap-2">
+                                <button @click="exportAuto(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10" title="下載分享檔">匯出</button>
                                 <button @click="openLimit(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10">截止</button>
                                 <button @click="toggle(a)" class="rounded-lg border border-white/10 px-2.5 py-1 text-xs hover:bg-white/10">
                                     {{ a.enabled ? '停用' : '啟用' }}
@@ -158,6 +183,21 @@ onMounted(async () => {
                         </div>
                     </li>
                 </ul>
+            </section>
+
+            <!-- 匯入分享的自動化（市集基礎：匯出檔可分享給別人一鍵安裝） -->
+            <section class="glass rounded-2xl border border-white/10 bg-white/5 p-5">
+                <h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">📦 匯入分享的自動化</h2>
+                <p class="mb-2 text-xs text-slate-500">
+                    把別人「匯出」的 JSON 貼進來即可安裝；匯入後預設停用，檢視內容沒問題再啟用。
+                </p>
+                <textarea v-model="importText" rows="3" placeholder='{"pai_automation":1,"name":"…","spec":{…}}'
+                    class="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-slate-100"></textarea>
+                <div class="mt-2 flex items-center gap-3">
+                    <button @click="importAuto" :disabled="!importText.trim()"
+                        class="rounded-lg bg-cyan-500/25 px-3 py-1 text-xs text-cyan-200 hover:bg-cyan-500/35 disabled:opacity-40">匯入</button>
+                    <span class="text-xs" :class="importMsg.startsWith('✅') ? 'text-emerald-300' : 'text-rose-300'">{{ importMsg }}</span>
+                </div>
             </section>
 
             <!-- AI 主動思考記錄 -->

@@ -153,6 +153,8 @@ Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::cla
 Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');
 Route::post('/api/automations/builtin', [\App\Http\Controllers\AutomationsController::class, 'builtin'])->name('automations.builtin');
 Route::get('/api/automations/preview', [\App\Http\Controllers\AutomationsController::class, 'preview'])->name('automations.preview'); // 明天預演時間軸
+Route::get('/api/automations/{id}/export', [\App\Http\Controllers\AutomationsController::class, 'export'])->name('automations.export'); // 匯出分享 JSON
+Route::post('/api/automations/import', [\App\Http\Controllers\AutomationsController::class, 'import'])->name('automations.import'); // 匯入分享 JSON
 
 Route::post("/api/gateway/pair", [GatewayController::class, "pair"])->name("gateway.pair");          // 兌換配對碼→長期 per-device 憑證
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
