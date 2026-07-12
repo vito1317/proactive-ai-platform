@@ -140,6 +140,7 @@ Route::post('/api/sensor/decide', [\App\Http\Controllers\SensorEventController::
 Route::get('/api/sensor/config', [\App\Http\Controllers\SensorEventController::class, 'config'])->name('sensor.config'); // 哨兵設定同步（心率門檻等）
 Route::post('/api/mail/decide', [\App\Http\Controllers\MailAssistController::class, 'decide'])->name('mail.decide'); // 收件匣助理「寄出草稿/不用」按鈕
 Route::post('/api/notify-triage', [\App\Http\Controllers\NotifyTriageController::class, 'handle'])->name('notify.triage'); // 通知分流（手機轉送 App 通知）
+Route::post('/api/meeting/chunk', [\App\Http\Controllers\MeetingController::class, 'chunk'])->name('meeting.chunk'); // 會議模式錄音分段上傳
 Route::post('/api/automation/decide', [\App\Http\Controllers\AutomationController::class, 'decide'])->name('automation.decide');
 Route::post('/api/automation/wake', [\App\Http\Controllers\AutomationController::class, 'wake'])->name('automation.wake');
 // 取消操作：中止進行中的 agent（浮框「取消操作」鈕）

@@ -844,6 +844,56 @@ class VoiceAgentController extends Controller
                 'meta' => ['category' => 'skill', 'skill' => 'collision-guard', 'direct' => true], 'step' => '👁 前向警戒'];
         }
 
+        // ── 會議模式：「開始記會議」→ 手機持續錄音轉寫；「結束會議」→ 摘要+待辦 ──────
+        if ($conv && preg_match('/(開始|开始|幫我|帮我)(記|记|錄|录)?.{0,2}(會議|会议)|(會議|会议)(記錄|纪录|记录)?(開始|开始)/u', $t)
+            && ! preg_match('/(結束|结束|停止|取消)/u', $t)) {
+            $uid = (int) $conv->user_id;
+            if (\App\Pai\Meeting\Meeting::activeFor($uid) !== null) {
+                return ['reply' => '已經在記錄會議了，說「結束會議」就會整理摘要。', 'speech' => '已經在記錄會議了。',
+                    'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+            }
+            $node = $this->turnDeviceNode ?: \App\Pai\Mcp\ReverseBus::ownerPhoneNode($uid);
+            if (! $node) {
+                return ['reply' => '找不到在線的手機，開不了會議錄音。', 'speech' => '找不到在線的手機，開不了會議錄音。',
+                    'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+            }
+            $m = \App\Pai\Meeting\Meeting::create(['user_id' => $uid, 'status' => 'recording', 'started_at' => now()]);
+            $r = \App\Pai\Mcp\ReverseBus::call($node, 'meeting_record', ['on' => true], 25);
+            if (empty($r['ok']) || str_contains((string) ($r['text'] ?? ''), '沒有') || str_contains((string) ($r['text'] ?? ''), '使用中')) {
+                $m->delete();
+                $why = (string) ($r['text'] ?? $r['error'] ?? '手機沒回應（App 可能是舊版）');
+
+                return ['reply' => "會議錄音開啟失敗：{$why}", 'speech' => "會議錄音開啟失敗：{$why}",
+                    'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+            }
+
+            return ['reply' => "🎙️ 會議記錄開始（#{$m->id}）：手機持續錄音、每 20 秒轉寫一段。結束時說「結束會議」，我會整理摘要＋決議＋待辦（有期限的直接排提醒）。",
+                'speech' => '會議記錄開始了，結束時跟我說結束會議。',
+                'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+        }
+        if ($conv && preg_match('/(結束|结束|停止)(記|记|錄|录)?.{0,2}(會議|会议)|(會議|会议)(結束|结束)/u', $t)) {
+            $uid = (int) $conv->user_id;
+            $m = \App\Pai\Meeting\Meeting::activeFor($uid);
+            if ($m === null) {
+                return ['reply' => '目前沒有進行中的會議記錄。', 'speech' => '目前沒有在記錄會議。',
+                    'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+            }
+            if (($node = $this->turnDeviceNode ?: \App\Pai\Mcp\ReverseBus::ownerPhoneNode($uid)) !== null) {
+                try {
+                    \App\Pai\Mcp\ReverseBus::call($node, 'meeting_record', ['on' => false], 20);
+                } catch (Throwable) {
+                }
+            }
+            $m->status = 'summarizing';
+            $m->ended_at = now();
+            $m->save();
+            \App\Pai\Meeting\MeetingSummaryJob::dispatch($m->id)->delay(now()->addSeconds(30)); // 等最後一段轉寫進來
+
+            return ['reply' => '🛑 會議記錄結束，整理摘要中（約一分鐘），好了會推給你＋手機彈出完整記錄。',
+                'speech' => '會議結束，我整理一下摘要和待辦，好了通知你。',
+                'meta' => ['category' => 'skill', 'skill' => 'meeting', 'direct' => true], 'step' => '🎙️ 會議記錄'];
+        }
+
         // ── 每日 Podcast：「播今天的 podcast/播客/晨間節目」→ 有今天的檔就直接播，沒有就現做 ──
         if ($conv && preg_match('/(podcast|播客|晨間節目|晨间节目|今日節目|今日节目)/iu', $t)
             && ! preg_match('/(關閉|关闭|取消|不要|停止)/u', $t)) {

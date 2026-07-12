@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/sensor/*',  // 傳感器哨兵回報＋我沒事/需要幫忙按鈕（device token 驗證）
             'api/mail/*',    // 收件匣助理按鈕（device token 驗證）
             'api/notify-triage', // 通知分流（手機轉送，device token 驗證）
+            'api/meeting/*', // 會議模式錄音上傳（device token 驗證）
         ]);
 
         $middleware->web(append: [
