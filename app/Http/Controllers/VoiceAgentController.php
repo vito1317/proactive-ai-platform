@@ -747,6 +747,16 @@ class VoiceAgentController extends Controller
                 'meta' => ['category' => 'skill', 'skill' => 'control', 'direct' => true, 'action' => 'stop'], 'step' => '🛑 停止處理'];
         }
 
+        // ── 情境模式：「睡覺模式/進入睡覺模式」→ 執行 Scene（真的有這個模式才攔，管理語句放行）──
+        if ($conv && str_contains($t, '模式')
+            && ! preg_match('/(建立|新增|幫我建|帮我建|刪除|删除|刪掉|删掉|列出|哪些|人格|persona|profile)/iu', $t)
+            && ($scene = \App\Pai\Automation\Scene::match((int) $conv->user_id, $t)) !== null) {
+            $msg = $scene->run($this->turnDeviceNode);
+
+            return ['reply' => '🎬 '.$msg, 'speech' => $msg,
+                'meta' => ['category' => 'skill', 'skill' => 'scene', 'direct' => true], 'step' => "🎬 {$scene->name}模式"];
+        }
+
         // ── 切換人格 / 模式（Agent Profile）────────────────────────────────────
         if ($conv && preg_match('/(切換|切换|換成|换成|改用|切到|使用)\s*(.{1,20}?)\s*(人格|模式|persona|profile|角色)/iu', $t, $pm)) {
             $name = trim($pm[2]);

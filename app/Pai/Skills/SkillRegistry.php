@@ -60,6 +60,8 @@ class SkillRegistry
         \App\Pai\Skills\Builtin\PlaceCallSkill::class,
         \App\Pai\Skills\Builtin\LogExpenseSkill::class,
         \App\Pai\Skills\Builtin\ExpenseReportSkill::class,
+        \App\Pai\Skills\Builtin\CreateSceneSkill::class,
+        \App\Pai\Skills\Builtin\ListScenesSkill::class,
         GenerateImageSkill::class,
         FirecrawlScrapeSkill::class,
         FalGenerateSkill::class,
