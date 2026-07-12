@@ -38,6 +38,24 @@ Schedule::call(function () {
     }
 })->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
 
+// 每週日 20:00：AI 週報（本週幫你做了什麼＋估計省下的時間）
+Schedule::call(function () {
+    $now = now('Asia/Taipei');
+    if ($now->isoWeekday() !== 7 || $now->format('H:i') !== '20:00') {
+        return;
+    }
+    if (! \Illuminate\Support\Facades\Cache::add('pai:weekly-report:'.$now->format('Y-W'), 1, 86400)) {
+        return;
+    }
+    foreach (\App\Models\User::pluck('id') as $uid) {
+        try {
+            \App\Pai\Agent\Tenant::set((int) $uid);
+            app(\App\Pai\Notify\Notifier::class)->send(\App\Pai\Schedule\WeeklyReport::build((int) $uid));
+        } catch (\Throwable) {
+        }
+    }
+})->everyMinute()->name('pai:weekly-report')->withoutOverlapping();
+
 // 每月 1 號 09:00：上個月消費摘要（有記帳的帳號才推）
 Schedule::call(function () {
     $now = now('Asia/Taipei');
