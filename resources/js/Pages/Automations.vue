@@ -1,6 +1,6 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 
 const props = defineProps({
     automations: { type: Array, default: () => [] },
@@ -50,6 +50,15 @@ function clearLimit(a) {
     apiPost(`/api/automations/${a.id}/toggle`, { action: 'set_limit', expires_at: null, max_runs: null });
     editing.value = null;
 }
+
+// 明天預演：未來 24h 的觸發時間軸（自動化＋定時任務＋簡報＋守望）
+const preview = ref(null);
+onMounted(async () => {
+    try {
+        const r = await fetch('/api/automations/preview', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        preview.value = (await r.json()).items || [];
+    } catch { preview.value = []; }
+});
 </script>
 
 <template>
@@ -78,6 +87,26 @@ function clearLimit(a) {
                         </button>
                     </li>
                 </ul>
+            </section>
+
+            <!-- 明天預演：未來 24h 觸發時間軸 -->
+            <section class="glass rounded-2xl border border-white/10 bg-white/5 p-5">
+                <h2 class="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-300">🔮 明天預演（未來 24 小時）</h2>
+                <p v-if="preview === null" class="text-sm text-slate-500">載入中…</p>
+                <p v-else-if="!preview.length" class="text-sm text-slate-500">
+                    未來 24 小時沒有排定會觸發的東西。建了自動化之後，這裡會直接演給你看「明天幾點會發生什麼」。
+                </p>
+                <ol v-else class="relative ml-2 space-y-3 border-l border-white/10 pl-5">
+                    <li v-for="(p, i) in preview" :key="i" class="relative">
+                        <span class="absolute -left-[27px] top-0.5 text-sm">{{ p.icon }}</span>
+                        <div class="flex flex-wrap items-baseline gap-x-2">
+                            <span class="text-xs font-semibold text-cyan-300">{{ p.time }}</span>
+                            <span class="text-sm font-medium text-slate-100">{{ p.title }}</span>
+                        </div>
+                        <div v-if="p.detail" class="text-xs text-slate-400">{{ p.detail }}</div>
+                        <div v-if="p.note" class="text-[11px] text-amber-300/70">{{ p.note }}</div>
+                    </li>
+                </ol>
             </section>
 
             <!-- 自動化流程列表（AI 或你建立的） -->

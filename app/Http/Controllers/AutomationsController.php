@@ -81,6 +81,112 @@ class AutomationsController extends Controller
         return response()->json(['ok' => true, 'enabled' => $auto->enabled]);
     }
 
+    /**
+     * 明天預演（dry-run 時間軸）：把未來 24 小時會發生的事排成時間軸——
+     * enabled 自動化（daily/interval/unlock）＋定時任務＋晨間簡報＋進行中的守望。
+     * 建完自動化立刻看到「明天 7:30 會發生什麼」，也能揪出互相打架的規則。
+     */
+    public function preview(Request $request): JsonResponse
+    {
+        $uid = $this->uid($request);
+        if ($uid === null) {
+            return response()->json(['error' => '未授權'], 403);
+        }
+        $now = now('Asia/Taipei');
+        $end = $now->copy()->addDay();
+        $items = [];
+        $push = function ($at, string $icon, string $title, string $detail = '', string $note = '') use (&$items, $now) {
+            $items[] = [
+                'ts' => $at->timestamp,
+                'time' => ($at->isSameDay($now) ? '今天' : '明天').' '.$at->format('H:i'),
+                'icon' => $icon, 'title' => $title, 'detail' => $detail, 'note' => $note,
+            ];
+        };
+
+        foreach (Automation::where('user_id', $uid)->where('enabled', true)->get() as $a) {
+            if ($a->isAutoStopped()) {
+                continue;
+            }
+            $t = (array) ($a->spec['trigger'] ?? []);
+            $conds = collect((array) ($a->spec['conditions'] ?? []))->map(fn ($c) => match ($c['type'] ?? '') {
+                'location_inside' => '需在'.($c['place'] ?? ''),
+                'location_outside' => '需不在'.($c['place'] ?? ''),
+                'weekday' => '限指定星期',
+                'time_after' => '需晚於'.($c['time'] ?? ''),
+                default => null,
+            })->filter()->implode('、');
+            $acts = implode('→', array_filter(array_map(fn ($x) => is_array($x) ? ($x['type'] ?? '') : '', (array) ($a->spec['actions'] ?? []))));
+            switch ($t['type'] ?? '') {
+                case 'daily':
+                    [$h, $m] = array_pad(explode(':', (string) ($t['at'] ?? '00:00')), 2, '0');
+                    for ($d = 0; $d <= 1; $d++) {
+                        $at = $now->copy()->startOfDay()->addDays($d)->setTime((int) $h, (int) $m);
+                        if ($at->lt($now) || $at->gt($end)) {
+                            continue;
+                        }
+                        if (! empty($t['days']) && ! in_array($at->isoWeekday(), (array) $t['days'], true)) {
+                            continue;
+                        }
+                        $push($at, '⚙️', $a->name, "動作：{$acts}", $conds);
+                    }
+                    break;
+                case 'interval':
+                    $ev = (int) ($t['every_min'] ?? 0);
+                    if ($ev <= 0) {
+                        break;
+                    }
+                    $mins = $now->hour * 60 + $now->minute;
+                    $next = $now->copy()->startOfDay()->addMinutes((intdiv($mins, $ev) + 1) * $ev);
+                    $push($next, '🔁', $a->name, "動作：{$acts}", "之後每 {$ev} 分鐘重複".($conds !== '' ? '；'.$conds : ''));
+                    break;
+                case 'unlock':
+                    $win = (array) ($t['window'] ?? ['07:00', '09:30']);
+                    for ($d = 0; $d <= 1; $d++) {
+                        [$h, $m] = array_pad(explode(':', (string) ($win[0] ?? '07:00')), 2, '0');
+                        $at = $now->copy()->startOfDay()->addDays($d)->setTime((int) $h, (int) $m);
+                        if ($at->lt($now) || $at->gt($end)) {
+                            continue;
+                        }
+                        if (! empty($t['days']) && ! in_array($at->isoWeekday(), (array) $t['days'], true)) {
+                            continue;
+                        }
+                        $push($at, '🔓', $a->name, "動作：{$acts}", '解鎖手機時觸發（窗 '.implode('~', $win).'）'.($conds !== '' ? '；'.$conds : ''));
+                    }
+                    break;
+            }
+        }
+
+        // 定時任務（「明天 8:30 開導航」）
+        foreach (\App\Pai\Schedule\ScheduledTask::where('status', 'pending')
+            ->whereBetween('run_at', [$now->copy()->utc(), $end->copy()->utc()])->get() as $st) {
+            $push($st->run_at->timezone('Asia/Taipei'), '⏰', mb_substr((string) $st->command, 0, 60), '', $st->recur === 'daily' ? '每天重複' : '');
+        }
+
+        // 晨間簡報
+        $s = app(\App\Pai\Settings\Settings::class);
+        if ((bool) $s->get('briefing.enabled', true)) {
+            [$h, $m] = array_pad(explode(':', (string) ($s->get('briefing.time') ?: '08:00')), 2, '0');
+            for ($d = 0; $d <= 1; $d++) {
+                $at = $now->copy()->startOfDay()->addDays($d)->setTime((int) $h, (int) $m);
+                if ($at->gte($now) && $at->lte($end)) {
+                    $push($at, '🌅', '晨間簡報', '天氣＋今日行程＋未讀信', '');
+                    break;
+                }
+            }
+        }
+
+        // 進行中的守望（畫面/網頁盯梢）
+        foreach (\App\Pai\Watch\WatchTask::where('user_id', $uid)->where('status', 'active')->get() as $w) {
+            $kind = str_starts_with((string) $w->source, 'web:') ? '網頁盯梢' : '畫面守望';
+            $unit = $w->interval_sec >= 60 ? intdiv($w->interval_sec, 60).' 分鐘' : $w->interval_sec.' 秒';
+            $push($now, '👀', "{$kind}（進行中）：".mb_substr($w->goal, 0, 40), "每 {$unit} 看一次", '到期 '.$w->expires_at->timezone('Asia/Taipei')->format('m/d H:i'));
+        }
+
+        usort($items, fn ($a, $b) => $a['ts'] <=> $b['ts']);
+
+        return response()->json(['items' => array_values($items)]);
+    }
+
     private function uid(Request $request): ?int
     {
         if ($request->user()) {

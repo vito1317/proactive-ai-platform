@@ -149,6 +149,7 @@ Route::get('/api/agent-ops', [\App\Http\Controllers\ConsoleController::class, 'a
 Route::get('/api/automations', [\App\Http\Controllers\AutomationsController::class, 'data'])->name('automations.data');
 Route::post('/api/automations/{id}/toggle', [\App\Http\Controllers\AutomationsController::class, 'toggle'])->name('automations.toggle');
 Route::post('/api/automations/builtin', [\App\Http\Controllers\AutomationsController::class, 'builtin'])->name('automations.builtin');
+Route::get('/api/automations/preview', [\App\Http\Controllers\AutomationsController::class, 'preview'])->name('automations.preview'); // 明天預演時間軸
 
 Route::post("/api/gateway/pair", [GatewayController::class, "pair"])->name("gateway.pair");          // 兌換配對碼→長期 per-device 憑證
 Route::post("/api/gateway/register", [GatewayController::class, "register"])->name("gateway.register");
