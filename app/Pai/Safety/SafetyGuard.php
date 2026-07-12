@@ -38,7 +38,9 @@ class SafetyGuard
         $type = (string) ($p['type'] ?? '');
         if ($type === 'collision_warning') {
             // 本地已即時嗶聲警示；這裡只累計，讓「AI 週報/中控台」看得到
-            Cache::increment('safety:collision_warns:'.now('Asia/Taipei')->format('Y-m-d'));
+            $key = 'safety:collision_warns:'.now('Asia/Taipei')->format('Y-m-d');
+            Cache::add($key, 0, 86400 * 8); // database driver 的 increment 不會自動建 key
+            Cache::increment($key);
 
             return 'recorded';
         }

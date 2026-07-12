@@ -84,6 +84,7 @@ class Settings
         'calendar.ics_url' => ['label' => 'Google 行事曆「私人 iCal 網址」(secret address in iCal format)', 'type' => 'string', 'group' => '行事曆/郵件'],
         'mail.address' => ['label' => 'Gmail 信箱', 'type' => 'string', 'group' => '行事曆/郵件'],
         'mail.app_password' => ['label' => 'Gmail 應用程式密碼（Google 帳號→安全性→應用程式密碼）', 'type' => 'secret', 'group' => '行事曆/郵件'],
+        'inbox.assistant_enabled' => ['label' => '啟用收件匣助理（新信自動分類：重要立刻通知+擬回覆草稿、一般每小時摘要、廣告靜音）', 'type' => 'bool', 'group' => '行事曆/郵件'],
         'briefing.enabled' => ['label' => '啟用每日晨間簡報', 'type' => 'bool', 'group' => '行事曆/郵件'],
         // 安全守護（手機傳感器哨兵：撞擊/跌倒偵測 → 確認 → 沒回應自動求援）
         'safety.enabled' => ['label' => '啟用安全守護（撞擊/跌倒自動確認求援）', 'type' => 'bool', 'group' => '安全守護'],

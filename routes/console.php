@@ -38,6 +38,12 @@ Schedule::call(function () {
     }
 })->everyMinute()->name('pai:user-scheduled-tasks')->withoutOverlapping();
 
+// 收件匣助理：每 5 分鐘掃新未讀信（分類＋擬稿）；每小時整點把一般信件榨成一則摘要
+Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->scan())
+    ->everyFiveMinutes()->name('pai:inbox-scan')->withoutOverlapping();
+Schedule::call(fn () => app(\App\Pai\Integrations\InboxAssistant::class)->flushDigests())
+    ->hourly()->name('pai:inbox-digest')->withoutOverlapping();
+
 // 每週日 20:00：AI 週報（本週幫你做了什麼＋估計省下的時間）
 Schedule::call(function () {
     $now = now('Asia/Taipei');

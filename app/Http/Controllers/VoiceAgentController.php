@@ -1831,6 +1831,12 @@ class VoiceAgentController extends Controller
         \Illuminate\Support\Facades\Cache::forget("voice:pendingq:{$uid}");
         $node = $this->turnDeviceNode;
 
+        if (($pq['kind'] ?? '') === 'mail') {
+            // 收件匣助理：「好，寄出」→ 寄回覆草稿；「不用」→ 放棄
+            $msg = app(\App\Pai\Integrations\InboxAssistant::class)->decide($uid, ! $no);
+
+            return ['reply' => $msg, 'speech' => $msg, 'meta' => ['category' => 'skill', 'skill' => 'mail', 'direct' => true], 'step' => '✉️ 回信決定'];
+        }
         if (($pq['kind'] ?? '') === 'safety') {
             // 安全確認：「我沒事/還好」→ 解除；「需要幫忙/救命/受傷」→ 立刻求援
             $help = (bool) preg_match('/(救命|救我|需要|受傷|受伤|快叫|119|110|幫忙|帮忙|求援)/u', $t);

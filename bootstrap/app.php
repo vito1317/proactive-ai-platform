@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/agent/*',   // 取消操作等 agent 控制
             'api/event/*',   // 行程出發提醒按鈕
             'api/sensor/*',  // 傳感器哨兵回報＋我沒事/需要幫忙按鈕（device token 驗證）
+            'api/mail/*',    // 收件匣助理按鈕（device token 驗證）
         ]);
 
         $middleware->web(append: [

@@ -14,18 +14,29 @@ use Throwable;
  */
 class Mailer
 {
+    private ?int $uid = null;   // 指定帳號（per-user 設定優先，無則落回全域）
+
     public function __construct(private readonly Settings $settings) {}
+
+    /** 取指定帳號的 Mailer（收件匣助理多帳號用）。 */
+    public function forUser(?int $uid): self
+    {
+        $c = clone $this;
+        $c->uid = $uid;
+
+        return $c;
+    }
 
     public function configured(): bool
     {
-        return (bool) ($this->settings->get('mail.address') && $this->settings->get('mail.app_password'));
+        return (bool) ($this->settings->get('mail.address', null, $this->uid) && $this->settings->get('mail.app_password', null, $this->uid));
     }
 
     private function cred(): array
     {
         return [
-            (string) $this->settings->get('mail.address'),
-            (string) $this->settings->get('mail.app_password'),
+            (string) $this->settings->get('mail.address', null, $this->uid),
+            (string) $this->settings->get('mail.app_password', null, $this->uid),
         ];
     }
 
@@ -60,6 +71,62 @@ class Mailer
         }
     }
 
+    /**
+     * 讀未讀信「完整內容」（message_id/寄件人/內文節錄）。用 FT_PEEK 讀，不會把信標成已讀。
+     * 給收件匣助理分類＋擬稿用。
+     */
+    public function unreadFull(int $limit = 5): array
+    {
+        if (! $this->configured() || ! function_exists('imap_open')) {
+            return ['ok' => false, 'error' => '未設定 Gmail 或缺 imap 擴充'];
+        }
+        [$user, $pass] = $this->cred();
+        $host = (string) ($this->settings->get('mail.imap_host', null, $this->uid) ?: '{imap.gmail.com:993/imap/ssl}INBOX');
+        try {
+            $mbox = @imap_open($host, $user, $pass, 0, 1);
+            if (! $mbox) {
+                return ['ok' => false, 'error' => 'IMAP 登入失敗：'.imap_last_error()];
+            }
+            $ids = imap_search($mbox, 'UNSEEN') ?: [];
+            rsort($ids);
+            $items = [];
+            foreach (array_slice($ids, 0, $limit) as $id) {
+                $h = imap_headerinfo($mbox, $id);
+                $fromName = isset($h->from[0]) ? $this->decode((string) ($h->from[0]->personal ?? $h->from[0]->mailbox)) : '?';
+                $fromMail = isset($h->from[0]) ? $h->from[0]->mailbox.'@'.$h->from[0]->host : '';
+                $body = '';
+                foreach (['1.1', '1', '2'] as $sec) { // 常見 text part 位置
+                    $raw = @imap_fetchbody($mbox, $id, $sec, FT_PEEK);
+                    if (is_string($raw) && trim($raw) !== '') {
+                        $body = $raw;
+                        break;
+                    }
+                }
+                // best-effort 解編碼：base64（整段合法且解出合法 UTF-8）→ quoted-printable → 去 HTML
+                $t = trim($body);
+                if (strlen($t) > 100 && preg_match('/^[A-Za-z0-9+\/=\r\n]+$/', $t)) {
+                    $d = base64_decode($t, true);
+                    if ($d !== false && mb_check_encoding($d, 'UTF-8')) {
+                        $body = $d;
+                    }
+                }
+                $body = trim((string) preg_replace('/\s{3,}/', ' ', strip_tags(quoted_printable_decode($body))));
+                $items[] = [
+                    'msg_id' => trim((string) ($h->message_id ?? $id)),
+                    'from_name' => $fromName, 'from_email' => $fromMail,
+                    'subject' => isset($h->subject) ? $this->decode($h->subject) : '(無主旨)',
+                    'body' => mb_substr($body, 0, 1500),
+                    'date' => isset($h->udate) ? date('m/d H:i', $h->udate) : '',
+                ];
+            }
+            imap_close($mbox);
+
+            return ['ok' => true, 'count' => count($ids), 'items' => $items];
+        } catch (Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
     /** 寄信。 */
     public function send(string $to, string $subject, string $body): array
     {
@@ -67,7 +134,7 @@ class Mailer
             return ['ok' => false, 'error' => '未設定 Gmail（mail.address / mail.app_password）'];
         }
         [$user, $pass] = $this->cred();
-        $host = (string) ($this->settings->get('mail.smtp_host') ?: 'smtp.gmail.com');
+        $host = (string) ($this->settings->get('mail.smtp_host', null, $this->uid) ?: 'smtp.gmail.com');
         try {
             $transport = new EsmtpTransport($host, 587, false);
             $transport->setUsername($user);
